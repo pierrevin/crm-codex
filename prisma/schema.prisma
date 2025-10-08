@@ -1,0 +1,140 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum OpportunityStage {
+  QUALIFICATION
+  PROPOSAL
+  NEGOTIATION
+  CLOSED_WON
+  CLOSED_LOST
+}
+
+enum ActivityType {
+  CALL
+  EMAIL
+  MEETING
+  TASK
+  EVENT
+}
+
+enum ImportStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model User {
+  id                 String          @id @default(cuid())
+  email              String          @unique
+  passwordHash       String
+  googleRefreshToken String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  contacts           Contact[]
+  opportunities      Opportunity[]   @relation("OpportunityOwner")
+  activities         Activity[]
+  refreshTokens      RefreshToken[]
+  auditLogs          AuditLog[]
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model Company {
+  id         String     @id @default(cuid())
+  name       String
+  domain     String?
+  contacts   Contact[]
+  opportunities Opportunity[]
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+}
+
+model Contact {
+  id           String        @id @default(cuid())
+  firstName    String
+  lastName     String?
+  email        String?       @unique
+  phone        String?
+  company      Company?      @relation(fields: [companyId], references: [id])
+  companyId    String?
+  owner        User?         @relation(fields: [ownerId], references: [id])
+  ownerId      String?
+  opportunities Opportunity[]
+  activities   Activity[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+model Opportunity {
+  id          String           @id @default(cuid())
+  title       String
+  stage       OpportunityStage @default(QUALIFICATION)
+  amount      Decimal?         @db.Decimal(18, 2)
+  closeDate   DateTime?
+  contact     Contact?         @relation(fields: [contactId], references: [id])
+  contactId   String?
+  company     Company?         @relation(fields: [companyId], references: [id])
+  companyId   String?
+  owner       User?            @relation("OpportunityOwner", fields: [ownerId], references: [id])
+  ownerId     String?
+  activities  Activity[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+}
+
+model Activity {
+  id             String        @id @default(cuid())
+  type           ActivityType  @default(TASK)
+  subject        String
+  description    String?
+  dueDate        DateTime?
+  contact        Contact?      @relation(fields: [contactId], references: [id])
+  contactId      String?
+  opportunity    Opportunity?  @relation(fields: [opportunityId], references: [id])
+  opportunityId  String?
+  user           User?         @relation(fields: [userId], references: [id])
+  userId         String?
+  googleEventId  String?   @unique
+  googleCalendarId String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+}
+
+model Webhook {
+  id        String   @id @default(cuid())
+  url       String
+  event     String
+  createdAt DateTime @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  entity    String
+  entityId  String
+  action    String
+  user      User?    @relation(fields: [userId], references: [id])
+  userId    String?
+  createdAt DateTime @default(now())
+}
+
+model ImportJob {
+  id        String        @id @default(cuid())
+  filename  String
+  status    ImportStatus  @default(PENDING)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+}
