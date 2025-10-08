@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -32,5 +32,10 @@ export class CompaniesController {
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.companies.findOne(id);
+  }
+
+  @Delete(':id')
+  delete(@Param('id') id: string) {
+    return this.companies.delete(id);
   }
 }

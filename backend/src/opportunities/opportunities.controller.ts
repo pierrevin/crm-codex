@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiQuery, ApiTags } from '@nestjs/swagger';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -34,5 +34,10 @@ export class OpportunitiesController {
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.opportunities.findOne(id);
+  }
+
+  @Delete(':id')
+  delete(@Param('id') id: string) {
+    return this.opportunities.delete(id);
   }
 }

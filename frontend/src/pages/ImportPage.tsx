@@ -21,16 +21,16 @@ export function ImportPage() {
       filename: fileName || 'import.csv',
       csv: csvContent
     });
-    setStatus(`Imported ${data.imported} contacts successfully.`);
+    setStatus(`${data.imported} contacts importés avec succès.`);
     setCsvContent('');
   };
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold text-slate-900">Import contacts from CSV</h1>
+        <h1 className="text-2xl font-semibold text-slate-900">Importer des contacts depuis CSV</h1>
         <p className="text-sm text-slate-500">
-          Upload a CSV file with headers <code>firstName,lastName,email,phone</code> to import contacts quickly.
+          Téléchargez un fichier CSV avec les en-têtes <code>firstName,lastName,email,phone</code> pour importer rapidement des contacts.
         </p>
       </div>
       <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
@@ -39,7 +39,7 @@ export function ImportPage() {
           value={csvContent}
           onChange={(event) => setCsvContent(event.target.value)}
           rows={10}
-          placeholder="Paste CSV content here"
+          placeholder="Collez le contenu CSV ici"
           className="mt-4 w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
         />
         <div className="mt-4 flex justify-end">
@@ -47,7 +47,7 @@ export function ImportPage() {
             onClick={handleSubmit}
             className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500"
           >
-            Import
+            Importer
           </button>
         </div>
         {status && <p className="mt-4 text-sm text-emerald-600">{status}</p>}

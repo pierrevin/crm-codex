@@ -10,10 +10,10 @@ import { AppConfig } from '../../config/app.config';
 @Injectable()
 export class JwtRefreshStrategy extends PassportStrategy(Strategy, 'jwt-refresh') {
   constructor(
-    configService: ConfigService<AppConfig>,
+    configService: ConfigService,
     private readonly prisma: PrismaService
   ) {
-    const appConfig = configService.get('app', { infer: true });
+    const appConfig = configService.get<AppConfig>('app')!;
     if (!appConfig) {
       throw new Error('Application configuration missing');
     }
@@ -26,7 +26,7 @@ export class JwtRefreshStrategy extends PassportStrategy(Strategy, 'jwt-refresh'
   }
 
   async validate(req: FastifyRequest, payload: { sub: string }) {
-    const token = ExtractJwt.fromAuthHeaderAsBearerToken()(req);
+    const token = ExtractJwt.fromAuthHeaderAsBearerToken()(req as any);
     if (!token) {
       throw new UnauthorizedException();
     }

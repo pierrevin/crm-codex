@@ -20,7 +20,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly auditService: AuditService,
-    private readonly config: ConfigService<AppConfig>
+    private readonly config: ConfigService
   ) {}
 
   async validateUser(email: string, password: string) {
@@ -47,10 +47,7 @@ export class AuthService {
     if (!existing || existing.expiresAt < new Date()) {
       throw new UnauthorizedException('Refresh token invalid');
     }
-    const appConfig = this.config.get('app', { infer: true });
-    if (!appConfig) {
-      throw new Error('App configuration missing');
-    }
+    const appConfig = this.config.get<AppConfig>('app')!;
     await this.jwtService.verifyAsync(dto.refreshToken, {
       secret: appConfig.jwt.refreshSecret
     });
@@ -58,10 +55,7 @@ export class AuthService {
   }
 
   private async issueTokens(userId: string, reuseToken?: string): Promise<TokensDto> {
-    const appConfig = this.config.get('app', { infer: true });
-    if (!appConfig) {
-      throw new Error('App configuration missing');
-    }
+    const appConfig = this.config.get<AppConfig>('app')!;
     const payload = { sub: userId };
     const accessToken = await this.jwtService.signAsync(payload, {
       secret: appConfig.jwt.accessSecret,

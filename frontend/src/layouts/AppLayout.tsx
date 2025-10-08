@@ -3,10 +3,11 @@ import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 
 const navItems = [
+  { to: '/dashboard', label: 'Tableau de bord' },
+  { to: '/companies', label: 'Clients' },
   { to: '/contacts', label: 'Contacts' },
-  { to: '/opportunities', label: 'Opportunities' },
-  { to: '/activities', label: 'Activities' },
-  { to: '/import', label: 'Import CSV' }
+  { to: '/opportunities', label: 'Opportunités' },
+  { to: '/import', label: 'Import' }
 ];
 
 export function AppLayout() {

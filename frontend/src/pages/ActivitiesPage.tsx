@@ -22,11 +22,11 @@ type PaginatedResponse<T> = {
 };
 
 const typeLabels: Record<string, string> = {
-  CALL: 'Call',
+  CALL: 'Appel',
   EMAIL: 'Email',
-  MEETING: 'Meeting',
-  TASK: 'Task',
-  EVENT: 'Calendar event'
+  MEETING: 'Réunion',
+  TASK: 'Tâche',
+  EVENT: 'Événement'
 };
 
 export function ActivitiesPage() {
@@ -79,8 +79,8 @@ export function ActivitiesPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Activities</h1>
-          <p className="text-sm text-slate-500">Stay on top of tasks and interactions.</p>
+          <h1 className="text-2xl font-semibold text-slate-900">Activités</h1>
+          <p className="text-sm text-slate-500">Restez au courant de vos tâches et interactions.</p>
         </div>
         <div className="flex gap-2">
           <button
@@ -88,20 +88,20 @@ export function ActivitiesPage() {
             className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-500"
             disabled={syncing}
           >
-            {syncing ? 'Syncing…' : 'Sync Google Calendar'}
+            {syncing ? 'Synchronisation…' : 'Sync Google Calendar'}
           </button>
           <button
             onClick={loadGmail}
             className="rounded-md border border-slate-200 px-3 py-2 text-sm hover:bg-slate-100"
             disabled={loadingGmail}
           >
-            {loadingGmail ? 'Loading…' : 'Load Gmail'}
+            {loadingGmail ? 'Chargement…' : 'Charger Gmail'}
           </button>
           <button
             onClick={() => setCursor(undefined)}
             className="rounded-md border border-slate-200 px-3 py-2 text-sm hover:bg-slate-100"
           >
-            Refresh
+            Actualiser
           </button>
         </div>
       </div>
@@ -116,7 +116,7 @@ export function ActivitiesPage() {
                 {typeLabels[activity.type] ?? activity.type}
               </span>
               <span className="text-xs text-slate-400">
-                {activity.dueDate ? new Date(activity.dueDate).toLocaleString() : 'No due date'}
+                {activity.dueDate ? new Date(activity.dueDate).toLocaleString('fr-FR') : 'Pas d\'échéance'}
               </span>
             </div>
             <h3 className="mt-2 text-base font-semibold text-slate-900">{activity.subject}</h3>
@@ -129,7 +129,7 @@ export function ActivitiesPage() {
             onClick={() => setCursor(nextCursor)}
             className="rounded-md border border-slate-200 px-4 py-2 text-sm hover:bg-slate-100"
           >
-            Load more
+            Charger plus
           </button>
         </div>
       )}

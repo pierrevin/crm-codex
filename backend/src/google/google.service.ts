@@ -9,13 +9,13 @@ import { UsersService } from '../users/users.service';
 @Injectable()
 export class GoogleService {
   constructor(
-    private readonly config: ConfigService<AppConfig>,
+    private readonly config: ConfigService,
     private readonly users: UsersService,
     private readonly activities: ActivitiesService
   ) {}
 
   private getOAuthClient() {
-    const cfg = this.config.get('app', { infer: true });
+    const cfg = this.config.get<AppConfig>('app')!;
     if (!cfg) {
       throw new Error('Google configuration missing');
     }

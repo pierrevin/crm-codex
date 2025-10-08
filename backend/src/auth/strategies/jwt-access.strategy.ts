@@ -7,8 +7,8 @@ import { AppConfig } from '../../config/app.config';
 
 @Injectable()
 export class JwtAccessStrategy extends PassportStrategy(Strategy, 'jwt') {
-  constructor(configService: ConfigService<AppConfig>) {
-    const appConfig = configService.get('app', { infer: true });
+  constructor(configService: ConfigService) {
+    const appConfig = configService.get<AppConfig>('app')!;
     if (!appConfig) {
       throw new Error('Application configuration missing');
     }

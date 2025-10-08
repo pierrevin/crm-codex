@@ -1,5 +1,6 @@
 generator client {
   provider = "prisma-client-js"
+  output   = "../backend/node_modules/.prisma/client"
 }
 
 datasource db {
@@ -83,7 +84,7 @@ model Opportunity {
   id          String           @id @default(cuid())
   title       String
   stage       OpportunityStage @default(QUALIFICATION)
-  amount      Decimal?         @db.Decimal(18, 2)
+  amount      Float?
   closeDate   DateTime?
   contact     Contact?         @relation(fields: [contactId], references: [id])
   contactId   String?

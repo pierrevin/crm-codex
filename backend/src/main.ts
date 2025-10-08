@@ -18,8 +18,9 @@ async function bootstrap() {
     new FastifyAdapter({ logger: true })
   );
 
-  await app.register(helmet, { global: true });
-  await app.register(rateLimit, {
+  // Helmet et rate limiting
+  await app.register(helmet as any, { global: true });
+  await app.register(rateLimit as any, {
     max: 100,
     timeWindow: '1 minute'
   });

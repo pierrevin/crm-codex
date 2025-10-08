@@ -1,4 +1,4 @@
-import { IsEnum, IsNumber, IsOptional, IsString } from 'class-validator';
+import { IsEnum, IsNumber, IsOptional, IsString, IsDateString } from 'class-validator';
 
 import { OpportunityStage } from '@prisma/client';
 
@@ -13,6 +13,10 @@ export class CreateOpportunityDto {
   @IsOptional()
   @IsNumber()
   amount?: number;
+
+  @IsOptional()
+  @IsDateString()
+  closeDate?: string;
 
   @IsOptional()
   @IsString()

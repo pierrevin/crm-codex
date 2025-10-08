@@ -14,7 +14,17 @@ export class CompaniesService {
   ) {}
 
   list() {
-    return this.prisma.company.findMany({ orderBy: { createdAt: 'desc' } });
+    return this.prisma.company.findMany({ 
+      orderBy: { createdAt: 'desc' },
+      include: {
+        _count: {
+          select: {
+            contacts: true,
+            opportunities: true
+          }
+        }
+      }
+    });
   }
 
   async create(dto: CreateCompanyDto) {
@@ -35,5 +45,23 @@ export class CompaniesService {
       throw new NotFoundException('Company not found');
     }
     return company;
+  }
+
+  async delete(id: string) {
+    const company = await this.prisma.company.findUnique({ where: { id } });
+    if (!company) {
+      throw new NotFoundException('Company not found');
+    }
+    // Vérifier s'il y a des contacts ou opportunités liés
+    const contactCount = await this.prisma.contact.count({ where: { companyId: id } });
+    const oppCount = await this.prisma.opportunity.count({ where: { companyId: id } });
+    
+    if (contactCount > 0 || oppCount > 0) {
+      throw new Error(`Cannot delete company with ${contactCount} contact(s) and ${oppCount} opportunit(ies). Delete them first.`);
+    }
+    
+    await this.prisma.company.delete({ where: { id } });
+    await this.audit.log('company', id, 'deleted');
+    return { message: 'Company deleted successfully' };
   }
 }

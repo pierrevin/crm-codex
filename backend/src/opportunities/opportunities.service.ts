@@ -28,14 +28,22 @@ export class OpportunitiesService {
   }
 
   async create(dto: CreateOpportunityDto) {
-    const opportunity = await this.prisma.opportunity.create({ data: dto });
+    const data = {
+      ...dto,
+      closeDate: dto.closeDate ? new Date(dto.closeDate) : undefined
+    };
+    const opportunity = await this.prisma.opportunity.create({ data });
     await this.audit.log('opportunity', opportunity.id, 'created');
     await this.webhooks.trigger('opportunity.updated', opportunity);
     return opportunity;
   }
 
   async update(id: string, dto: UpdateOpportunityDto) {
-    const opportunity = await this.prisma.opportunity.update({ where: { id }, data: dto });
+    const data = {
+      ...dto,
+      closeDate: dto.closeDate ? new Date(dto.closeDate) : undefined
+    };
+    const opportunity = await this.prisma.opportunity.update({ where: { id }, data });
     await this.audit.log('opportunity', id, 'updated');
     await this.webhooks.trigger('opportunity.updated', opportunity);
     return opportunity;
@@ -50,5 +58,15 @@ export class OpportunitiesService {
       throw new NotFoundException('Opportunity not found');
     }
     return opportunity;
+  }
+
+  async delete(id: string) {
+    const opportunity = await this.prisma.opportunity.findUnique({ where: { id } });
+    if (!opportunity) {
+      throw new NotFoundException('Opportunity not found');
+    }
+    await this.prisma.opportunity.delete({ where: { id } });
+    await this.audit.log('opportunity', id, 'deleted');
+    return { message: 'Opportunity deleted successfully' };
   }
 }

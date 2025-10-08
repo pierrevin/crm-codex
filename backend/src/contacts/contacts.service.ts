@@ -23,9 +23,9 @@ export class ContactsService {
       where: search
         ? {
             OR: [
-              { firstName: { contains: search, mode: 'insensitive' } },
-              { lastName: { contains: search, mode: 'insensitive' } },
-              { email: { contains: search, mode: 'insensitive' } }
+              { firstName: { contains: search } },
+              { lastName: { contains: search } },
+              { email: { contains: search } }
             ]
           }
         : undefined,
@@ -56,5 +56,15 @@ export class ContactsService {
       throw new NotFoundException('Contact not found');
     }
     return contact;
+  }
+
+  async delete(id: string) {
+    const contact = await this.prisma.contact.findUnique({ where: { id } });
+    if (!contact) {
+      throw new NotFoundException('Contact not found');
+    }
+    await this.prisma.contact.delete({ where: { id } });
+    await this.audit.log('contact', id, 'deleted');
+    return { message: 'Contact deleted successfully' };
   }
 }
