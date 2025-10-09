@@ -21,12 +21,18 @@ function App() {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/contacts" element={<ContactsListPage />} />
           <Route path="/contacts/:id" element={<ContactDetailPage />} />
-          <Route path="/opportunities" element={<OpportunitiesPage />} />
-          <Route path="/opportunities/:id" element={<OpportunityDetailPage />} />
+          <Route path="/opportunites" element={<OpportunitiesPage />} />
+          <Route path="/opportunites/:id" element={<OpportunityDetailPage />} />
           <Route path="/activities" element={<ActivitiesPage />} />
-          <Route path="/companies" element={<CompaniesPage />} />
-          <Route path="/companies/:id" element={<CompanyDetailPage />} />
+          <Route path="/clients" element={<CompaniesPage />} />
+          <Route path="/clients/:id" element={<CompanyDetailPage />} />
           <Route path="/import" element={<ImportPage />} />
+          
+          {/* Redirections pour les anciennes URLs */}
+          <Route path="/companies" element={<Navigate to="/clients" replace />} />
+          <Route path="/companies/:id" element={<Navigate to="/clients/:id" replace />} />
+          <Route path="/opportunities" element={<Navigate to="/opportunites" replace />} />
+          <Route path="/opportunities/:id" element={<Navigate to="/opportunites/:id" replace />} />
         </Route>
       </Route>
     </Routes>

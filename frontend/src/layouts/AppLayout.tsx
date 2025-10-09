@@ -4,9 +4,9 @@ import { useAuth } from '../hooks/useAuth';
 
 const navItems = [
   { to: '/dashboard', label: 'Tableau de bord' },
-  { to: '/companies', label: 'Clients' },
+  { to: '/clients', label: 'Clients' },
   { to: '/contacts', label: 'Contacts' },
-  { to: '/opportunities', label: 'Opportunités' },
+  { to: '/opportunites', label: 'Opportunités' },
   { to: '/import', label: 'Import' }
 ];
 

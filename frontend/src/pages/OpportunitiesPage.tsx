@@ -118,7 +118,7 @@ export function OpportunitiesPage() {
         </div>
       </div>
 
-      {view === 'kanban' ? (
+      {view === 'kanban' && (
         <div className="grid grid-cols-4 gap-4">
           {Object.entries(STAGES).map(([stage, { label, color }]) => (
             <div 
@@ -130,9 +130,14 @@ export function OpportunitiesPage() {
               <div className="border-b border-slate-200 bg-white px-4 py-3">
                 <h3 className="text-sm font-semibold text-slate-900">{label}</h3>
                 <p className="text-xs text-slate-500">{opportunitiesByStage[stage]?.length || 0} opportunité(s)</p>
-                <p className="text-sm font-semibold text-emerald-600 mt-1">
-                  {totalByStage[stage]?.toFixed(2)} €
-                </p>
+                <div className="mt-1 space-y-1">
+                  <p className="text-sm font-semibold text-slate-700">
+                    CA: {(totalByStage[stage] || 0).toFixed(2)} €
+                  </p>
+                  <p className="text-sm font-semibold text-emerald-600">
+                    Net (-27%): {((totalByStage[stage] || 0) * 0.73).toFixed(2)} €
+                  </p>
+                </div>
               </div>
               <div className="flex-1 space-y-2 p-3">
                 {opportunitiesByStage[stage]?.map((opp) => (
@@ -140,7 +145,7 @@ export function OpportunitiesPage() {
                     key={opp.id}
                     draggable
                     onDragStart={() => handleDragStart(opp)}
-                    onClick={() => window.location.href = `/opportunities/${opp.id}`}
+                    onClick={() => window.location.href = `/opportunites/${opp.id}`}
                     className={`w-full rounded-lg border border-slate-200 bg-white p-3 shadow-sm hover:shadow-md transition-all cursor-move text-left ${draggedOpp?.id === opp.id ? 'opacity-50' : ''}`}
                   >
                     <h4 className="font-medium text-slate-900 text-sm mb-1">{opp.title}</h4>
@@ -165,8 +170,10 @@ export function OpportunitiesPage() {
             </div>
           ))}
         </div>
-      ) : (
-      <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+      )}
+
+      {view === 'list' && (
+        <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
         <table className="min-w-full divide-y divide-slate-100">
           <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
             <tr>
@@ -180,7 +187,7 @@ export function OpportunitiesPage() {
             {opportunities.map((opportunity) => (
                 <tr 
                   key={opportunity.id} 
-                  onClick={() => window.location.href = `/opportunities/${opportunity.id}`}
+                  onClick={() => window.location.href = `/opportunites/${opportunity.id}`}
                   className="text-sm text-slate-700 cursor-pointer hover:bg-slate-50"
                 >
                 <td className="px-4 py-3 font-medium text-slate-900">{opportunity.title}</td>
@@ -213,12 +220,12 @@ export function OpportunitiesPage() {
         </div>
       )}
 
+
       {showModal && <CreateOpportunityModal onClose={() => setShowModal(false)} onCreated={loadOpportunities} />}
     </div>
   );
 }
 
-// Modal de création d'opportunité
 function CreateOpportunityModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const [title, setTitle] = useState('');
   const [stage, setStage] = useState<keyof typeof STAGES>('QUALIFICATION');
@@ -244,7 +251,7 @@ function CreateOpportunityModal({ onClose, onCreated }: { onClose: () => void; o
     setCompanies(Array.isArray(data) ? data : (data.items || data.data || []));
   };
 
-  // Filtrer les contacts par entreprise sélectionnée
+  // Filtrer les contacts par client sélectionné
   const filteredContacts = selectedCompany 
     ? contacts.filter(c => c.companyId === selectedCompany)
     : contacts;
@@ -401,3 +408,4 @@ function CreateOpportunityModal({ onClose, onCreated }: { onClose: () => void; o
     </div>
   );
 }
+

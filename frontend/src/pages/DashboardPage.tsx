@@ -6,11 +6,11 @@ import {
   BuildingOfficeIcon, 
   BriefcaseIcon,
   ChartBarIcon,
-  ArrowTrendingUpIcon,
-  FunnelIcon
+  ArrowTrendingUpIcon
 } from '@heroicons/react/24/outline';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Line, PieChart, Pie, Cell } from 'recharts';
 import api from '../services/apiClient';
+import { ProjectionView } from '../components/ProjectionView';
 
 const STAGES = {
   QUALIFICATION: { label: 'Qualification', color: 'bg-blue-500' },
@@ -32,8 +32,10 @@ export function DashboardPage() {
     recentOpportunities: [] as any[]
   });
   const [loading, setLoading] = useState(true);
-  const [selectedStages, setSelectedStages] = useState<string[]>(['QUALIFICATION', 'PROPOSAL', 'CLOSED_WON']);
-  const [chartType, setChartType] = useState<'projected' | 'won'>('projected');
+  
+  // États pour la projection CA
+  const [projectionPeriod, setProjectionPeriod] = useState<3 | 6 | 12>(6);
+  const [projectionSelectedStages, setProjectionSelectedStages] = useState<Set<string>>(new Set(['CLOSED_WON']));
 
   useEffect(() => {
     void loadStats();
@@ -86,75 +88,6 @@ export function DashboardPage() {
     ? ((stats.opportunitiesByStage['CLOSED_WON'] || 0) / stats.totalOpportunities * 100).toFixed(1)
     : 0;
 
-  // Calculer l'évolution du CA par mois et par client pour Recharts
-  const getRechartsData = () => {
-    const monthlyData: Record<string, Record<string, { projected: number; won: number }>> = {};
-    
-    // Filtrer les opportunités selon les étapes sélectionnées
-    const filteredOpportunities = stats.recentOpportunities.filter((opp: any) => 
-      selectedStages.includes(opp.stage)
-    );
-    
-    filteredOpportunities.forEach((opp: any) => {
-      const date = opp.closeDate ? new Date(opp.closeDate) : new Date();
-      const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-      const companyName = opp.company?.name || 'Sans entreprise';
-      
-      if (!monthlyData[monthKey]) {
-        monthlyData[monthKey] = {};
-      }
-      
-      if (!monthlyData[monthKey][companyName]) {
-        monthlyData[monthKey][companyName] = { projected: 0, won: 0 };
-      }
-      
-      const amount = Number(opp.amount) || 0;
-      if (opp.stage === 'CLOSED_WON') {
-        monthlyData[monthKey][companyName].won += amount;
-      }
-      if (opp.stage !== 'CLOSED_LOST') {
-        monthlyData[monthKey][companyName].projected += amount;
-      }
-    });
-
-    // Trier par date et prendre les 6 derniers mois disponibles
-    const sorted = Object.entries(monthlyData)
-      .sort(([a], [b]) => a.localeCompare(b));
-
-    const monthsToShow = sorted.slice(-6);
-
-    // Créer la structure pour Recharts (format aplati)
-    const result = monthsToShow.map(([month, companies]) => {
-      const monthLabel = new Date(month + '-01').toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
-      const data: any = { month: monthLabel };
-      
-      Object.entries(companies).forEach(([companyName, amounts]) => {
-        if (amounts[chartType] > 0) {
-          data[companyName] = amounts[chartType];
-        }
-      });
-      
-      return data;
-    });
-
-    return result;
-  };
-
-  const chartData = getRechartsData();
-  
-  // Couleurs pour les entreprises (format Recharts)
-  const companyColors = [
-    '#3B82F6', '#8B5CF6', '#10B981', '#F59E0B', 
-    '#EF4444', '#6366F1', '#EC4899', '#14B8A6'
-  ];
-  
-  const getCompanyColor = (index: number) => companyColors[index % companyColors.length];
-  
-  // Obtenir toutes les entreprises uniques pour les barres
-  const allCompanies = Array.from(new Set(
-    chartData.flatMap(data => Object.keys(data).filter(key => key !== 'month'))
-  ));
-
   if (loading) {
     return <div className="p-8 text-center text-slate-500">Chargement du tableau de bord...</div>;
   }
@@ -170,7 +103,7 @@ export function DashboardPage() {
       {/* Statistiques principales - Cliquables */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Link
-          to="/companies"
+          to="/clients"
           className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm hover:shadow-md transition-shadow"
         >
           <div className="flex items-center justify-between">
@@ -196,7 +129,7 @@ export function DashboardPage() {
         </Link>
 
         <Link
-          to="/opportunities"
+          to="/opportunites"
           className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm hover:shadow-md transition-shadow"
         >
           <div className="flex items-center justify-between">
@@ -232,7 +165,7 @@ export function DashboardPage() {
         <h2 className="text-lg font-semibold text-slate-900 mb-4">⚡ Créer rapidement</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <button
-            onClick={() => navigate('/companies/new')}
+            onClick={() => navigate('/clients/new')}
             className="flex items-center gap-3 rounded-lg bg-white border border-slate-200 p-4 hover:shadow-md transition-shadow"
           >
             <PlusIcon className="h-6 w-6 text-indigo-600" />
@@ -254,7 +187,7 @@ export function DashboardPage() {
           </button>
 
           <button
-            onClick={() => navigate('/opportunities')}
+            onClick={() => navigate('/opportunites')}
             className="flex items-center gap-3 rounded-lg bg-white border border-slate-200 p-4 hover:shadow-md transition-shadow"
           >
             <PlusIcon className="h-6 w-6 text-purple-600" />
@@ -350,7 +283,7 @@ export function DashboardPage() {
             <div className="text-center py-8 text-slate-500">
               <p>Aucune opportunité pour le moment</p>
               <button
-                onClick={() => navigate('/opportunities')}
+                onClick={() => navigate('/opportunites')}
                 className="mt-3 text-sm text-indigo-600 hover:text-indigo-500"
               >
                 Créer votre première opportunité →
@@ -367,109 +300,14 @@ export function DashboardPage() {
         </div>
       </div>
 
-      {/* Évolution CA dans le temps - Graphique empilé par clients avec Recharts */}
-      <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-slate-900">📈 Évolution du CA par client</h2>
-          
-          {/* Contrôles du graphique */}
-          <div className="flex items-center gap-4">
-            {/* Type de graphique */}
-            <div className="flex items-center gap-2">
-              <label className="text-sm text-slate-600">Type:</label>
-              <select 
-                value={chartType}
-                onChange={(e) => setChartType(e.target.value as 'projected' | 'won')}
-                className="text-sm border border-slate-300 rounded px-2 py-1"
-              >
-                <option value="projected">CA Prévu</option>
-                <option value="won">CA Réalisé</option>
-              </select>
-            </div>
-            
-            {/* Filtre par étapes */}
-            <div className="flex items-center gap-2">
-              <FunnelIcon className="h-4 w-4 text-slate-500" />
-              <select 
-                multiple
-                value={selectedStages}
-                onChange={(e) => {
-                  const options = Array.from(e.target.selectedOptions, option => option.value);
-                  setSelectedStages(options);
-                }}
-                className="text-sm border border-slate-300 rounded px-2 py-1 min-w-32"
-                size={1}
-              >
-                {Object.entries(STAGES).map(([key, { label }]) => (
-                  <option key={key} value={key}>{label}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-        </div>
-        
-        {chartData.length > 0 && allCompanies.length > 0 ? (
-          <div className="h-96">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={chartData}
-                margin={{
-                  top: 20,
-                  right: 30,
-                  left: 20,
-                  bottom: 60,
-                }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis 
-                  dataKey="month" 
-                  stroke="#64748b"
-                  fontSize={12}
-                  angle={-45}
-                  textAnchor="end"
-                  height={60}
-                />
-                <YAxis 
-                  stroke="#64748b"
-                  fontSize={12}
-                  tickFormatter={(value) => `${(value / 1000).toFixed(1)}k`}
-                />
-                <Tooltip 
-                  formatter={(value: number, name: string) => [
-                    `${value.toFixed(0)} €`, 
-                    name
-                  ]}
-                  labelFormatter={(label) => `Mois: ${label}`}
-                  contentStyle={{
-                    backgroundColor: '#1e293b',
-                    border: 'none',
-                    borderRadius: '8px',
-                    color: 'white'
-                  }}
-                />
-                <Legend />
-                
-                {/* Barres empilées pour chaque entreprise */}
-                {allCompanies.map((company, index) => (
-                  <Bar
-                    key={company}
-                    dataKey={company}
-                    stackId="a"
-                    fill={getCompanyColor(index)}
-                    name={company}
-                    radius={[0, 0, 0, 0]}
-                  />
-                ))}
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        ) : (
-          <div className="text-center py-12 text-slate-500">
-            <p>Aucune donnée disponible pour les étapes sélectionnées</p>
-            <p className="text-sm mt-2">Modifiez les filtres ou ajoutez des opportunités</p>
-          </div>
-        )}
-      </div>
+      {/* Projection CA */}
+      <ProjectionView 
+        opportunities={stats.recentOpportunities} 
+        period={projectionPeriod}
+        onPeriodChange={setProjectionPeriod}
+        selectedStages={projectionSelectedStages}
+        onStagesChange={setProjectionSelectedStages}
+      />
 
       {/* Graphique pipeline value par étape */}
       <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">

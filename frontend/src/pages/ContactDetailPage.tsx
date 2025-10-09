@@ -38,7 +38,7 @@ export function ContactDetailPage() {
       const { data } = await api.get('/api/companies');
       setCompanies(Array.isArray(data) ? data : (data.items || data.data || []));
     } catch (error) {
-      console.error('Erreur chargement entreprises:', error);
+      console.error('Erreur chargement clients:', error);
     }
   };
 

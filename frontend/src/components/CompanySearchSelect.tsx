@@ -74,7 +74,7 @@ export function CompanySearchSelect({
             }
           }}
           onFocus={() => setShowDropdown(true)}
-          placeholder="Rechercher ou créer une entreprise..."
+          placeholder="Rechercher ou créer un client..."
           className="w-full rounded-md border border-slate-200 px-3 py-2 pr-20 text-sm focus:border-indigo-500 focus:outline-none"
         />
         {selectedCompany && (
@@ -127,7 +127,7 @@ export function CompanySearchSelect({
 
           {!searchTerm && filteredCompanies.length === 0 && (
             <div className="px-3 py-2 text-sm text-slate-500">
-              Tapez pour rechercher ou créer une entreprise
+              Tapez pour rechercher ou créer un client
             </div>
           )}
         </div>

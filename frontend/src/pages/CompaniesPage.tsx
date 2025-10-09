@@ -44,7 +44,7 @@ export function CompaniesPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">Clients</h1>
-          <p className="text-sm text-slate-500">Gérez vos entreprises clientes.</p>
+          <p className="text-sm text-slate-500">Gérez vos clients partenaires.</p>
         </div>
         <button
           onClick={() => setShowModal(true)}
@@ -59,7 +59,7 @@ export function CompaniesPage() {
         {companies.map((company) => (
           <button
             key={company.id}
-            onClick={() => window.location.href = `/companies/${company.id}`}
+            onClick={() => window.location.href = `/clients/${company.id}`}
             className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm hover:shadow-md transition-shadow text-left"
           >
             <h3 className="font-semibold text-slate-900">{company.name}</h3>
