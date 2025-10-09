@@ -1,4 +1,4 @@
-# 🚀 CRM Codex - V1.0
+# 🚀 CRM Codex - V1.1.0
 
 CRM moderne single-user construit avec React, Supabase Edge Functions (Deno) et PostgreSQL.
 
@@ -26,8 +26,7 @@ Frontend (Vercel) → Backend (Supabase Edge Functions) → PostgreSQL (Supabase
 
 ### Prérequis
 - Node.js 20+
-- Compte Supabase (gratuit)
-- Supabase CLI : `brew install supabase/tap/supabase`
+- L'application utilise directement l'API Supabase en production (pas de backend local)
 
 ### Configuration
 
@@ -37,41 +36,24 @@ git clone https://github.com/pierrevin/crm-codex.git
 cd crm-codex
 ```
 
-2. **Configurer Supabase**
+2. **Configurer le Frontend**
 
-Créez `backend/.env` :
+Créez `frontend/.env.local` :
 ```bash
-DATABASE_URL="postgresql://postgres.xxxxx:[PASSWORD]@xxx.pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=1"
-PORT=3000
-NODE_ENV=development
-WEB_APP_URL=http://localhost:5173
-JWT_ACCESS_SECRET=local-dev-secret
-JWT_REFRESH_SECRET=local-refresh-secret
-ADMIN_EMAIL=admin@crm-codex.local
-ADMIN_PASSWORD=AdminCRM2024!
-```
-
-Créez `frontend/.env` :
-```bash
-VITE_API_URL=http://localhost:3000
+VITE_API_URL=https://oecbrtyeqatieeybjvhj.supabase.co/functions/v1
 ```
 
 3. **Installer et lancer**
 ```bash
-# Backend NestJS
-cd backend
-npm install
-npm run prisma:generate
-npm run build
-npm run start:dev
-
-# Frontend React (dans un autre terminal)
+# Frontend React
 cd frontend
 npm install
 npm run dev
 ```
 
 Ouvrez http://localhost:5173
+
+**Note** : Le frontend local se connecte directement à l'API Supabase en production. Pas besoin de serveur backend local !
 
 ---
 
@@ -129,10 +111,11 @@ vercel --prod
 
 ### Gestion CRM
 - ✅ **Contacts** - CRUD complet avec recherche
-- ✅ **Entreprises** - Gestion des clients
-- ✅ **Opportunités** - Suivi des affaires avec Kanban
+- ✅ **Clients** - Gestion des entreprises clientes (anciennement "Companies")
+- ✅ **Opportunités** - Suivi des affaires avec Kanban et CA Net (-27%)
 - ✅ **Activités** - Tâches, appels, réunions
-- ✅ **Dashboard** - Statistiques et graphiques temps réel
+- ✅ **Dashboard** - Statistiques, graphiques temps réel et projection CA
+- ✅ **Projection CA** - Vue mensuelle sur 3/6/12 mois avec filtres par étapes
 
 ### Sécurité & Performance
 - ✅ Authentification JWT (access + refresh tokens)
@@ -163,12 +146,14 @@ Toutes les routes sur : `https://[projet].supabase.co/functions/v1/api/`
 - `PATCH /contacts/:id` - Modifier
 - `DELETE /contacts/:id` - Supprimer
 
-### Companies
+### Companies (Clients)
 - `GET /companies` - Liste
 - `POST /companies` - Créer
 - `GET /companies/:id` - Détail
 - `PATCH /companies/:id` - Modifier
 - `DELETE /companies/:id` - Supprimer
+
+**Note** : Les routes frontend utilisent `/clients` mais l'API backend utilise toujours `/companies`
 
 ### Opportunities
 - `GET /opportunities` - Liste
@@ -186,14 +171,6 @@ Toutes les routes sur : `https://[projet].supabase.co/functions/v1/api/`
 ---
 
 ## 🔧 Commandes Utiles
-
-### Développement Backend (NestJS local)
-```bash
-cd backend
-npm run start:dev    # Mode développement avec hot-reload
-npm run build        # Compiler
-npm run start:prod   # Mode production
-```
 
 ### Développement Frontend
 ```bash
@@ -262,6 +239,30 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 Pour toute question ou amélioration, ouvrez une issue sur GitHub.
 
-**Version** : 1.0.0  
+**Version** : 1.1.0  
 **Licence** : MIT  
 **Auteur** : Pierre Vincenot
+
+---
+
+## 📋 Changelog
+
+### V1.1.0 (Octobre 2025)
+- ✅ Traduction FR : "Companies" → "Clients", "Opportunities" → "Opportunités"
+- ✅ URLs françaises : `/clients` et `/opportunites`
+- ✅ Nouvelle vue "Projection CA" dans le Dashboard
+- ✅ Graphiques de projection mensuelle (3/6/12 mois)
+- ✅ Filtres par étapes d'opportunités
+- ✅ Affichage CA Net (-27%) dans les en-têtes Kanban
+- ✅ Amélioration des tooltips avec détails clients
+- ✅ Configuration SPA rewrites pour Vercel
+
+### V1.0.1 (Octobre 2025)
+- ✅ Correction génération automatique des IDs (UUID)
+- ✅ Correction génération automatique des timestamps
+- ✅ Changement "CA Réalisé" → "CA Validé"
+
+### V1.0.0 (Octobre 2025)
+- ✅ Migration complète vers Supabase Edge Functions
+- ✅ Déploiement Vercel + Supabase
+- ✅ Architecture 100% serverless
