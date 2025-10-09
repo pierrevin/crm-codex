@@ -87,79 +87,80 @@ export function OpportunitiesPage() {
   }, {} as Record<string, number>);
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-      <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Opportunités</h1>
+    <div className="space-y-4 sm:space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-semibold text-slate-900">Opportunités</h1>
           <p className="text-sm text-slate-500">Suivez vos affaires et leur progression.</p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex gap-2 sm:gap-3">
           <div className="flex rounded-md border border-slate-200 bg-white">
             <button
               onClick={() => setView('kanban')}
-              className={`px-4 py-2 text-sm font-medium ${view === 'kanban' ? 'bg-slate-100 text-slate-900' : 'text-slate-600'}`}
+              className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium ${view === 'kanban' ? 'bg-slate-100 text-slate-900' : 'text-slate-600'}`}
             >
               Kanban
             </button>
             <button
               onClick={() => setView('list')}
-              className={`px-4 py-2 text-sm font-medium ${view === 'list' ? 'bg-slate-100 text-slate-900' : 'text-slate-600'}`}
+              className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium ${view === 'list' ? 'bg-slate-100 text-slate-900' : 'text-slate-600'}`}
             >
               Liste
             </button>
           </div>
           <button
             onClick={() => setShowModal(true)}
-            className="flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-indigo-500"
+            className="flex items-center gap-1 sm:gap-2 rounded-md bg-indigo-600 px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium text-white shadow hover:bg-indigo-500"
           >
             <PlusIcon className="h-4 w-4" />
-            Nouvelle opportunité
+            <span className="hidden sm:inline">Nouvelle opportunité</span>
+            <span className="sm:hidden">Nouvelle</span>
           </button>
         </div>
       </div>
 
       {view === 'kanban' && (
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
           {Object.entries(STAGES).map(([stage, { label, color }]) => (
             <div 
               key={stage} 
-              className={`flex flex-col rounded-lg border-2 ${draggedOpp ? 'border-dashed border-indigo-300' : 'border-slate-200'} bg-slate-50 min-h-96`}
+              className={`flex flex-col rounded-lg border-2 ${draggedOpp ? 'border-dashed border-indigo-300' : 'border-slate-200'} bg-slate-50 min-h-64 md:min-h-96`}
               onDragOver={handleDragOver}
               onDrop={() => handleDrop(stage as keyof typeof STAGES)}
             >
-              <div className="border-b border-slate-200 bg-white px-4 py-3">
+              <div className="border-b border-slate-200 bg-white px-3 sm:px-4 py-2 sm:py-3">
                 <h3 className="text-sm font-semibold text-slate-900">{label}</h3>
                 <p className="text-xs text-slate-500">{opportunitiesByStage[stage]?.length || 0} opportunité(s)</p>
-                <div className="mt-1 space-y-1">
-                  <p className="text-sm font-semibold text-slate-700">
-                    CA: {(totalByStage[stage] || 0).toFixed(2)} €
+                <div className="mt-1 space-y-0.5 sm:space-y-1">
+                  <p className="text-xs sm:text-sm font-semibold text-slate-700">
+                    CA: {(totalByStage[stage] || 0).toFixed(0)} €
                   </p>
-                  <p className="text-sm font-semibold text-emerald-600">
-                    Net (-27%): {((totalByStage[stage] || 0) * 0.73).toFixed(2)} €
+                  <p className="text-xs sm:text-sm font-semibold text-emerald-600">
+                    Net: {((totalByStage[stage] || 0) * 0.73).toFixed(0)} €
                   </p>
                 </div>
               </div>
-              <div className="flex-1 space-y-2 p-3">
+              <div className="flex-1 space-y-2 p-2 sm:p-3">
                 {opportunitiesByStage[stage]?.map((opp) => (
                   <div
                     key={opp.id}
                     draggable
                     onDragStart={() => handleDragStart(opp)}
                     onClick={() => window.location.href = `/opportunites/${opp.id}`}
-                    className={`w-full rounded-lg border border-slate-200 bg-white p-3 shadow-sm hover:shadow-md transition-all cursor-move text-left ${draggedOpp?.id === opp.id ? 'opacity-50' : ''}`}
+                    className={`w-full rounded-lg border border-slate-200 bg-white p-2 sm:p-3 shadow-sm hover:shadow-md transition-all cursor-move text-left ${draggedOpp?.id === opp.id ? 'opacity-50' : ''}`}
                   >
-                    <h4 className="font-medium text-slate-900 text-sm mb-1">{opp.title}</h4>
+                    <h4 className="font-medium text-slate-900 text-xs sm:text-sm mb-1 line-clamp-2">{opp.title}</h4>
                     {opp.amount && (
-                      <p className="text-sm font-semibold text-indigo-600 mb-1">
-                        {Number(opp.amount).toFixed(2)} €
+                      <p className="text-xs sm:text-sm font-semibold text-indigo-600 mb-1">
+                        {Number(opp.amount).toFixed(0)} €
                       </p>
                     )}
                     {opp.closeDate && (
                       <p className="text-xs text-slate-400 mb-1">
-                        📅 {new Date(opp.closeDate).toLocaleDateString('fr-FR')}
+                        📅 {new Date(opp.closeDate).toLocaleDateString('fr-FR', { month: 'short', day: 'numeric' })}
                       </p>
                     )}
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs text-slate-500 truncate">
                       {opp.contact
                         ? `${opp.contact.firstName} ${opp.contact.lastName ?? ''}`
                         : opp.company?.name ?? 'Sans client'}
@@ -173,50 +174,90 @@ export function OpportunitiesPage() {
       )}
 
       {view === 'list' && (
-        <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-        <table className="min-w-full divide-y divide-slate-100">
-          <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-            <tr>
-                <th className="px-4 py-3">Titre</th>
-                <th className="px-4 py-3">Étape</th>
-                <th className="px-4 py-3">Montant</th>
-              <th className="px-4 py-3">Contact</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
+        <div className="space-y-3 sm:space-y-0">
+          {/* Vue mobile : cartes */}
+          <div className="sm:hidden space-y-3">
             {opportunities.map((opportunity) => (
-                <tr 
-                  key={opportunity.id} 
-                  onClick={() => window.location.href = `/opportunites/${opportunity.id}`}
-                  className="text-sm text-slate-700 cursor-pointer hover:bg-slate-50"
-                >
-                <td className="px-4 py-3 font-medium text-slate-900">{opportunity.title}</td>
-                <td className="px-4 py-3">
-                    <span className={`rounded-full px-2 py-1 text-xs font-semibold ${STAGES[opportunity.stage].color}`}>
-                      {STAGES[opportunity.stage].label}
+              <div
+                key={opportunity.id}
+                onClick={() => window.location.href = `/opportunites/${opportunity.id}`}
+                className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm hover:shadow-md transition-all cursor-pointer"
+              >
+                <div className="flex items-start justify-between mb-2">
+                  <h3 className="font-medium text-slate-900 text-sm flex-1">{opportunity.title}</h3>
+                  <span className={`ml-2 rounded-full px-2 py-1 text-xs font-semibold ${STAGES[opportunity.stage].color}`}>
+                    {STAGES[opportunity.stage].label}
                   </span>
-                </td>
-                  <td className="px-4 py-3">
-                    <div>
-                      {opportunity.amount !== undefined && opportunity.amount !== null 
-                        ? `${Number(opportunity.amount).toFixed(2)} €` 
-                        : '-'}
-                    </div>
-                    {opportunity.closeDate && (
-                      <div className="text-xs text-slate-400 mt-1">
-                        📅 {new Date(opportunity.closeDate).toLocaleDateString('fr-FR')}
-                      </div>
-                    )}
-                  </td>
-                <td className="px-4 py-3">
-                  {opportunity.contact
-                    ? `${opportunity.contact.firstName} ${opportunity.contact.lastName ?? ''}`
-                    : opportunity.company?.name ?? '-'}
-                </td>
-              </tr>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-indigo-600">
+                    {opportunity.amount !== undefined && opportunity.amount !== null 
+                      ? `${Number(opportunity.amount).toFixed(0)} €` 
+                      : 'Montant non défini'}
+                  </p>
+                  {opportunity.closeDate && (
+                    <p className="text-xs text-slate-400">
+                      📅 {new Date(opportunity.closeDate).toLocaleDateString('fr-FR')}
+                    </p>
+                  )}
+                  <p className="text-xs text-slate-500">
+                    {opportunity.contact
+                      ? `${opportunity.contact.firstName} ${opportunity.contact.lastName ?? ''}`
+                      : opportunity.company?.name ?? '-'}
+                  </p>
+                </div>
+              </div>
             ))}
-          </tbody>
-        </table>
+          </div>
+
+          {/* Vue desktop : tableau */}
+          <div className="hidden sm:block overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-slate-100">
+                <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3">Titre</th>
+                    <th className="px-4 py-3">Étape</th>
+                    <th className="px-4 py-3">Montant</th>
+                    <th className="px-4 py-3">Contact</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {opportunities.map((opportunity) => (
+                    <tr 
+                      key={opportunity.id} 
+                      onClick={() => window.location.href = `/opportunites/${opportunity.id}`}
+                      className="text-sm text-slate-700 cursor-pointer hover:bg-slate-50"
+                    >
+                      <td className="px-4 py-3 font-medium text-slate-900">{opportunity.title}</td>
+                      <td className="px-4 py-3">
+                        <span className={`rounded-full px-2 py-1 text-xs font-semibold ${STAGES[opportunity.stage].color}`}>
+                          {STAGES[opportunity.stage].label}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div>
+                          {opportunity.amount !== undefined && opportunity.amount !== null 
+                            ? `${Number(opportunity.amount).toFixed(2)} €` 
+                            : '-'}
+                        </div>
+                        {opportunity.closeDate && (
+                          <div className="text-xs text-slate-400 mt-1">
+                            📅 {new Date(opportunity.closeDate).toLocaleDateString('fr-FR')}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {opportunity.contact
+                          ? `${opportunity.contact.firstName} ${opportunity.contact.lastName ?? ''}`
+                          : opportunity.company?.name ?? '-'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
 
