@@ -45,8 +45,8 @@ export function CompanyDetailPage() {
       ]);
 
       const companyData = companyRes.data;
-      const allContacts = contactsRes.data.data || [];
-      const allOpportunities = opportunitiesRes.data.data || [];
+      const allContacts = contactsRes.data.items || contactsRes.data.data || [];
+      const allOpportunities = opportunitiesRes.data.items || opportunitiesRes.data.data || [];
 
       setCompany({
         ...companyData,

@@ -16,8 +16,10 @@ type Opportunity = {
 };
 
 type PaginatedResponse<T> = {
-  data: T[];
-  nextCursor: string | null;
+  data?: T[];
+  items?: T[];
+  nextCursor?: string | null;
+  total?: number;
 };
 
 const STAGES = {
@@ -39,7 +41,7 @@ export function OpportunitiesPage() {
 
   const loadOpportunities = async () => {
     const { data } = await api.get<PaginatedResponse<Opportunity>>('/api/opportunities');
-      setOpportunities(data.data);
+      setOpportunities(data.items || data.data || []);
   };
 
   const handleDragStart = (opp: Opportunity) => {
@@ -234,12 +236,12 @@ function CreateOpportunityModal({ onClose, onCreated }: { onClose: () => void; o
 
   const loadContacts = async () => {
     const { data } = await api.get('/api/contacts');
-    setContacts(data.data || []);
+    setContacts(data.items || data.data || []);
   };
 
   const loadCompanies = async () => {
     const { data } = await api.get('/api/companies');
-    setCompanies(Array.isArray(data) ? data : (data.data || []));
+    setCompanies(Array.isArray(data) ? data : (data.items || data.data || []));
   };
 
   // Filtrer les contacts par entreprise sélectionnée

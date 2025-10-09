@@ -17,8 +17,10 @@ type GmailMessage = {
 };
 
 type PaginatedResponse<T> = {
-  data: T[];
-  nextCursor: string | null;
+  data?: T[];
+  items?: T[];
+  nextCursor?: string | null;
+  total?: number;
 };
 
 const typeLabels: Record<string, string> = {
@@ -47,11 +49,11 @@ export function ActivitiesPage() {
       params: { cursor }
     });
     if (cursor) {
-      setActivities((prev) => [...prev, ...data.data]);
+      setActivities((prev) => [...prev, ...(data.items || data.data || [])]);
     } else {
-      setActivities(data.data);
+      setActivities(data.items || data.data || []);
     }
-    setNextCursor(data.nextCursor);
+    setNextCursor(data.nextCursor ?? null);
   };
 
   const syncCalendar = async () => {
