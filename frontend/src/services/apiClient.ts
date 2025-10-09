@@ -29,10 +29,17 @@ api.interceptors.response.use(
           error.config.headers.Authorization = `Bearer ${data.accessToken}`;
           return api.request(error.config);
         } catch (refreshError) {
+          // Échec du refresh token : déconnexion
           localStorage.removeItem('accessToken');
           localStorage.removeItem('refreshToken');
+          window.location.href = '/';
           return Promise.reject(refreshError);
         }
+      } else {
+        // Pas de refresh token : déconnexion immédiate
+        localStorage.removeItem('accessToken');
+        localStorage.removeItem('refreshToken');
+        window.location.href = '/';
       }
     }
     return Promise.reject(error);
