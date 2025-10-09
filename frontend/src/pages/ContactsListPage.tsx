@@ -13,8 +13,10 @@ type Contact = {
 };
 
 type PaginatedResponse<T> = {
-  data: T[];
-  nextCursor: string | null;
+  data?: T[];
+  items?: T[];
+  nextCursor?: string | null;
+  total?: number;
 };
 
 export function ContactsListPage() {
@@ -36,11 +38,11 @@ export function ContactsListPage() {
       }
     });
     if (cursor) {
-      setContacts((prev) => [...prev, ...data.data]);
+      setContacts((prev) => [...prev, ...(data.items || data.data || [])]);
     } else {
-      setContacts(data.data);
+      setContacts(data.items || data.data || []);
     }
-    setNextCursor(data.nextCursor);
+    setNextCursor(data.nextCursor ?? null);
   };
 
   return (

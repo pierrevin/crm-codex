@@ -51,7 +51,7 @@ export function OpportunityDetailPage() {
   const loadContacts = async () => {
     try {
       const { data } = await api.get('/api/contacts');
-      setContacts(data.data || []);
+      setContacts(data.items || data.data || []);
     } catch (error) {
       console.error('Erreur chargement contacts:', error);
     }
@@ -60,7 +60,7 @@ export function OpportunityDetailPage() {
   const loadCompanies = async () => {
     try {
       const { data } = await api.get('/api/companies');
-      setCompanies(Array.isArray(data) ? data : (data.data || []));
+      setCompanies(Array.isArray(data) ? data : (data.items || data.data || []));
     } catch (error) {
       console.error('Erreur chargement entreprises:', error);
     }

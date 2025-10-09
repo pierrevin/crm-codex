@@ -36,7 +36,7 @@ export function ContactDetailPage() {
   const loadCompanies = async () => {
     try {
       const { data } = await api.get('/api/companies');
-      setCompanies(data.data || data || []);
+      setCompanies(Array.isArray(data) ? data : (data.items || data.data || []));
     } catch (error) {
       console.error('Erreur chargement entreprises:', error);
     }

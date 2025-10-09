@@ -47,9 +47,9 @@ export function DashboardPage() {
         api.get('/api/opportunities', { params: { limit: 1000 } })
       ]);
 
-      const contacts = contactsRes.data.data || [];
-      const companies = Array.isArray(companiesRes.data) ? companiesRes.data : (companiesRes.data.data || []);
-      const opportunities = opportunitiesRes.data.data || [];
+      const contacts = contactsRes.data.items || contactsRes.data.data || [];
+      const companies = Array.isArray(companiesRes.data) ? companiesRes.data : (companiesRes.data.items || companiesRes.data.data || []);
+      const opportunities = opportunitiesRes.data.items || opportunitiesRes.data.data || [];
 
       const oppsByStage = opportunities.reduce((acc: any, opp: any) => {
         acc[opp.stage] = (acc[opp.stage] || 0) + 1;

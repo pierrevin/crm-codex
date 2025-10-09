@@ -14,8 +14,10 @@ type Company = {
 };
 
 type PaginatedResponse<T> = {
-  data: T[];
-  nextCursor: string | null;
+  data?: T[];
+  items?: T[];
+  nextCursor?: string | null;
+  total?: number;
 };
 
 export function CompaniesPage() {
@@ -30,7 +32,7 @@ export function CompaniesPage() {
     try {
       const { data } = await api.get('/api/companies');
       // L'API retourne directement un tableau, pas un objet paginé
-      setCompanies(Array.isArray(data) ? data : (data.data || []));
+      setCompanies(Array.isArray(data) ? data : (data.items || data.data || []));
     } catch (error) {
       console.error('Erreur chargement clients:', error);
       setCompanies([]);
