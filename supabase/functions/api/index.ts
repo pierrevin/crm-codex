@@ -179,9 +179,18 @@ serve(async (req) => {
 
     if (path === 'contacts' && method === 'POST') {
       const body = await req.json()
+      const now = new Date().toISOString()
+      const newId = crypto.randomUUID()
+      
       const { data, error } = await supabase
         .from('Contact')
-        .insert({ ...body, ownerId: userId })
+        .insert({ 
+          id: newId, 
+          ...body, 
+          ownerId: userId,
+          createdAt: now,
+          updatedAt: now
+        })
         .select()
         .single()
 
@@ -214,7 +223,7 @@ serve(async (req) => {
       const body = await req.json()
       const { data, error } = await supabase
         .from('Contact')
-        .update(body)
+        .update({ ...body, updatedAt: new Date().toISOString() })
         .eq('id', id)
         .select()
         .single()
@@ -256,9 +265,17 @@ serve(async (req) => {
 
     if (path === 'companies' && method === 'POST') {
       const body = await req.json()
+      const now = new Date().toISOString()
+      const newId = crypto.randomUUID()
+      
       const { data, error } = await supabase
         .from('Company')
-        .insert(body)
+        .insert({ 
+          id: newId, 
+          ...body,
+          createdAt: now,
+          updatedAt: now
+        })
         .select()
         .single()
 
@@ -291,7 +308,7 @@ serve(async (req) => {
       const body = await req.json()
       const { data, error } = await supabase
         .from('Company')
-        .update(body)
+        .update({ ...body, updatedAt: new Date().toISOString() })
         .eq('id', id)
         .select()
         .single()
@@ -336,9 +353,18 @@ serve(async (req) => {
 
     if (path === 'opportunities' && method === 'POST') {
       const body = await req.json()
+      const now = new Date().toISOString()
+      const newId = crypto.randomUUID()
+      
       const { data, error } = await supabase
         .from('Opportunity')
-        .insert({ ...body, ownerId: userId })
+        .insert({ 
+          id: newId, 
+          ...body, 
+          ownerId: userId,
+          createdAt: now,
+          updatedAt: now
+        })
         .select()
         .single()
 
@@ -371,7 +397,7 @@ serve(async (req) => {
       const body = await req.json()
       const { data, error } = await supabase
         .from('Opportunity')
-        .update(body)
+        .update({ ...body, updatedAt: new Date().toISOString() })
         .eq('id', id)
         .select()
         .single()
@@ -416,9 +442,18 @@ serve(async (req) => {
 
     if (path === 'activities' && method === 'POST') {
       const body = await req.json()
+      const now = new Date().toISOString()
+      const newId = crypto.randomUUID()
+      
       const { data, error } = await supabase
         .from('Activity')
-        .insert({ ...body, userId })
+        .insert({ 
+          id: newId, 
+          ...body, 
+          userId,
+          createdAt: now,
+          updatedAt: now
+        })
         .select()
         .single()
 
@@ -451,7 +486,7 @@ serve(async (req) => {
       const body = await req.json()
       const { data, error } = await supabase
         .from('Activity')
-        .update(body)
+        .update({ ...body, updatedAt: new Date().toISOString() })
         .eq('id', id)
         .select()
         .single()

@@ -211,7 +211,7 @@ export function DashboardPage() {
         <div className="rounded-lg border border-slate-200 bg-gradient-to-br from-emerald-500 to-green-600 p-6 shadow-sm">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-emerald-100 uppercase">CA Réalisé</p>
+              <p className="text-sm text-emerald-100 uppercase">CA Validé</p>
               <p className="text-3xl font-bold text-white mt-2">{stats.wonValue.toFixed(0)} €</p>
               <div className="mt-3 pt-2 border-t border-emerald-400 border-opacity-30">
                 <p className="text-xs text-emerald-100">CA Net (-27%)</p>
