@@ -5,6 +5,7 @@ import { PencilIcon, PlusIcon, TrashIcon, ArrowRightIcon } from '@heroicons/reac
 import api from '../services/apiClient';
 import { CompanySearchSelect } from '../components/CompanySearchSelect';
 import { recentStorage } from '../services/localStorage';
+import { formatSiret, normalizeSiret } from '../utils/formatSiret';
 
 const STAGES = {
   QUALIFICATION: { label: 'Qualification', color: 'bg-blue-100 text-blue-700' },
@@ -319,9 +320,14 @@ export function CompanyDetailPage() {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <input
-              value={editSiret}
-              onChange={(e) => setEditSiret(e.target.value)}
+              value={formatSiret(editSiret)}
+              onChange={(e) => {
+                // Normaliser à la saisie (supprimer les espaces)
+                const normalized = normalizeSiret(e.target.value);
+                setEditSiret(normalized);
+              }}
               placeholder="SIRET"
+              maxLength={17} // 14 chiffres + 3 espaces
               className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
             />
             <input
@@ -407,7 +413,7 @@ export function CompanyDetailPage() {
                   <p className="text-sm text-slate-500 mt-1">{company.addressStreet ? `${company.addressStreet}, ` : ''}{company.addressZip} {company.addressCity} {company.addressCountry || ''}</p>
                 )}
                 {(company.siret || company.vatNumber) && (
-                  <p className="text-xs text-slate-400 mt-1">{company.siret ? `SIRET: ${company.siret}` : ''}{company.siret && company.vatNumber ? ' • ' : ''}{company.vatNumber ? `TVA: ${company.vatNumber}` : ''}</p>
+                  <p className="text-xs text-slate-400 mt-1">{company.siret ? `SIRET: ${formatSiret(company.siret)}` : ''}{company.siret && company.vatNumber ? ' • ' : ''}{company.vatNumber ? `TVA: ${company.vatNumber}` : ''}</p>
                 )}
                 {(company.linkedinUrl || company.salesNavigatorUrl) && (
                   <p className="text-xs text-slate-400 mt-1">
@@ -469,9 +475,14 @@ export function CompanyDetailPage() {
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <input
-                    value={editSiret}
-                    onChange={(e) => setEditSiret(e.target.value)}
+                    value={formatSiret(editSiret)}
+                    onChange={(e) => {
+                      // Normaliser à la saisie (supprimer les espaces)
+                      const normalized = normalizeSiret(e.target.value);
+                      setEditSiret(normalized);
+                    }}
                     placeholder="SIRET"
+                    maxLength={17} // 14 chiffres + 3 espaces
                     className="text-sm border-b border-slate-300 focus:outline-none focus:border-indigo-500"
                   />
                   <input
