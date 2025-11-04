@@ -155,6 +155,7 @@ serve(async (req) => {
     // ===== CONTACTS ROUTES =====
     if (path === 'contacts' && method === 'GET') {
       const search = url.searchParams.get('search')
+      const companyId = url.searchParams.get('companyId')
       const limit = parseInt(url.searchParams.get('limit') ?? '20')
 
       let query = supabase
@@ -162,6 +163,10 @@ serve(async (req) => {
         .select('*, company:Company(*)', { count: 'exact' })
         .order('createdAt', { ascending: false })
         .limit(limit)
+
+      if (companyId) {
+        query = query.eq('companyId', companyId)
+      }
 
       if (search) {
         query = query.or(`firstName.ilike.%${search}%,lastName.ilike.%${search}%,email.ilike.%${search}%`)
@@ -172,7 +177,7 @@ serve(async (req) => {
       if (error) throw error
 
       return new Response(
-        JSON.stringify({ items: data, total: data?.length ?? 0 }),
+        JSON.stringify({ data: data, items: data, total: data?.length ?? 0 }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -289,16 +294,52 @@ serve(async (req) => {
 
     if (path.startsWith('companies/') && method === 'GET') {
       const id = path.split('/')[1]
-      const { data, error } = await supabase
+      
+      // Récupérer la company avec contacts et opportunités filtrés par companyId
+      const { data: company, error: companyError } = await supabase
         .from('Company')
-        .select('*, contacts:Contact(*)')
+        .select('*')
         .eq('id', id)
         .single()
 
-      if (error) throw error
+      if (companyError) throw companyError
+
+      // Récupérer les contacts de cette company
+      const { data: contacts, error: contactsError } = await supabase
+        .from('Contact')
+        .select('*')
+        .eq('companyId', id)
+
+      if (contactsError) throw contactsError
+
+      // Récupérer les opportunités de cette company
+      const { data: opportunities, error: opportunitiesError } = await supabase
+        .from('Opportunity')
+        .select('*')
+        .eq('companyId', id)
+
+      if (opportunitiesError) throw opportunitiesError
+
+      // Récupérer les tags (relation many-to-many)
+      const { data: tags, error: tagsError } = await supabase
+        .from('_CompanyToTag')
+        .select('*, Tag(*)')
+        .eq('A', id)
+
+      let tagNames: string[] = []
+      if (!tagsError && tags) {
+        tagNames = tags.map((t: any) => t.Tag?.name).filter(Boolean)
+      }
+
+      const result = {
+        ...company,
+        contacts: contacts || [],
+        opportunities: opportunities || [],
+        tags: tagNames
+      }
 
       return new Response(
-        JSON.stringify(data),
+        JSON.stringify(result),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -321,6 +362,106 @@ serve(async (req) => {
       )
     }
 
+    if (path.startsWith('companies/') && path.includes('/merge') && method === 'POST') {
+      const pathParts = path.split('/')
+      const id = pathParts[1]
+      const { mergeCompanyId } = await req.json()
+
+      if (!mergeCompanyId || id === mergeCompanyId) {
+        return new Response(
+          JSON.stringify({ message: 'Invalid merge company ID' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      // Vérifier que les deux companies existent
+      const { data: mainCompany, error: mainError } = await supabase
+        .from('Company')
+        .select('*')
+        .eq('id', id)
+        .single()
+
+      if (mainError || !mainCompany) {
+        return new Response(
+          JSON.stringify({ message: 'Main company not found' }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      const { data: mergeCompany, error: mergeError } = await supabase
+        .from('Company')
+        .select('*')
+        .eq('id', mergeCompanyId)
+        .single()
+
+      if (mergeError || !mergeCompany) {
+        return new Response(
+          JSON.stringify({ message: 'Company to merge not found' }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      // Déplacer les contacts
+      const { error: contactsError } = await supabase
+        .from('Contact')
+        .update({ companyId: id })
+        .eq('companyId', mergeCompanyId)
+
+      if (contactsError) throw contactsError
+
+      // Déplacer les opportunités
+      const { error: opportunitiesError } = await supabase
+        .from('Opportunity')
+        .update({ companyId: id })
+        .eq('companyId', mergeCompanyId)
+
+      if (opportunitiesError) throw opportunitiesError
+
+      // Fusionner les champs optionnels (si la principale est vide)
+      const updateData: any = {}
+      if (!mainCompany.domain && mergeCompany.domain) updateData.domain = mergeCompany.domain
+      if (!mainCompany.externalRef && mergeCompany.externalRef) updateData.externalRef = mergeCompany.externalRef
+      if (!mainCompany.addressStreet && mergeCompany.addressStreet) updateData.addressStreet = mergeCompany.addressStreet
+      if (!mainCompany.addressZip && mergeCompany.addressZip) updateData.addressZip = mergeCompany.addressZip
+      if (!mainCompany.addressCity && mergeCompany.addressCity) updateData.addressCity = mergeCompany.addressCity
+      if (!mainCompany.addressCountry && mergeCompany.addressCountry) updateData.addressCountry = mergeCompany.addressCountry
+      if (!mainCompany.siret && mergeCompany.siret) updateData.siret = mergeCompany.siret
+      if (!mainCompany.vatNumber && mergeCompany.vatNumber) updateData.vatNumber = mergeCompany.vatNumber
+      if (!mainCompany.linkedinUrl && mergeCompany.linkedinUrl) updateData.linkedinUrl = mergeCompany.linkedinUrl
+      if (!mainCompany.salesNavigatorUrl && mergeCompany.salesNavigatorUrl) updateData.salesNavigatorUrl = mergeCompany.salesNavigatorUrl
+      if (mergeCompany.notes) {
+        updateData.notes = mainCompany.notes
+          ? `${mainCompany.notes}\n\n--- Fusionné depuis "${mergeCompany.name}" ---\n${mergeCompany.notes}`
+          : mergeCompany.notes
+      }
+      updateData.statusClient = mainCompany.statusClient || mergeCompany.statusClient
+      updateData.statusProspect = mainCompany.statusProspect || mergeCompany.statusProspect
+      updateData.statusSupplier = mainCompany.statusSupplier || mergeCompany.statusSupplier
+
+      if (Object.keys(updateData).length > 0) {
+        updateData.updatedAt = new Date().toISOString()
+        const { error: updateError } = await supabase
+          .from('Company')
+          .update(updateData)
+          .eq('id', id)
+
+        if (updateError) throw updateError
+      }
+
+      // Supprimer la company fusionnée
+      const { error: deleteError } = await supabase
+        .from('Company')
+        .delete()
+        .eq('id', mergeCompanyId)
+
+      if (deleteError) throw deleteError
+
+      return new Response(
+        JSON.stringify({ message: 'Companies merged successfully' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     if (path.startsWith('companies/') && method === 'DELETE') {
       const id = path.split('/')[1]
       const { error } = await supabase
@@ -336,17 +477,24 @@ serve(async (req) => {
     // ===== OPPORTUNITIES ROUTES =====
     if (path === 'opportunities' && method === 'GET') {
       const limit = parseInt(url.searchParams.get('limit') ?? '20')
+      const companyId = url.searchParams.get('companyId')
 
-      const { data, error } = await supabase
+      let query = supabase
         .from('Opportunity')
         .select('*, contact:Contact(*), company:Company(*)')
         .order('createdAt', { ascending: false })
         .limit(limit)
 
+      if (companyId) {
+        query = query.eq('companyId', companyId)
+      }
+
+      const { data, error } = await query
+
       if (error) throw error
 
       return new Response(
-        JSON.stringify({ items: data, total: data?.length ?? 0 }),
+        JSON.stringify({ data: data, items: data, total: data?.length ?? 0 }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
