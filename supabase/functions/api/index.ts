@@ -292,7 +292,7 @@ serve(async (req) => {
       )
     }
 
-    if (path.startsWith('companies/') && method === 'GET') {
+    if (path.startsWith('companies/') && method === 'GET' && !path.includes('/merge')) {
       const id = path.split('/')[1]
       
       // Récupérer la company avec contacts et opportunités filtrés par companyId
