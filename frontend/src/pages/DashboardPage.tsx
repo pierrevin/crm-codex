@@ -11,6 +11,7 @@ import {
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Line, PieChart, Pie, Cell } from 'recharts';
 import api from '../services/apiClient';
 import { ProjectionView } from '../components/ProjectionView';
+import { GlobalSearch } from '../components/GlobalSearch';
 
 const STAGES = {
   QUALIFICATION: { label: 'Qualification', color: 'bg-blue-500' },
@@ -53,6 +54,10 @@ export function DashboardPage() {
       const companies = Array.isArray(companiesRes.data) ? companiesRes.data : (companiesRes.data.items || companiesRes.data.data || []);
       const opportunities = opportunitiesRes.data.items || opportunitiesRes.data.data || [];
 
+      // Utiliser le total de l'API au lieu de la longueur du tableau (pour éviter les problèmes de limite)
+      const totalContacts = contactsRes.data.total ?? contacts.length;
+      const totalOpportunities = opportunitiesRes.data.total ?? opportunities.length;
+
       const oppsByStage = opportunities.reduce((acc: any, opp: any) => {
         acc[opp.stage] = (acc[opp.stage] || 0) + 1;
         return acc;
@@ -69,9 +74,9 @@ export function DashboardPage() {
       const netRevenue = wonValue * 0.73; // CA net = CA réalisé - 27%
 
       setStats({
-        totalContacts: contacts.length,
+        totalContacts: totalContacts,
         totalCompanies: companies.length,
-        totalOpportunities: opportunities.length,
+        totalOpportunities: totalOpportunities,
         pipelineValue,
         wonValue,
         netRevenue,
@@ -94,10 +99,15 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      {/* En-tête */}
-      <div>
-        <h1 className="text-3xl font-bold text-slate-900">Tableau de bord</h1>
-        <p className="text-slate-500 mt-1">Vue d'ensemble de votre activité commerciale</p>
+      {/* En-tête avec recherche globale */}
+      <div className="space-y-4">
+        <div>
+          <h1 className="text-3xl font-bold text-slate-900">Tableau de bord</h1>
+          <p className="text-slate-500 mt-1">Vue d'ensemble de votre activité commerciale</p>
+        </div>
+        <div className="flex justify-center">
+          <GlobalSearch />
+        </div>
       </div>
 
       {/* Statistiques principales - Cliquables */}

@@ -172,12 +172,12 @@ serve(async (req) => {
         query = query.or(`firstName.ilike.%${search}%,lastName.ilike.%${search}%,email.ilike.%${search}%`)
       }
 
-      const { data, error } = await query
+      const { data, error, count } = await query
 
       if (error) throw error
 
       return new Response(
-        JSON.stringify({ data: data, items: data, total: data?.length ?? 0 }),
+        JSON.stringify({ data: data, items: data, total: count ?? data?.length ?? 0 }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -255,15 +255,41 @@ serve(async (req) => {
 
     // ===== COMPANIES ROUTES =====
     if (path === 'companies' && method === 'GET') {
-      const { data, error } = await supabase
+      const search = url.searchParams.get('search')
+      
+      let query = supabase
         .from('Company')
         .select('*')
         .order('createdAt', { ascending: false })
 
+      if (search) {
+        query = query.or(`name.ilike.%${search}%,domain.ilike.%${search}%`)
+      }
+
+      const { data: companies, error } = await query
+
       if (error) throw error
 
+      // Pour chaque company, récupérer les counts de contacts et opportunités
+      const companiesWithCount = await Promise.all(
+        (companies || []).map(async (company: any) => {
+          const [contactsCount, opportunitiesCount] = await Promise.all([
+            supabase.from('Contact').select('id', { count: 'exact', head: true }).eq('companyId', company.id),
+            supabase.from('Opportunity').select('id', { count: 'exact', head: true }).eq('companyId', company.id)
+          ])
+
+          return {
+            ...company,
+            _count: {
+              contacts: contactsCount.count ?? 0,
+              opportunities: opportunitiesCount.count ?? 0
+            }
+          }
+        })
+      )
+
       return new Response(
-        JSON.stringify(data),
+        JSON.stringify(companiesWithCount),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -478,10 +504,11 @@ serve(async (req) => {
     if (path === 'opportunities' && method === 'GET') {
       const limit = parseInt(url.searchParams.get('limit') ?? '20')
       const companyId = url.searchParams.get('companyId')
+      const search = url.searchParams.get('search')
 
       let query = supabase
         .from('Opportunity')
-        .select('*, contact:Contact(*), company:Company(*)')
+        .select('*, contact:Contact(*), company:Company(*)', { count: 'exact' })
         .order('createdAt', { ascending: false })
         .limit(limit)
 
@@ -489,12 +516,26 @@ serve(async (req) => {
         query = query.eq('companyId', companyId)
       }
 
-      const { data, error } = await query
+      if (search) {
+        query = query.or(`title.ilike.%${search}%`)
+      }
+
+      const { data, error, count } = await query
 
       if (error) throw error
 
+      // Filtrer aussi par company name si search est fourni
+      let filteredData = data || []
+      if (search && data) {
+        const searchLower = search.toLowerCase()
+        filteredData = data.filter((opp: any) => 
+          opp.title?.toLowerCase().includes(searchLower) ||
+          opp.company?.name?.toLowerCase().includes(searchLower)
+        )
+      }
+
       return new Response(
-        JSON.stringify({ data: data, items: data, total: data?.length ?? 0 }),
+        JSON.stringify({ data: filteredData, items: filteredData, total: count ?? filteredData?.length ?? 0 }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
