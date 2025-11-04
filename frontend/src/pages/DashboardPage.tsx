@@ -44,47 +44,64 @@ export function DashboardPage() {
 
   const loadStats = async () => {
     try {
-      const [contactsRes, companiesRes, opportunitiesRes] = await Promise.all([
-        api.get('/api/contacts', { params: { limit: 1000 } }),
-        api.get('/api/companies'),
-        api.get('/api/opportunities', { params: { limit: 1000 } })
-      ]);
-
-      const contacts = contactsRes.data.items || contactsRes.data.data || [];
-      const companies = Array.isArray(companiesRes.data) ? companiesRes.data : (companiesRes.data.items || companiesRes.data.data || []);
-      const opportunities = opportunitiesRes.data.items || opportunitiesRes.data.data || [];
-
-      // Utiliser le total de l'API au lieu de la longueur du tableau (pour éviter les problèmes de limite)
-      const totalContacts = contactsRes.data.total ?? contacts.length;
-      const totalOpportunities = opportunitiesRes.data.total ?? opportunities.length;
-
-      const oppsByStage = opportunities.reduce((acc: any, opp: any) => {
-        acc[opp.stage] = (acc[opp.stage] || 0) + 1;
-        return acc;
-      }, {});
-
-      const pipelineValue = opportunities
-        .filter((o: any) => o.stage !== 'CLOSED_LOST')
-        .reduce((sum: number, opp: any) => sum + (Number(opp.amount) || 0), 0);
-
-      const wonValue = opportunities
-        .filter((o: any) => o.stage === 'CLOSED_WON')
-        .reduce((sum: number, opp: any) => sum + (Number(opp.amount) || 0), 0);
+      // Utiliser l'endpoint /stats optimisé au lieu de charger toutes les données
+      const statsRes = await api.get('/api/stats');
       
-      const netRevenue = wonValue * 0.73; // CA net = CA réalisé - 27%
-
       setStats({
-        totalContacts: totalContacts,
-        totalCompanies: companies.length,
-        totalOpportunities: totalOpportunities,
-        pipelineValue,
-        wonValue,
-        netRevenue,
-        opportunitiesByStage: oppsByStage,
-        recentOpportunities: opportunities.slice(0, 5)
+        totalContacts: statsRes.data.totalContacts ?? 0,
+        totalCompanies: statsRes.data.totalCompanies ?? 0,
+        totalOpportunities: statsRes.data.totalOpportunities ?? 0,
+        pipelineValue: statsRes.data.pipelineValue ?? 0,
+        wonValue: statsRes.data.wonValue ?? 0,
+        netRevenue: statsRes.data.netRevenue ?? 0,
+        opportunitiesByStage: statsRes.data.opportunitiesByStage ?? {},
+        recentOpportunities: statsRes.data.recentOpportunities ?? []
       });
     } catch (error) {
       console.error('Erreur chargement stats:', error);
+      // Fallback vers l'ancienne méthode si /stats n'existe pas encore
+      try {
+        const [contactsRes, companiesRes, opportunitiesRes] = await Promise.all([
+          api.get('/api/contacts', { params: { limit: 1000 } }),
+          api.get('/api/companies'),
+          api.get('/api/opportunities', { params: { limit: 1000 } })
+        ]);
+
+        const contacts = contactsRes.data.items || contactsRes.data.data || [];
+        const companies = Array.isArray(companiesRes.data) ? companiesRes.data : (companiesRes.data.items || companiesRes.data.data || []);
+        const opportunities = opportunitiesRes.data.items || opportunitiesRes.data.data || [];
+
+        const totalContacts = contactsRes.data.total ?? contacts.length;
+        const totalOpportunities = opportunitiesRes.data.total ?? opportunities.length;
+
+        const oppsByStage = opportunities.reduce((acc: any, opp: any) => {
+          acc[opp.stage] = (acc[opp.stage] || 0) + 1;
+          return acc;
+        }, {});
+
+        const pipelineValue = opportunities
+          .filter((o: any) => o.stage !== 'CLOSED_LOST')
+          .reduce((sum: number, opp: any) => sum + (Number(opp.amount) || 0), 0);
+
+        const wonValue = opportunities
+          .filter((o: any) => o.stage === 'CLOSED_WON')
+          .reduce((sum: number, opp: any) => sum + (Number(opp.amount) || 0), 0);
+        
+        const netRevenue = wonValue * 0.73;
+
+        setStats({
+          totalContacts: totalContacts,
+          totalCompanies: companies.length,
+          totalOpportunities: totalOpportunities,
+          pipelineValue,
+          wonValue,
+          netRevenue,
+          opportunitiesByStage: oppsByStage,
+          recentOpportunities: opportunities.slice(0, 5)
+        });
+      } catch (fallbackError) {
+        console.error('Erreur fallback:', fallbackError);
+      }
     }
     setLoading(false);
   };

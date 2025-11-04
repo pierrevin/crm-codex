@@ -257,6 +257,7 @@ serve(async (req) => {
     if (path === 'companies' && method === 'GET') {
       const search = url.searchParams.get('search')
       
+      // Charger toutes les companies
       let query = supabase
         .from('Company')
         .select('*')
@@ -266,27 +267,49 @@ serve(async (req) => {
         query = query.or(`name.ilike.%${search}%,domain.ilike.%${search}%`)
       }
 
-      const { data: companies, error } = await query
+      const { data: companies, error: companiesError } = await query
 
-      if (error) throw error
+      if (companiesError) throw companiesError
 
-      // Pour chaque company, récupérer les counts de contacts et opportunités
-      const companiesWithCount = await Promise.all(
-        (companies || []).map(async (company: any) => {
-          const [contactsCount, opportunitiesCount] = await Promise.all([
-            supabase.from('Contact').select('id', { count: 'exact', head: true }).eq('companyId', company.id),
-            supabase.from('Opportunity').select('id', { count: 'exact', head: true }).eq('companyId', company.id)
-          ])
+      if (!companies || companies.length === 0) {
+        return new Response(
+          JSON.stringify([]),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
 
-          return {
-            ...company,
-            _count: {
-              contacts: contactsCount.count ?? 0,
-              opportunities: opportunitiesCount.count ?? 0
-            }
-          }
-        })
-      )
+      // Récupérer tous les IDs des companies
+      const companyIds = companies.map(c => c.id)
+
+      // Récupérer tous les counts en batch avec seulement 2 requêtes au lieu de 2N
+      const [contactsRes, opportunitiesRes] = await Promise.all([
+        supabase.from('Contact').select('companyId').in('companyId', companyIds),
+        supabase.from('Opportunity').select('companyId').in('companyId', companyIds)
+      ])
+
+      // Compter par companyId côté JavaScript
+      const contactsByCompany = (contactsRes.data || []).reduce((acc: any, c: any) => {
+        if (c.companyId) {
+          acc[c.companyId] = (acc[c.companyId] || 0) + 1
+        }
+        return acc
+      }, {})
+
+      const opportunitiesByCompany = (opportunitiesRes.data || []).reduce((acc: any, o: any) => {
+        if (o.companyId) {
+          acc[o.companyId] = (acc[o.companyId] || 0) + 1
+        }
+        return acc
+      }, {})
+
+      // Combiner les résultats
+      const companiesWithCount = companies.map((company: any) => ({
+        ...company,
+        _count: {
+          contacts: contactsByCompany[company.id] || 0,
+          opportunities: opportunitiesByCompany[company.id] || 0
+        }
+      }))
 
       return new Response(
         JSON.stringify(companiesWithCount),
@@ -321,40 +344,25 @@ serve(async (req) => {
     if (path.startsWith('companies/') && method === 'GET' && !path.includes('/merge')) {
       const id = path.split('/')[1]
       
-      // Récupérer la company avec contacts et opportunités filtrés par companyId
-      const { data: company, error: companyError } = await supabase
-        .from('Company')
-        .select('*')
-        .eq('id', id)
-        .single()
+      // Exécuter toutes les requêtes en parallèle pour optimiser les performances
+      const [companyRes, contactsRes, opportunitiesRes, tagsRes] = await Promise.all([
+        supabase.from('Company').select('*').eq('id', id).single(),
+        supabase.from('Contact').select('*').eq('companyId', id),
+        supabase.from('Opportunity').select('*').eq('companyId', id),
+        supabase.from('_CompanyToTag').select('*, Tag(*)').eq('A', id)
+      ])
 
-      if (companyError) throw companyError
+      if (companyRes.error) throw companyRes.error
+      if (contactsRes.error) throw contactsRes.error
+      if (opportunitiesRes.error) throw opportunitiesRes.error
 
-      // Récupérer les contacts de cette company
-      const { data: contacts, error: contactsError } = await supabase
-        .from('Contact')
-        .select('*')
-        .eq('companyId', id)
-
-      if (contactsError) throw contactsError
-
-      // Récupérer les opportunités de cette company
-      const { data: opportunities, error: opportunitiesError } = await supabase
-        .from('Opportunity')
-        .select('*')
-        .eq('companyId', id)
-
-      if (opportunitiesError) throw opportunitiesError
-
-      // Récupérer les tags (relation many-to-many)
-      const { data: tags, error: tagsError } = await supabase
-        .from('_CompanyToTag')
-        .select('*, Tag(*)')
-        .eq('A', id)
+      const company = companyRes.data
+      const contacts = contactsRes.data || []
+      const opportunities = opportunitiesRes.data || []
 
       let tagNames: string[] = []
-      if (!tagsError && tags) {
-        tagNames = tags.map((t: any) => t.Tag?.name).filter(Boolean)
+      if (!tagsRes.error && tagsRes.data) {
+        tagNames = tagsRes.data.map((t: any) => t.Tag?.name).filter(Boolean)
       }
 
       const result = {
@@ -498,6 +506,54 @@ serve(async (req) => {
       if (error) throw error
 
       return new Response(null, { status: 204, headers: corsHeaders })
+    }
+
+    // ===== STATS ROUTE (pour Dashboard optimisé) =====
+    if (path === 'stats' && method === 'GET') {
+      // Récupérer les counts totaux et quelques opportunités récentes seulement
+      const [contactsCount, companiesCount, opportunitiesCount, allOppsRes, recentOppsRes] = await Promise.all([
+        supabase.from('Contact').select('id', { count: 'exact', head: true }),
+        supabase.from('Company').select('id', { count: 'exact', head: true }),
+        supabase.from('Opportunity').select('id', { count: 'exact', head: true }),
+        // Charger seulement les champs nécessaires pour les calculs (pas tous les champs)
+        supabase.from('Opportunity').select('stage, amount'),
+        supabase.from('Opportunity').select('*').order('createdAt', { ascending: false }).limit(5)
+      ])
+
+      const totalOpportunities = opportunitiesCount.count ?? 0
+      const opportunities = allOppsRes.data || []
+      const recentOpportunities = recentOppsRes.data || []
+
+      // Calculer les stats par stage
+      const oppsByStage = opportunities.reduce((acc: any, opp: any) => {
+        acc[opp.stage] = (acc[opp.stage] || 0) + 1
+        return acc
+      }, {})
+
+      // Calculer les valeurs
+      const pipelineValue = opportunities
+        .filter((o: any) => o.stage !== 'CLOSED_LOST')
+        .reduce((sum: number, opp: any) => sum + (Number(opp.amount) || 0), 0)
+
+      const wonValue = opportunities
+        .filter((o: any) => o.stage === 'CLOSED_WON')
+        .reduce((sum: number, opp: any) => sum + (Number(opp.amount) || 0), 0)
+
+      const netRevenue = wonValue * 0.73
+
+      return new Response(
+        JSON.stringify({
+          totalContacts: contactsCount.count ?? 0,
+          totalCompanies: companiesCount.count ?? 0,
+          totalOpportunities: totalOpportunities,
+          pipelineValue,
+          wonValue,
+          netRevenue,
+          opportunitiesByStage: oppsByStage,
+          recentOpportunities
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
     }
 
     // ===== OPPORTUNITIES ROUTES =====
