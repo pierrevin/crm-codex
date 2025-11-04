@@ -1,0 +1,5 @@
+-- Add Sirene API fields to Company table
+ALTER TABLE "Company" ADD COLUMN IF NOT EXISTS "siren" TEXT;
+ALTER TABLE "Company" ADD COLUMN IF NOT EXISTS "codeNAF" TEXT;
+ALTER TABLE "Company" ADD COLUMN IF NOT EXISTS "libelleNAF" TEXT;
+

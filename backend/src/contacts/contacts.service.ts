@@ -22,13 +22,13 @@ export class ContactsService {
       cursor: cursor ? { id: cursor } : undefined,
       where: {
         ...(search
-          ? {
-              OR: [
-                { firstName: { contains: search } },
-                { lastName: { contains: search } },
-                { email: { contains: search } }
-              ]
-            }
+        ? {
+            OR: [
+              { firstName: { contains: search } },
+              { lastName: { contains: search } },
+              { email: { contains: search } }
+            ]
+          }
           : {}),
         ...(companyId ? { companyId } : {})
       },

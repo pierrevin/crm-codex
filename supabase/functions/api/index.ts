@@ -810,6 +810,213 @@ serve(async (req) => {
       )
     }
 
+    // ===== SIRENE API ROUTES =====
+    if (path === 'companies/sirene/search' && method === 'POST') {
+      const body = await req.json()
+      const { type, value } = body
+
+      if (!type || !value) {
+        return new Response(
+          JSON.stringify({ message: 'Missing type or value' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      try {
+        // Construire l'URL de l'API data.gouv.fr
+        let apiUrl = 'https://recherche-entreprises.api.gouv.fr/search'
+        
+        if (type === 'siret') {
+          // Normaliser le SIRET (supprimer les espaces)
+          const normalizedSiret = value.replace(/\s+/g, '')
+          apiUrl += `?siret=${encodeURIComponent(normalizedSiret)}`
+        } else if (type === 'siren') {
+          const normalizedSiren = value.replace(/\s+/g, '')
+          apiUrl += `?siren=${encodeURIComponent(normalizedSiren)}`
+        } else if (type === 'name') {
+          apiUrl += `?q=${encodeURIComponent(value)}`
+        } else {
+          return new Response(
+            JSON.stringify({ message: 'Invalid type. Use siret, siren, or name' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+
+        // Appeler l'API data.gouv.fr
+        const response = await fetch(apiUrl, {
+          headers: {
+            'Accept': 'application/json'
+          }
+        })
+
+        if (!response.ok) {
+          throw new Error(`API returned ${response.status}`)
+        }
+
+        const data = await response.json()
+
+        // Formater les résultats pour notre modèle
+        const formattedResults = (data.results || []).map((result: any) => {
+          // Extraire l'adresse si disponible
+          const adresse = result.siege?.adresse || result.adresse || {}
+          
+          return {
+            siret: result.siret,
+            siren: result.siren,
+            denomination: result.nom_complet || result.denomination,
+            codeNAF: result.activite_principale || result.naf,
+            libelleNAF: result.libelle_activite_principale || null,
+            addressStreet: adresse.numero_voie ? `${adresse.numero_voie} ${adresse.type_voie || ''} ${adresse.libelle_voie || ''}`.trim() : (adresse.ligne_1 || null),
+            addressZip: adresse.code_postal || null,
+            addressCity: adresse.ville || adresse.localite || null,
+            addressCountry: 'France',
+            isIndividual: result.nature_juridique === 'Entrepreneur individuel' || result.entreprise_individuelle === true
+          }
+        })
+
+        return new Response(
+          JSON.stringify({ results: formattedResults }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      } catch (error: any) {
+        console.error('Erreur appel API Sirene:', error)
+        return new Response(
+          JSON.stringify({ message: error.message || 'Erreur lors de la recherche' }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+    }
+
+    // Endpoint pour compléter une fiche existante
+    if (path.startsWith('companies/') && path.includes('/sirene/fill') && method === 'POST') {
+      const pathParts = path.split('/')
+      const companyId = pathParts[1]
+      const body = await req.json()
+      const { siret, siren, name } = body
+
+      try {
+        // Déterminer le type de recherche
+        let searchType = 'name'
+        let searchValue = name
+
+        if (siret) {
+          searchType = 'siret'
+          searchValue = siret.replace(/\s+/g, '')
+        } else if (siren) {
+          searchType = 'siren'
+          searchValue = siren.replace(/\s+/g, '')
+        }
+
+        if (!searchValue) {
+          return new Response(
+            JSON.stringify({ message: 'Missing siret, siren, or name' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+
+        // Appeler l'API Sirene
+        let apiUrl = 'https://recherche-entreprises.api.gouv.fr/search'
+        if (searchType === 'siret') {
+          apiUrl += `?siret=${encodeURIComponent(searchValue)}`
+        } else if (searchType === 'siren') {
+          apiUrl += `?siren=${encodeURIComponent(searchValue)}`
+        } else {
+          apiUrl += `?q=${encodeURIComponent(searchValue)}`
+        }
+
+        const response = await fetch(apiUrl, {
+          headers: { 'Accept': 'application/json' }
+        })
+
+        if (!response.ok) {
+          throw new Error(`API returned ${response.status}`)
+        }
+
+        const data = await response.json()
+        const results = data.results || []
+
+        if (results.length === 0) {
+          return new Response(
+            JSON.stringify({ message: 'Aucune entreprise trouvée' }),
+            { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+
+        // Récupérer la company actuelle pour ne mettre à jour que les champs vides
+        const { data: currentCompany, error: fetchError } = await supabase
+          .from('Company')
+          .select('*')
+          .eq('id', companyId)
+          .single()
+
+        if (fetchError) throw fetchError
+
+        // Prendre le premier résultat
+        const result = results[0]
+        const adresse = result.siege?.adresse || result.adresse || {}
+
+        // Préparer les données à mettre à jour (seulement les champs vides)
+        const updateData: any = {
+          updatedAt: new Date().toISOString()
+        }
+
+        // Mettre à jour seulement les champs vides
+        if (!currentCompany.name && (result.nom_complet || result.denomination)) {
+          updateData.name = result.nom_complet || result.denomination
+        }
+        if (!currentCompany.siret && result.siret) {
+          updateData.siret = result.siret
+        }
+        if (!currentCompany.siren && result.siren) {
+          updateData.siren = result.siren
+        }
+        if (!currentCompany.codeNAF && (result.activite_principale || result.naf)) {
+          updateData.codeNAF = result.activite_principale || result.naf
+        }
+        if (!currentCompany.libelleNAF && result.libelle_activite_principale) {
+          updateData.libelleNAF = result.libelle_activite_principale
+        }
+
+        // Adresse - seulement si vide
+        if (!currentCompany.addressStreet && (adresse.numero_voie || adresse.ligne_1)) {
+          const street = adresse.numero_voie 
+            ? `${adresse.numero_voie} ${adresse.type_voie || ''} ${adresse.libelle_voie || ''}`.trim()
+            : adresse.ligne_1
+          if (street) updateData.addressStreet = street
+        }
+        if (!currentCompany.addressZip && adresse.code_postal) {
+          updateData.addressZip = adresse.code_postal
+        }
+        if (!currentCompany.addressCity && (adresse.ville || adresse.localite)) {
+          updateData.addressCity = adresse.ville || adresse.localite
+        }
+        if (!currentCompany.addressCountry) {
+          updateData.addressCountry = 'France'
+        }
+
+        // Mettre à jour la company
+        const { data: updatedCompany, error } = await supabase
+          .from('Company')
+          .update(updateData)
+          .eq('id', companyId)
+          .select()
+          .single()
+
+        if (error) throw error
+
+        return new Response(
+          JSON.stringify(updatedCompany),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      } catch (error: any) {
+        console.error('Erreur complétion fiche:', error)
+        return new Response(
+          JSON.stringify({ message: error.message || 'Erreur lors de la complétion' }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+    }
+
     // Route not found
     return new Response(
       JSON.stringify({ message: 'Not found' }),

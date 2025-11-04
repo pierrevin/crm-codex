@@ -67,6 +67,9 @@ model Company {
   addressCity       String?
   addressCountry    String?
   siret             String?   @unique
+  siren             String?   // Numéro SIREN (9 chiffres) - de l'API Sirene
+  codeNAF           String?   // Code NAF/APE - de l'API Sirene
+  libelleNAF        String?   // Libellé de l'activité NAF - de l'API Sirene
   vatNumber         String?
   iban              String?
   bic               String?

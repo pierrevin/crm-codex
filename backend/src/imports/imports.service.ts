@@ -362,7 +362,7 @@ export class ImportsService {
       const trimmed = key.externalRef.trim();
       if (trimmed) {
         const c = await this.prisma.company.findFirst({ where: { externalRef: trimmed } });
-        if (c) return c.id;
+      if (c) return c.id;
       }
     }
     const name = (key.name ?? '').trim();
