@@ -226,9 +226,20 @@ serve(async (req) => {
     if (path.startsWith('contacts/') && method === 'PATCH') {
       const id = path.split('/')[1]
       const body = await req.json()
+      
+      // Nettoyer le body : convertir les valeurs vides en null pour les champs optionnels
+      const cleanedBody: any = { ...body }
+      // Convertir les chaînes vides en null pour les champs optionnels
+      const optionalFields = ['lastName', 'email', 'phone', 'mobilePhone', 'title', 'jobTitle', 'industry', 'linkedinUrl', 'funnelStep', 'companyId']
+      for (const field of optionalFields) {
+        if (cleanedBody[field] === '') {
+          cleanedBody[field] = null
+        }
+      }
+
       const { data, error } = await supabase
         .from('Contact')
-        .update({ ...body, updatedAt: new Date().toISOString() })
+        .update({ ...cleanedBody, updatedAt: new Date().toISOString() })
         .eq('id', id)
         .select()
         .single()
@@ -381,14 +392,68 @@ serve(async (req) => {
     if (path.startsWith('companies/') && method === 'PATCH') {
       const id = path.split('/')[1]
       const body = await req.json()
+      const { tags, ...updateData } = body
+
+      // Nettoyer le body : convertir les valeurs vides en null pour les champs optionnels
+      const cleanedUpdateData: any = { ...updateData }
+      // Convertir les chaînes vides en null pour les champs optionnels
+      const optionalFields = ['domain', 'addressStreet', 'addressZip', 'addressCity', 'addressCountry', 'siret', 'vatNumber', 'linkedinUrl', 'salesNavigatorUrl', 'notes']
+      for (const field of optionalFields) {
+        if (cleanedUpdateData[field] === '') {
+          cleanedUpdateData[field] = null
+        }
+      }
+
+      // Mettre à jour la company (sans les tags)
       const { data, error } = await supabase
         .from('Company')
-        .update({ ...body, updatedAt: new Date().toISOString() })
+        .update({ ...cleanedUpdateData, updatedAt: new Date().toISOString() })
         .eq('id', id)
         .select()
         .single()
 
       if (error) throw error
+
+      // Gérer les tags si fournis (tableau de strings)
+      if (tags && Array.isArray(tags)) {
+        // Supprimer toutes les relations existantes
+        await supabase.from('_CompanyToTag').delete().eq('A', id)
+
+        // Créer ou récupérer les tags et créer les relations
+        for (const tagName of tags) {
+          if (!tagName || typeof tagName !== 'string') continue
+
+          // Chercher ou créer le tag
+          let { data: existingTag } = await supabase
+            .from('Tag')
+            .select('id')
+            .eq('name', tagName.trim())
+            .single()
+
+          let tagId: string
+
+          if (!existingTag) {
+            // Créer le tag
+            const slug = tagName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')
+            const { data: newTag, error: createError } = await supabase
+              .from('Tag')
+              .insert({ name: tagName.trim(), slug })
+              .select('id')
+              .single()
+
+            if (createError) {
+              console.error('Erreur création tag:', createError)
+              continue
+            }
+            tagId = newTag.id
+          } else {
+            tagId = existingTag.id
+          }
+
+          // Créer la relation
+          await supabase.from('_CompanyToTag').insert({ A: id, B: tagId })
+        }
+      }
 
       return new Response(
         JSON.stringify(data),
