@@ -10,6 +10,12 @@ type ContactPayload = {
   lastName?: string;
   email?: string;
   phone?: string;
+  mobilePhone?: string;
+  title?: string;
+  jobTitle?: string;
+  industry?: string;
+  linkedinUrl?: string;
+  funnelStep?: string;
   companyId?: string;
 };
 
@@ -50,6 +56,12 @@ export function ContactDetailPage() {
       lastName: data.lastName,
       email: data.email,
       phone: data.phone,
+      mobilePhone: (data as any).mobilePhone,
+      title: (data as any).title,
+      jobTitle: (data as any).jobTitle,
+      industry: (data as any).industry,
+      linkedinUrl: (data as any).linkedinUrl,
+      funnelStep: (data as any).funnelStep,
       companyId: data.company?.id
     });
     setLoading(false);
@@ -115,6 +127,14 @@ export function ContactDetailPage() {
           />
         </div>
         <div>
+          <label className="block text-sm font-medium text-slate-700">Civilité</label>
+          <input
+            value={contact.title ?? ''}
+            onChange={(event) => setContact({ ...contact, title: event.target.value })}
+            className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+          />
+        </div>
+        <div>
           <label className="block text-sm font-medium text-slate-700">Nom</label>
           <input
             value={contact.lastName ?? ''}
@@ -136,6 +156,46 @@ export function ContactDetailPage() {
           <input
             value={contact.phone ?? ''}
             onChange={(event) => setContact({ ...contact, phone: event.target.value })}
+            className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-slate-700">Mobile</label>
+          <input
+            value={contact.mobilePhone ?? ''}
+            onChange={(event) => setContact({ ...contact, mobilePhone: event.target.value })}
+            className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-slate-700">Poste</label>
+          <input
+            value={contact.jobTitle ?? ''}
+            onChange={(event) => setContact({ ...contact, jobTitle: event.target.value })}
+            className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-slate-700">Secteur</label>
+          <input
+            value={contact.industry ?? ''}
+            onChange={(event) => setContact({ ...contact, industry: event.target.value })}
+            className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-slate-700">Profil LinkedIn</label>
+          <input
+            value={contact.linkedinUrl ?? ''}
+            onChange={(event) => setContact({ ...contact, linkedinUrl: event.target.value })}
+            className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-slate-700">Étape funnel</label>
+          <input
+            value={contact.funnelStep ?? ''}
+            onChange={(event) => setContact({ ...contact, funnelStep: event.target.value })}
             className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
           />
         </div>

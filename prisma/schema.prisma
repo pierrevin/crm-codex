@@ -43,6 +43,7 @@ model User {
   activities         Activity[]
   refreshTokens      RefreshToken[]
   auditLogs          AuditLog[]
+  companiesOwned     Company[]       @relation("CompanyOwner")
 }
 
 model RefreshToken {
@@ -58,6 +59,36 @@ model Company {
   id         String     @id @default(cuid())
   name       String
   domain     String?
+  // Axonaut / CRM enrichissements
+  externalRef       String?   @unique
+  isIndividual      Boolean   @default(false)
+  addressStreet     String?
+  addressZip        String?
+  addressCity       String?
+  addressCountry    String?
+  siret             String?   @unique
+  vatNumber         String?
+  iban              String?
+  bic               String?
+  rum               String?
+  sepaMandateActive Boolean?
+  legacyCode        String?
+  locale            String?
+  notes             String?
+  tags              Tag[]
+  statusClient      Boolean   @default(false)
+  statusProspect    Boolean   @default(false)
+  statusSupplier    Boolean   @default(false)
+  owner             User?     @relation("CompanyOwner", fields: [ownerId], references: [id])
+  ownerId           String?
+  linkedinUrl       String?
+  salesNavigatorUrl String?
+  firstInvoiceDate  DateTime?
+  lastInvoiceDate   DateTime?
+  turnoverAllTime   Decimal?  @db.Decimal(18, 2)
+  turnoverThisYear  Decimal?  @db.Decimal(18, 2)
+  lastActivityAt    DateTime?
+  nextActivityAt    DateTime?
   contacts   Contact[]
   opportunities Opportunity[]
   createdAt  DateTime   @default(now())
@@ -70,6 +101,13 @@ model Contact {
   lastName     String?
   email        String?       @unique
   phone        String?
+  mobilePhone  String?
+  title        String?
+  jobTitle     String?
+  industry     String?
+  linkedinUrl  String?
+  funnelStep   String?
+  externalRef  String?       @unique
   company      Company?      @relation(fields: [companyId], references: [id])
   companyId    String?
   owner        User?         @relation(fields: [ownerId], references: [id])
@@ -138,4 +176,11 @@ model ImportJob {
   status    ImportStatus  @default(PENDING)
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
+}
+
+model Tag {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  slug      String?   @unique
+  companies Company[]
 }

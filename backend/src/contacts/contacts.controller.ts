@@ -18,12 +18,14 @@ export class ContactsController {
   @ApiQuery({ name: 'cursor', required: false })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'search', required: false })
+  @ApiQuery({ name: 'companyId', required: false })
   list(
     @Query('search') search?: string,
     @Query('cursor') cursor?: string,
-    @Query('limit') limit = '20'
+    @Query('limit') limit = '1000',
+    @Query('companyId') companyId?: string
   ) {
-    return this.contacts.list(search, cursor, Number(limit));
+    return this.contacts.list(search, cursor, Number(limit), companyId);
   }
 
   @Post()

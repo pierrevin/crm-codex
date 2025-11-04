@@ -34,6 +34,11 @@ export class CompaniesController {
     return this.companies.findOne(id);
   }
 
+  @Post(':id/merge')
+  merge(@Param('id') id: string, @Body() body: { mergeCompanyId: string }) {
+    return this.companies.merge(id, body.mergeCompanyId);
+  }
+
   @Delete(':id')
   delete(@Param('id') id: string) {
     return this.companies.delete(id);

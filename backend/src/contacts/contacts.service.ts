@@ -15,20 +15,23 @@ export class ContactsService {
     private readonly webhooks: WebhooksService
   ) {}
 
-  async list(search: string | undefined, cursor: string | undefined, limit: number) {
+  async list(search: string | undefined, cursor: string | undefined, limit: number, companyId?: string) {
     const contacts = await this.prisma.contact.findMany({
       take: limit,
       skip: cursor ? 1 : 0,
       cursor: cursor ? { id: cursor } : undefined,
-      where: search
-        ? {
-            OR: [
-              { firstName: { contains: search } },
-              { lastName: { contains: search } },
-              { email: { contains: search } }
-            ]
-          }
-        : undefined,
+      where: {
+        ...(search
+          ? {
+              OR: [
+                { firstName: { contains: search } },
+                { lastName: { contains: search } },
+                { email: { contains: search } }
+              ]
+            }
+          : {}),
+        ...(companyId ? { companyId } : {})
+      },
       orderBy: { createdAt: 'desc' },
       include: { company: true }
     });

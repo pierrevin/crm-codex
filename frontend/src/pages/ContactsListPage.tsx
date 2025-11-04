@@ -34,7 +34,8 @@ export function ContactsListPage() {
     const { data } = await api.get<PaginatedResponse<Contact>>('/api/contacts', {
       params: {
         cursor,
-        search: search || undefined
+        search: search || undefined,
+        limit: 1000
       }
     });
     if (cursor) {
