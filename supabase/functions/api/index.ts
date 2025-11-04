@@ -573,14 +573,15 @@ serve(async (req) => {
       }
 
       if (search) {
-        query = query.or(`title.ilike.%${search}%`)
+        // Recherche dans title uniquement côté serveur (Supabase ne supporte pas bien les recherches dans relations avec or)
+        query = query.ilike('title', `%${search}%`)
       }
 
       const { data, error, count } = await query
 
       if (error) throw error
 
-      // Filtrer aussi par company name si search est fourni
+      // Filtrer aussi par company name si search est fourni (filtrage côté client après avoir chargé les relations)
       let filteredData = data || []
       if (search && data) {
         const searchLower = search.toLowerCase()

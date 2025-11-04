@@ -4,6 +4,7 @@ import { PencilIcon, PlusIcon, TrashIcon, ArrowRightIcon } from '@heroicons/reac
 
 import api from '../services/apiClient';
 import { CompanySearchSelect } from '../components/CompanySearchSelect';
+import { recentStorage } from '../services/localStorage';
 
 const STAGES = {
   QUALIFICATION: { label: 'Qualification', color: 'bg-blue-100 text-blue-700' },
@@ -81,6 +82,10 @@ export function CompanyDetailPage() {
     try {
       const companyRes = await api.get(`/api/companies/${companyId}`);
       const companyData = companyRes.data;
+      // Ajouter au localStorage des récents
+      if (companyData.name) {
+        recentStorage.addCompany(companyId, companyData.name);
+      }
       
       // Les contacts et opportunités sont déjà inclus dans companyData via Prisma include
       // Filtre de sécurité strict : s'assurer que seuls les contacts et opportunités avec le bon companyId sont affichés

@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { BuildingOfficeIcon, EnvelopeIcon, PhoneIcon, PlusIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline';
+import { BuildingOfficeIcon, EnvelopeIcon, PhoneIcon, PlusIcon, MagnifyingGlassIcon, ClockIcon } from '@heroicons/react/24/outline';
 
 import api from '../services/apiClient';
+import { recentStorage } from '../services/localStorage';
 
 type Contact = {
   id: string;
@@ -20,15 +21,22 @@ type PaginatedResponse<T> = {
   total?: number;
 };
 
+type SortOption = 'recent' | 'name-asc' | 'name-desc';
+
 export function ContactsListPage() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [search, setSearch] = useState('');
   const [cursor, setCursor] = useState<string | undefined>(undefined);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [total, setTotal] = useState(0);
+  const [sortBy, setSortBy] = useState<SortOption>('recent');
+  const [recentContacts, setRecentContacts] = useState<Array<{ id: string; name: string }>>([]);
 
   useEffect(() => {
     void loadContacts();
+    // Charger les récents
+    const recent = recentStorage.getContacts();
+    setRecentContacts(recent.map(item => ({ id: item.id, name: item.name })));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cursor, search]);
 
@@ -48,6 +56,43 @@ export function ContactsListPage() {
     setTotal(data.total ?? contacts.length);
     setNextCursor(data.nextCursor ?? null);
   };
+
+  // Filtrer et trier les contacts
+  const filteredAndSortedContacts = useMemo(() => {
+    let filtered = contacts;
+    
+    // Trier
+    const sorted = [...filtered];
+    switch (sortBy) {
+      case 'name-asc':
+        sorted.sort((a, b) => {
+          const nameA = `${a.firstName} ${a.lastName || ''}`.trim().toLowerCase();
+          const nameB = `${b.firstName} ${b.lastName || ''}`.trim().toLowerCase();
+          return nameA.localeCompare(nameB);
+        });
+        break;
+      case 'name-desc':
+        sorted.sort((a, b) => {
+          const nameA = `${a.firstName} ${a.lastName || ''}`.trim().toLowerCase();
+          const nameB = `${b.firstName} ${b.lastName || ''}`.trim().toLowerCase();
+          return nameB.localeCompare(nameA);
+        });
+        break;
+      case 'recent':
+      default:
+        // Trier par createdAt (dernière modification) - déjà trié par l'API
+        break;
+    }
+    
+    return sorted;
+  }, [contacts, sortBy]);
+
+  // Récupérer les détails des récents depuis la liste complète
+  const recentContactsDetails = useMemo(() => {
+    return recentContacts
+      .map(recent => contacts.find(c => c.id === recent.id))
+      .filter(Boolean) as Contact[];
+  }, [recentContacts, contacts]);
 
   return (
     <div className="space-y-6">
@@ -94,10 +139,81 @@ export function ContactsListPage() {
         )}
       </div>
 
+      {/* Section Récents */}
+      {recentContactsDetails.length > 0 && !search && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <ClockIcon className="h-5 w-5 text-slate-500" />
+            <h2 className="text-sm font-semibold text-slate-700">Récents</h2>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {recentContactsDetails.map((contact) => (
+              <Link
+                key={contact.id}
+                to={`/contacts/${contact.id}`}
+                className="group rounded-xl border border-slate-200 bg-white p-6 shadow-sm hover:shadow-md hover:border-indigo-300 transition-all duration-200"
+              >
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-base font-semibold text-slate-900 truncate">
+                      {contact.firstName} {contact.lastName || ''}
+                    </h3>
+                    {contact.company && (
+                      <div className="flex items-center gap-1.5 mt-2">
+                        <BuildingOfficeIcon className="h-4 w-4 text-slate-400 flex-shrink-0" />
+                        <span className="text-sm text-slate-600 truncate">{contact.company.name}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
+                <div className="space-y-2">
+                  {contact.email && (
+                    <div className="flex items-center gap-2 text-sm text-slate-600">
+                      <EnvelopeIcon className="h-4 w-4 text-slate-400 flex-shrink-0" />
+                      <span className="truncate">{contact.email}</span>
+                    </div>
+                  )}
+                  {contact.phone && (
+                    <div className="flex items-center gap-2 text-sm text-slate-600">
+                      <PhoneIcon className="h-4 w-4 text-slate-400 flex-shrink-0" />
+                      <span>{contact.phone}</span>
+                    </div>
+                  )}
+                  {!contact.email && !contact.phone && (
+                    <p className="text-xs text-slate-400 italic">Aucune information de contact</p>
+                  )}
+                </div>
+
+                <div className="mt-4 pt-4 border-t border-slate-100">
+                  <span className="text-xs font-medium text-indigo-600 group-hover:text-indigo-700">
+                    Voir les détails →
+                  </span>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Sélecteur de tri */}
+      <div className="flex items-center justify-end gap-2">
+        <label className="text-sm text-slate-600">Trier par:</label>
+        <select
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value as SortOption)}
+          className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+        >
+          <option value="recent">Dernière modification</option>
+          <option value="name-asc">Nom A-Z</option>
+          <option value="name-desc">Nom Z-A</option>
+        </select>
+      </div>
+
       {/* Liste des contacts - Design Cards */}
-      {contacts.length > 0 ? (
+      {filteredAndSortedContacts.length > 0 ? (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {contacts.map((contact) => (
+          {filteredAndSortedContacts.map((contact) => (
             <Link
               key={contact.id}
               to={`/contacts/${contact.id}`}

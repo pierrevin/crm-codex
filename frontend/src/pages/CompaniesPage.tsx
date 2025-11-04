@@ -1,8 +1,9 @@
 import { useEffect, useState, useMemo } from 'react';
-import { PlusIcon, MagnifyingGlassIcon, BuildingOfficeIcon, UserGroupIcon, BriefcaseIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, MagnifyingGlassIcon, BuildingOfficeIcon, UserGroupIcon, BriefcaseIcon, ClockIcon } from '@heroicons/react/24/outline';
 import { Link } from 'react-router-dom';
 
 import api from '../services/apiClient';
+import { recentStorage } from '../services/localStorage';
 
 type Company = {
   id: string;
@@ -14,13 +15,20 @@ type Company = {
   };
 };
 
+type SortOption = 'recent' | 'name-asc' | 'name-desc';
+
 export function CompaniesPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState<SortOption>('recent');
+  const [recentCompanies, setRecentCompanies] = useState<Array<{ id: string; name: string }>>([]);
 
   useEffect(() => {
     void loadCompanies();
+    // Charger les récents
+    const recent = recentStorage.getCompanies();
+    setRecentCompanies(recent.map(item => ({ id: item.id, name: item.name })));
   }, []);
 
   const loadCompanies = async () => {
@@ -33,16 +41,43 @@ export function CompaniesPage() {
     }
   };
 
-  // Filtrer les clients en fonction de la recherche
-  const filteredCompanies = useMemo(() => {
-    if (!searchQuery.trim()) return companies;
+  // Filtrer et trier les clients
+  const filteredAndSortedCompanies = useMemo(() => {
+    let filtered = companies;
     
-    const query = searchQuery.toLowerCase();
-    return companies.filter(company => 
-      company.name.toLowerCase().includes(query) ||
-      company.domain?.toLowerCase().includes(query)
-    );
-  }, [companies, searchQuery]);
+    // Filtrer par recherche
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filtered = companies.filter(company => 
+        company.name.toLowerCase().includes(query) ||
+        company.domain?.toLowerCase().includes(query)
+      );
+    }
+    
+    // Trier
+    const sorted = [...filtered];
+    switch (sortBy) {
+      case 'name-asc':
+        sorted.sort((a, b) => a.name.localeCompare(b.name));
+        break;
+      case 'name-desc':
+        sorted.sort((a, b) => b.name.localeCompare(a.name));
+        break;
+      case 'recent':
+      default:
+        // Trier par createdAt (dernière modification) - déjà trié par l'API
+        break;
+    }
+    
+    return sorted;
+  }, [companies, searchQuery, sortBy]);
+
+  // Récupérer les détails des récents depuis la liste complète
+  const recentCompaniesDetails = useMemo(() => {
+    return recentCompanies
+      .map(recent => companies.find(c => c.id === recent.id))
+      .filter(Boolean) as Company[];
+  }, [recentCompanies, companies]);
 
   return (
     <div className="space-y-6">
@@ -84,17 +119,85 @@ export function CompaniesPage() {
         )}
       </div>
 
-      {/* Résultats */}
-      {searchQuery && (
-        <div className="text-sm text-slate-600 font-medium">
-          {filteredCompanies.length} client{filteredCompanies.length > 1 ? 's' : ''} trouvé{filteredCompanies.length > 1 ? 's' : ''}
+      {/* Section Récents */}
+      {recentCompaniesDetails.length > 0 && !searchQuery && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <ClockIcon className="h-5 w-5 text-slate-500" />
+            <h2 className="text-sm font-semibold text-slate-700">Récents</h2>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {recentCompaniesDetails.map((company) => (
+              <Link
+                key={company.id}
+                to={`/clients/${company.id}`}
+                className="group rounded-xl border border-slate-200 bg-white p-6 shadow-sm hover:shadow-md hover:border-indigo-300 transition-all duration-200"
+              >
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-2">
+                      <BuildingOfficeIcon className="h-5 w-5 text-indigo-600 flex-shrink-0" />
+                      <h3 className="text-base font-semibold text-slate-900 truncate">{company.name}</h3>
+                    </div>
+                    {company.domain && (
+                      <p className="text-sm text-slate-500 truncate">{company.domain}</p>
+                    )}
+                  </div>
+                </div>
+                
+                <div className="flex items-center gap-4 pt-4 border-t border-slate-100">
+                  <div className="flex items-center gap-1.5">
+                    <UserGroupIcon className="h-4 w-4 text-slate-400" />
+                    <span className="text-sm font-medium text-slate-700">
+                      {company._count?.contacts ?? 0}
+                    </span>
+                    <span className="text-xs text-slate-500">contact{(company._count?.contacts ?? 0) > 1 ? 's' : ''}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <BriefcaseIcon className="h-4 w-4 text-slate-400" />
+                    <span className="text-sm font-medium text-slate-700">
+                      {company._count?.opportunities ?? 0}
+                    </span>
+                    <span className="text-xs text-slate-500">opportunité{(company._count?.opportunities ?? 0) > 1 ? 's' : ''}</span>
+                  </div>
+                </div>
+
+                <div className="mt-4 pt-4 border-t border-slate-100">
+                  <span className="text-xs font-medium text-indigo-600 group-hover:text-indigo-700">
+                    Voir les détails →
+                  </span>
+                </div>
+              </Link>
+            ))}
+          </div>
         </div>
       )}
 
+      {/* Sélecteur de tri et résultats */}
+      <div className="flex items-center justify-between gap-4">
+        {searchQuery && (
+          <div className="text-sm text-slate-600 font-medium">
+            {filteredAndSortedCompanies.length} client{filteredAndSortedCompanies.length > 1 ? 's' : ''} trouvé{filteredAndSortedCompanies.length > 1 ? 's' : ''}
+          </div>
+        )}
+        <div className="flex items-center gap-2 ml-auto">
+          <label className="text-sm text-slate-600">Trier par:</label>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as SortOption)}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+          >
+            <option value="recent">Dernière modification</option>
+            <option value="name-asc">Nom A-Z</option>
+            <option value="name-desc">Nom Z-A</option>
+          </select>
+        </div>
+      </div>
+
       {/* Grille de clients - Design Cards */}
-      {filteredCompanies.length > 0 ? (
+      {filteredAndSortedCompanies.length > 0 ? (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {filteredCompanies.map((company) => (
+          {filteredAndSortedCompanies.map((company) => (
             <Link
               key={company.id}
               to={`/clients/${company.id}`}
@@ -137,7 +240,7 @@ export function CompaniesPage() {
             </Link>
           ))}
         </div>
-      ) : companies.length > 0 ? (
+      ) : filteredAndSortedCompanies.length === 0 && companies.length > 0 ? (
         <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
           <p className="text-slate-500 mb-2">Aucun client ne correspond à votre recherche.</p>
           <button

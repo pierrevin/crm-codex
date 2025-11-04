@@ -4,6 +4,7 @@ import { TrashIcon } from '@heroicons/react/24/outline';
 
 import api from '../services/apiClient';
 import { CompanySearchSelect } from '../components/CompanySearchSelect';
+import { recentStorage } from '../services/localStorage';
 
 type ContactPayload = {
   firstName: string;
@@ -51,6 +52,9 @@ export function ContactDetailPage() {
   const loadContact = async (contactId: string) => {
     setLoading(true);
     const { data } = await api.get<ContactResponse>(`/api/contacts/${contactId}`);
+    // Ajouter au localStorage des récents
+    const contactName = `${data.firstName} ${data.lastName || ''}`.trim();
+    recentStorage.addContact(contactId, contactName || data.firstName);
     setContact({
       firstName: data.firstName,
       lastName: data.lastName,
