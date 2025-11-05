@@ -1275,6 +1275,73 @@ serve(async (req) => {
 
       if (error) throw error
 
+      // Créer les dossiers Drive (entreprise + opportunité) si l'opportunité a une entreprise
+      // Le dossier entreprise n'est créé QUE lors de la création d'une opportunité (pas de dossiers vides)
+      if (data?.companyId) {
+        try {
+          const rootId = Deno.env.get('GOOGLE_DRIVE_ROOT_FOLDER_ID') ?? ''
+          if (rootId) {
+            const at = await getValidAccessToken(userId)
+            if (at) {
+              // Récupérer l'entreprise
+              const { data: company } = await supabase.from('Company').select('*').eq('id', data.companyId).single()
+              if (company) {
+                // Créer/assurer le dossier entreprise (s'il n'existe pas déjà)
+                // Vérification initiale
+                let companyFolderId = company.googleDriveFolderId
+                
+                // Si pas de folderId, créer le dossier (avec vérification anti-doublon)
+                if (!companyFolderId) {
+                  const safeCompanyName = sanitizeName(company.name || data.companyId)
+                  
+                  // Chercher d'abord si un dossier existe déjà (au cas où il aurait été créé entre temps)
+                  const found = await findFolderByName(at, safeCompanyName, rootId)
+                  if (found) {
+                    companyFolderId = found.id
+                  } else {
+                    // Créer le dossier seulement s'il n'existe pas
+                    const created = await createFolder(at, safeCompanyName, rootId)
+                    companyFolderId = created.id
+                  }
+                  
+                  // Mettre à jour UNIQUEMENT si l'entreprise n'a toujours pas de folderId (évite les doublons en cas de création simultanée)
+                  // Utiliser une condition WHERE pour éviter les mises à jour inutiles
+                  const { data: updatedCompany } = await supabase
+                    .from('Company')
+                    .update({ googleDriveFolderId: companyFolderId, updatedAt: now })
+                    .eq('id', data.companyId)
+                    .is('googleDriveFolderId', null)
+                    .select('googleDriveFolderId')
+                    .single()
+                  
+                  // Si la mise à jour n'a pas fonctionné (car un autre processus a déjà créé le dossier), récupérer le folderId existant
+                  if (!updatedCompany?.googleDriveFolderId) {
+                    const { data: currentCompany } = await supabase.from('Company').select('googleDriveFolderId').eq('id', data.companyId).single()
+                    if (currentCompany?.googleDriveFolderId) {
+                      companyFolderId = currentCompany.googleDriveFolderId
+                    }
+                  }
+                }
+                
+                // Créer le dossier opportunité
+                const createdAt = new Date(data.createdAt || now)
+                const yyyymmdd = createdAt.toISOString().slice(0, 10).replace(/-/g, '')
+                const titleSane = sanitizeName(data.title || 'Opportunity')
+                const stage = data.stage || 'QUALIFICATION'
+                const oppFolderName = `${yyyymmdd}_${titleSane}_${stage}`
+                
+                const createdOppFolder = await createFolder(at, oppFolderName, companyFolderId)
+                // Mettre à jour l'opportunité avec le folderId
+                await supabase.from('Opportunity').update({ googleDriveFolderId: createdOppFolder.id, updatedAt: now }).eq('id', newId)
+              }
+            }
+          }
+        } catch (driveError) {
+          // Erreur silencieuse - ne pas bloquer la création de l'opportunité
+          console.error('Erreur lors de la création des dossiers Drive:', driveError)
+        }
+      }
+
       return new Response(
         JSON.stringify(data),
         { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

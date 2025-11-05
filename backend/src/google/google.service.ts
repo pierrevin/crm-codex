@@ -120,9 +120,21 @@ export class GoogleService {
   }
 
   async ensureCompanyFolder(company: Company): Promise<{ id: string; url: string }> {
+    // Vérification initiale : si le dossier existe déjà, le retourner
     if (company.googleDriveFolderId) {
       return { id: company.googleDriveFolderId, url: this.buildFolderUrl(company.googleDriveFolderId) };
     }
+    
+    // Re-vérifier dans la DB au cas où un autre processus aurait créé le dossier entre temps
+    const currentCompany = await this.prisma.company.findUnique({
+      where: { id: company.id },
+      select: { googleDriveFolderId: true }
+    });
+    if (currentCompany?.googleDriveFolderId) {
+      return { id: currentCompany.googleDriveFolderId, url: this.buildFolderUrl(currentCompany.googleDriveFolderId) };
+    }
+    
+    // Créer le dossier seulement si vraiment absent
     const drive = await this.getDriveClient();
     const cfg = this.config.get<AppConfig>('app')!;
     const name = `${company.name} - ${company.id}`;
@@ -135,8 +147,24 @@ export class GoogleService {
       fields: 'id'
     });
     const id = data.id as string;
-    await this.prisma.company.update({ where: { id: company.id }, data: { googleDriveFolderId: id } });
-    return { id, url: this.buildFolderUrl(id) };
+    
+    // Mettre à jour UNIQUEMENT si googleDriveFolderId est toujours null (évite les doublons en cas de création simultanée)
+    await this.prisma.company.updateMany({
+      where: { 
+        id: company.id,
+        googleDriveFolderId: null // Mettre à jour seulement si null
+      },
+      data: { googleDriveFolderId: id }
+    });
+    
+    // Re-lire pour obtenir le folderId final (au cas où un autre processus l'aurait créé entre temps)
+    const finalCompany = await this.prisma.company.findUnique({
+      where: { id: company.id },
+      select: { googleDriveFolderId: true }
+    });
+    const finalId = finalCompany?.googleDriveFolderId || id;
+    
+    return { id: finalId, url: this.buildFolderUrl(finalId) };
   }
 
   async ensureOpportunityFolder(company: Company, opportunity: Opportunity): Promise<{ id: string; url: string }> {

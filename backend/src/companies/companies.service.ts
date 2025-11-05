@@ -41,12 +41,7 @@ export class CompaniesService {
     const company = await this.prisma.company.create({ data });
     await this.audit.log('company', company.id, 'created');
     try { await this.webhooks.trigger('company.created', company); } catch {}
-    // Créer/assurer le dossier Drive de la société
-    try {
-      await this.google.ensureCompanyFolder(company as any);
-    } catch (e) {
-      // On n'échoue pas la création CRM si Drive n'est pas disponible
-    }
+    // Note: Le dossier Drive entreprise sera créé lors de la création d'une opportunité (pas de dossiers vides)
     return company;
   }
 
@@ -65,12 +60,7 @@ export class CompaniesService {
     const company = await this.prisma.company.update({ where: { id }, data });
     await this.audit.log('company', id, 'updated');
     try { await this.webhooks.trigger('company.updated', company); } catch {}
-    // S'assurer que le dossier Drive existe
-    try {
-      await this.google.ensureCompanyFolder(company as any);
-    } catch (e) {
-      // silencieux
-    }
+    // Note: Le dossier Drive entreprise sera créé lors de la création d'une opportunité (pas de dossiers vides)
     return company;
   }
 
