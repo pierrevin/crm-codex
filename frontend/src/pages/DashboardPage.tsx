@@ -6,7 +6,8 @@ import {
   BuildingOfficeIcon, 
   BriefcaseIcon,
   ChartBarIcon,
-  ArrowTrendingUpIcon
+  ArrowTrendingUpIcon,
+  CloudIcon
 } from '@heroicons/react/24/outline';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Line, PieChart, Pie, Cell } from 'recharts';
 import api from '../services/apiClient';
@@ -34,6 +35,8 @@ export function DashboardPage() {
     recentOpportunities: [] as any[]
   });
   const [loading, setLoading] = useState(true);
+  const [googleConnected, setGoogleConnected] = useState(false);
+  const [connectingGoogle, setConnectingGoogle] = useState(false);
   
   // États pour la projection CA
   const [projectionPeriod, setProjectionPeriod] = useState<3 | 6 | 12>(6);
@@ -48,6 +51,7 @@ export function DashboardPage() {
     if (google === 'connected') {
       // Afficher un toast de succès (on peut ajouter un système de toast plus tard)
       console.log('Google OAuth: Connexion réussie');
+      setGoogleConnected(true);
       // Nettoyer les paramètres après affichage
       setSearchParams({}, { replace: true });
     } else if (google === 'error') {
@@ -121,6 +125,29 @@ export function DashboardPage() {
     setLoading(false);
   };
 
+  const connectGoogle = async () => {
+    setConnectingGoogle(true);
+    try {
+      // Récupérer l'userId depuis l'API
+      const userRes = await api.get('/api/users/me');
+      const userId = userRes.data.id;
+      
+      // Générer l'URL OAuth
+      const { data } = await api.get('/api/google/auth-url');
+      if (data.url) {
+        // Rediriger vers Google OAuth avec le state (userId)
+        window.location.href = `${data.url}&state=${userId}`;
+      } else {
+        alert('Erreur: Impossible de générer l\'URL OAuth');
+        setConnectingGoogle(false);
+      }
+    } catch (error: any) {
+      console.error('Erreur connexion Google:', error);
+      alert(`Erreur: ${error.response?.data?.message || error.message || 'Erreur inconnue'}`);
+      setConnectingGoogle(false);
+    }
+  };
+
   const conversionRate = stats.totalOpportunities > 0 
     ? ((stats.opportunitiesByStage['CLOSED_WON'] || 0) / stats.totalOpportunities * 100).toFixed(1)
     : 0;
@@ -133,9 +160,27 @@ export function DashboardPage() {
     <div className="space-y-6">
       {/* En-tête avec recherche globale */}
       <div className="space-y-4">
-        <div>
-          <h1 className="text-3xl font-bold text-slate-900">Tableau de bord</h1>
-          <p className="text-slate-500 mt-1">Vue d'ensemble de votre activité commerciale</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-slate-900">Tableau de bord</h1>
+            <p className="text-slate-500 mt-1">Vue d'ensemble de votre activité commerciale</p>
+          </div>
+          {!googleConnected && (
+            <button
+              onClick={connectGoogle}
+              disabled={connectingGoogle}
+              className="flex items-center gap-2 rounded-md bg-white border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <CloudIcon className="h-5 w-5" />
+              {connectingGoogle ? 'Connexion...' : 'Connecter Google Drive'}
+            </button>
+          )}
+          {googleConnected && (
+            <div className="flex items-center gap-2 text-sm text-green-600">
+              <CloudIcon className="h-5 w-5" />
+              <span>Google Drive connecté</span>
+            </div>
+          )}
         </div>
         <div className="flex justify-center">
           <GlobalSearch />
