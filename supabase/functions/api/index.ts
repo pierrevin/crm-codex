@@ -2312,6 +2312,86 @@ serve(async (req) => {
       if (data) {
         // Détecter changement de stage
         if (body.stage && oldOpportunity && oldOpportunity.stage !== body.stage) {
+          // Créer automatiquement un devis brouillon si le stage passe à PROPOSAL
+          if (body.stage === 'PROPOSAL' && oldOpportunity.stage !== 'PROPOSAL') {
+            try {
+              // Vérifier qu'il n'existe pas déjà un devis pour cette opportunité
+              const { data: existingQuotes } = await supabase
+                .from('Quote')
+                .select('id')
+                .eq('opportunityId', id)
+                .limit(1)
+              
+              if (!existingQuotes || existingQuotes.length === 0) {
+                // Récupérer l'opportunité complète pour avoir les infos nécessaires
+                const { data: fullOpportunity } = await supabase
+                  .from('Opportunity')
+                  .select('*, company:Company(id, name)')
+                  .eq('id', id)
+                  .single()
+                
+                if (fullOpportunity) {
+                  const now = new Date().toISOString()
+                  const quoteId = crypto.randomUUID()
+                  
+                  // Calculer la date de validité (30 jours par défaut)
+                  const validityDate = new Date()
+                  validityDate.setDate(validityDate.getDate() + 30)
+                  
+                  // Créer une ligne de devis par défaut basée sur le montant de l'opportunité
+                  const defaultAmount = fullOpportunity.amount || 0
+                  const defaultItem = {
+                    id: crypto.randomUUID(),
+                    label: fullOpportunity.title || 'Prestation',
+                    description: `Devis pour l'opportunité: ${fullOpportunity.title}`,
+                    quantity: '1',
+                    unit: 'forfait',
+                    unitPriceHT: defaultAmount.toString(),
+                    discountAmount: null,
+                    taxRate: '0.2',
+                    vatExemptionReason: null,
+                    totalHT: defaultAmount.toString(),
+                    order: 0,
+                    quoteId: quoteId,
+                    createdAt: now,
+                    updatedAt: now
+                  }
+                  
+                  // Créer le devis
+                  const { error: quoteError } = await supabase
+                    .from('Quote')
+                    .insert({
+                      id: quoteId,
+                      label: `Devis - ${fullOpportunity.title}`,
+                      issueDate: now,
+                      validityEndDate: validityDate.toISOString(),
+                      status: 'DRAFT',
+                      opportunityId: id,
+                      companyId: fullOpportunity.companyId || null,
+                      totalHT: defaultAmount.toString(),
+                      totalTTC: (defaultAmount * 1.2).toString(),
+                      createdAt: now,
+                      updatedAt: now
+                    })
+                  
+                  if (!quoteError) {
+                    // Créer la ligne de devis
+                    await supabase
+                      .from('QuoteItem')
+                      .insert(defaultItem)
+                    
+                    console.log(`[Quote Auto] Devis brouillon créé automatiquement pour opportunité ${id}`)
+                  } else {
+                    console.error('[Quote Auto] Erreur création devis brouillon:', quoteError)
+                  }
+                }
+              }
+            } catch (quoteAutoError) {
+              // Erreur silencieuse - ne pas bloquer la mise à jour de l'opportunité
+              console.error('[Quote Auto] Erreur lors de la création automatique du devis:', quoteAutoError)
+            }
+          }
+          
           triggerWebhooks('opportunity.stage_changed', {
             opportunity: data,
             oldStage: oldOpportunity.stage,

@@ -43,8 +43,77 @@ export function QuoteDetailPage() {
   useEffect(() => {
     if (!isNew && id) {
       void loadQuote(id);
+    } else if (isNew && opportunityId) {
+      // Pré-remplir le formulaire avec les données de l'opportunité
+      void loadOpportunityForPrefill(opportunityId);
+    } else if (isNew && !opportunityId) {
+      // Initialiser avec un devis vide
+      const emptyQuote: Quote = {
+        label: '',
+        issueDate: new Date().toISOString().split('T')[0],
+        status: 'DRAFT',
+        companyId: companyId || undefined,
+        items: [{
+          label: '',
+          quantity: 1,
+          unit: 'heures',
+          unitPriceHT: 0,
+          taxRate: 0.2,
+          order: 0
+        }]
+      };
+      setQuote(emptyQuote);
     }
-  }, [id, isNew]);
+  }, [id, isNew, opportunityId, companyId]);
+
+  const loadOpportunityForPrefill = async (oppId: string) => {
+    try {
+      const { data: opportunity } = await api.get(`/api/opportunities/${oppId}`);
+      
+      // Calculer la date de validité (30 jours par défaut)
+      const validityDate = new Date();
+      validityDate.setDate(validityDate.getDate() + 30);
+      
+      // Créer un devis pré-rempli avec les données de l'opportunité
+      const prefillQuote: Quote = {
+        label: `Devis - ${opportunity.title}`,
+        issueDate: new Date().toISOString().split('T')[0],
+        validityEndDate: validityDate.toISOString().split('T')[0],
+        status: 'DRAFT',
+        opportunityId: oppId,
+        companyId: opportunity.company?.id || opportunity.companyId,
+        items: [{
+          label: opportunity.title || 'Prestation',
+          description: `Devis pour l'opportunité: ${opportunity.title}`,
+          quantity: 1,
+          unit: 'forfait',
+          unitPriceHT: opportunity.amount || 0,
+          taxRate: 0.2,
+          order: 0
+        }]
+      };
+      
+      setQuote(prefillQuote);
+    } catch (err: any) {
+      console.error('Erreur chargement opportunité pour pré-remplissage:', err);
+      // Ne pas bloquer, créer un devis vide
+      setQuote({
+        label: '',
+        issueDate: new Date().toISOString().split('T')[0],
+        status: 'DRAFT',
+        opportunityId: oppId,
+        companyId: companyId || undefined,
+        items: [{
+          label: '',
+          quantity: 1,
+          unit: 'heures',
+          unitPriceHT: 0,
+          taxRate: 0.2,
+          order: 0
+        }]
+      });
+    }
+  };
 
   const loadQuote = async (quoteId: string) => {
     setLoading(true);
