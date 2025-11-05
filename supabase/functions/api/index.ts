@@ -1501,7 +1501,7 @@ serve(async (req) => {
         .from('Opportunity')
         .select('*, contact:Contact(*), company:Company(*)', { count: 'exact' })
         .order('createdAt', { ascending: false })
-        .limit(limit)
+        .limit(Math.max(limit, 100)) // Augmenter la limite pour la recherche afin de pouvoir filtrer par company name
 
       if (companyId) {
         query = query.eq('companyId', companyId)
@@ -1517,6 +1517,7 @@ serve(async (req) => {
       if (error) throw error
 
       // Filtrer aussi par company name si search est fourni (filtrage côté client après avoir chargé les relations)
+      // Cette approche permet de rechercher dans les noms d'entreprises même si Supabase ne le supporte pas directement
       let filteredData = data || []
       if (search && data) {
         const searchLower = search.toLowerCase()
@@ -1524,6 +1525,8 @@ serve(async (req) => {
           opp.title?.toLowerCase().includes(searchLower) ||
           opp.company?.name?.toLowerCase().includes(searchLower)
         )
+        // Limiter après le filtrage
+        filteredData = filteredData.slice(0, limit)
       }
 
       return new Response(

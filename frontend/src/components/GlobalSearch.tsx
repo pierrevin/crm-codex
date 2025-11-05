@@ -52,14 +52,30 @@ export function GlobalSearch() {
 
     try {
       const [companiesRes, contactsRes, opportunitiesRes] = await Promise.all([
-        api.get('/api/companies', { params: { search: searchQuery } }).catch(() => ({ data: [] })),
-        api.get('/api/contacts', { params: { search: searchQuery, limit: 5 } }).catch(() => ({ data: { items: [], data: [] } })),
-        api.get('/api/opportunities', { params: { search: searchQuery, limit: 50 } }).catch(() => ({ data: { items: [], data: [] } }))
+        api.get('/api/companies', { params: { search: searchQuery } }).catch((err) => {
+          console.error('Erreur recherche entreprises:', err);
+          return { data: [] };
+        }),
+        api.get('/api/contacts', { params: { search: searchQuery, limit: 5 } }).catch((err) => {
+          console.error('Erreur recherche contacts:', err);
+          return { data: { items: [], data: [] } };
+        }),
+        api.get('/api/opportunities', { params: { search: searchQuery, limit: 50 } }).catch((err) => {
+          console.error('Erreur recherche opportunités:', err);
+          return { data: { items: [], data: [] } };
+        })
       ]);
 
       const companies = Array.isArray(companiesRes.data) ? companiesRes.data : [];
       const contacts = contactsRes.data.items || contactsRes.data.data || [];
       const opportunities = opportunitiesRes.data.items || opportunitiesRes.data.data || [];
+      
+      console.log('Résultats recherche globale:', {
+        companies: companies.length,
+        contacts: contacts.length,
+        opportunities: opportunities.length,
+        opportunitiesData: opportunities
+      });
 
       // Mapper les résultats
       const filteredCompanies = companies
