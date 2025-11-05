@@ -44,6 +44,7 @@ export function DashboardPage() {
 
   useEffect(() => {
     void loadStats();
+    void checkGoogleConnection();
     
     // Afficher un message si Google OAuth callback
     const google = searchParams.get('google');
@@ -60,6 +61,17 @@ export function DashboardPage() {
       setSearchParams({}, { replace: true });
     }
   }, [searchParams, setSearchParams]);
+
+  const checkGoogleConnection = async () => {
+    try {
+      const { data } = await api.get('/api/google/connected');
+      setGoogleConnected(data.connected === true);
+    } catch (error) {
+      // Si erreur, considérer comme non connecté
+      console.error('Erreur vérification connexion Google:', error);
+      setGoogleConnected(false);
+    }
+  };
 
   const loadStats = async () => {
     try {
@@ -161,11 +173,18 @@ export function DashboardPage() {
       {/* En-tête avec recherche globale */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-slate-900">Tableau de bord</h1>
-            <p className="text-slate-500 mt-1">Vue d'ensemble de votre activité commerciale</p>
+        <div>
+          <h1 className="text-3xl font-bold text-slate-900">Tableau de bord</h1>
+          <p className="text-slate-500 mt-1">Vue d'ensemble de votre activité commerciale</p>
           </div>
-          {!googleConnected && (
+          {googleConnected ? (
+            <div className="flex items-center gap-2 text-sm text-green-600" title="Google Drive connecté">
+              <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+              </svg>
+              <span>Google Drive</span>
+            </div>
+          ) : (
             <button
               onClick={connectGoogle}
               disabled={connectingGoogle}
@@ -174,12 +193,6 @@ export function DashboardPage() {
               <CloudIcon className="h-5 w-5" />
               {connectingGoogle ? 'Connexion...' : 'Connecter Google Drive'}
             </button>
-          )}
-          {googleConnected && (
-            <div className="flex items-center gap-2 text-sm text-green-600">
-              <CloudIcon className="h-5 w-5" />
-              <span>Google Drive connecté</span>
-            </div>
           )}
         </div>
         <div className="flex justify-center">

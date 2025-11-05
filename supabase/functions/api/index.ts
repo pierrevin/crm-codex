@@ -796,6 +796,41 @@ serve(async (req) => {
       }
     }
 
+    // ===== CHECK GOOGLE CONNECTION STATUS (needs auth) =====
+    if (path === 'google/connected' && method === 'GET') {
+      // Extract and verify JWT token
+      const userAuthHeader = req.headers.get('x-user-authorization') || ''
+      if (!userAuthHeader?.startsWith('Bearer ')) {
+        return new Response(
+          JSON.stringify({ connected: false, message: 'Not authenticated' }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      const token = userAuthHeader.substring(7)
+      const payload = await verifyAccessToken(token)
+      if (!payload) {
+        return new Response(
+          JSON.stringify({ connected: false, message: 'Invalid token' }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      const userId = payload.userId
+      
+      // Vérifier si l'utilisateur a un token Google
+      const { data: googleToken } = await supabase
+        .from('GoogleToken')
+        .select('userId')
+        .eq('userId', userId)
+        .single()
+      
+      return new Response(
+        JSON.stringify({ connected: !!googleToken }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     // ===== AUTHENTICATED ROUTES =====
     // Skip auth check for public routes (already handled above)
     const publicRoutes = ['google/callback', 'google/auth-url', 'google/status', 'auth/login', 'auth/google', 'auth/refresh', 'auth/health', 'auth/bootstrap-admin', 'auth/test-login']
