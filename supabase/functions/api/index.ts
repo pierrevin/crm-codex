@@ -1392,18 +1392,6 @@ serve(async (req) => {
       )
     }
 
-    if (path.startsWith('webhooks/') && method === 'DELETE') {
-      const id = path.split('/')[1]
-      const { error } = await supabase
-        .from('Webhook')
-        .delete()
-        .eq('id', id)
-      
-      if (error) throw error
-      
-      return new Response(null, { status: 204, headers: corsHeaders })
-    }
-
     if (path === 'webhooks/events' && method === 'GET') {
       const events = [
         {
@@ -1447,6 +1435,18 @@ serve(async (req) => {
         JSON.stringify(events),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
+    }
+
+    if (path.startsWith('webhooks/') && method === 'DELETE') {
+      const id = path.split('/')[1]
+      const { error } = await supabase
+        .from('Webhook')
+        .delete()
+        .eq('id', id)
+      
+      if (error) throw error
+      
+      return new Response(null, { status: 204, headers: corsHeaders })
     }
 
     // ===== QUOTES ROUTES =====
