@@ -1497,27 +1497,26 @@ serve(async (req) => {
       const companyId = url.searchParams.get('companyId')
       const search = url.searchParams.get('search')
 
+      // Pour la recherche, charger plus de données pour permettre le filtrage par nom d'entreprise
+      const fetchLimit = search ? Math.max(limit * 5, 200) : limit
+
       let query = supabase
         .from('Opportunity')
         .select('*, contact:Contact(*), company:Company(*)', { count: 'exact' })
         .order('createdAt', { ascending: false })
-        .limit(Math.max(limit, 100)) // Augmenter la limite pour la recherche afin de pouvoir filtrer par company name
+        .limit(fetchLimit)
 
       if (companyId) {
         query = query.eq('companyId', companyId)
       }
 
-      if (search) {
-        // Recherche dans title uniquement côté serveur (Supabase ne supporte pas bien les recherches dans relations avec or)
-        query = query.ilike('title', `%${search}%`)
-      }
-
+      // Si recherche, on ne filtre pas immédiatement par titre pour pouvoir aussi chercher dans les noms d'entreprises
+      // On chargera toutes les opportunités et on filtrera ensuite
       const { data, error, count } = await query
 
       if (error) throw error
 
-      // Filtrer aussi par company name si search est fourni (filtrage côté client après avoir chargé les relations)
-      // Cette approche permet de rechercher dans les noms d'entreprises même si Supabase ne le supporte pas directement
+      // Filtrer par titre ET par nom d'entreprise si search est fourni
       let filteredData = data || []
       if (search && data) {
         const searchLower = search.toLowerCase()
