@@ -310,6 +310,57 @@ serve(async (req) => {
     }
 
     // ===== GOOGLE OAUTH (PUBLIC) =====
+    if (path === 'google/status' && method === 'GET') {
+      // Endpoint de diagnostic pour vérifier la configuration OAuth
+      const clientId = Deno.env.get('GOOGLE_CLIENT_ID') ?? ''
+      const clientSecret = Deno.env.get('GOOGLE_CLIENT_SECRET') ?? ''
+      const redirectEnv = Deno.env.get('GOOGLE_REDIRECT_URI')
+      const supabaseUrl = Deno.env.get('SUPABASE_URL') || (() => {
+        const reqUrl = new URL(req.url)
+        return `${reqUrl.protocol}//${reqUrl.host}`
+      })()
+      const defaultCallback = `${supabaseUrl}/functions/v1/api/google/callback`
+      const redirectUri = (redirectEnv && redirectEnv.length > 0) ? redirectEnv : defaultCallback
+      const webAppUrl = Deno.env.get('WEB_APP_URL') || 'https://crm-codex.vercel.app'
+      
+      const status = {
+        configured: {
+          clientId: !!clientId && clientId.length > 0,
+          clientSecret: !!clientSecret && clientSecret.length > 0,
+          redirectUri: !!redirectEnv && redirectEnv.length > 0,
+          webAppUrl: !!Deno.env.get('WEB_APP_URL'),
+        },
+        values: {
+          clientId: clientId ? `${clientId.substring(0, 20)}...` : 'non configuré',
+          redirectUri: redirectUri,
+          redirectUriValid: redirectUri.startsWith('https://'),
+          webAppUrl: webAppUrl,
+        },
+        recommendations: [] as string[]
+      }
+      
+      if (!status.configured.clientId) {
+        status.recommendations.push('GOOGLE_CLIENT_ID manquant dans les secrets Supabase')
+      }
+      if (!status.configured.clientSecret) {
+        status.recommendations.push('GOOGLE_CLIENT_SECRET manquant dans les secrets Supabase')
+      }
+      if (!status.configured.redirectUri) {
+        status.recommendations.push('GOOGLE_REDIRECT_URI non configuré, utilisation de la valeur par défaut')
+      }
+      if (!status.values.redirectUriValid) {
+        status.recommendations.push(`L'URI de redirection doit commencer par "https://". Actuellement: ${redirectUri}`)
+      }
+      if (!status.configured.webAppUrl) {
+        status.recommendations.push('WEB_APP_URL non configuré, utilisation de la valeur par défaut')
+      }
+      
+      return new Response(
+        JSON.stringify(status, null, 2),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     if (path === 'google/auth-url' && method === 'GET') {
       const clientId = Deno.env.get('GOOGLE_CLIENT_ID') ?? ''
       const redirectEnv = Deno.env.get('GOOGLE_REDIRECT_URI')
@@ -334,66 +385,222 @@ serve(async (req) => {
     }
 
     if (path === 'google/callback' && method === 'GET') {
+      // Wrapper global pour capturer toutes les erreurs
+      try {
+        console.log('Google callback called, URL:', req.url)
+        
+        // Helper pour rediriger vers l'app avec un message d'erreur
+        // Utilise une redirection HTTP 302 standard (OAuth best practice)
+        const redirectToApp = (success: boolean, message?: string) => {
+        const webAppUrlRaw = Deno.env.get('WEB_APP_URL')
+        const appUrl = (webAppUrlRaw && webAppUrlRaw !== 'undefined' && webAppUrlRaw.length > 0) 
+          ? webAppUrlRaw 
+          : 'https://crm-codex.vercel.app'
+        const params = new URLSearchParams()
+        if (success) {
+          params.set('google', 'connected')
+        } else {
+          params.set('google', 'error')
+          if (message) params.set('message', encodeURIComponent(message))
+        }
+        // Rediriger vers la page frontend dédiée pour une meilleure UX
+        const redirectUrl = `${appUrl}/auth/google/callback?${params.toString()}`
+        // Valider que l'URL est bien formée
+        try {
+          new URL(redirectUrl)
+          // Redirection HTTP 302 standard (OAuth flow standard)
+          return new Response(null, { 
+            status: 302, 
+            headers: { 
+              ...corsHeaders,
+              'Location': redirectUrl,
+              'Cache-Control': 'no-cache, no-store, must-revalidate',
+              'Pragma': 'no-cache',
+              'Expires': '0'
+            } 
+          })
+        } catch (err) {
+          // Fallback si l'URL est invalide
+          console.error('Invalid redirect URL:', redirectUrl, err)
+          return new Response(
+            JSON.stringify({ error: 'Invalid redirect URL', url: redirectUrl }),
+            { 
+              status: 500, 
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+            }
+          )
+        }
+      }
+
+      // Helper pour retourner une page HTML d'erreur
+      const errorHtml = (title: string, message: string, details?: string) => {
+        const webAppUrlRaw = Deno.env.get('WEB_APP_URL')
+        const appUrl = (webAppUrlRaw && webAppUrlRaw !== 'undefined' && webAppUrlRaw.length > 0) 
+          ? webAppUrlRaw 
+          : 'https://crm-codex.vercel.app'
+        return new Response(
+          `<html><head><meta charset="utf-8"><title>${title}</title></head><body style="font-family: sans-serif; padding: 2rem; max-width: 600px; margin: 0 auto;"><h1>${title}</h1><p>${message}</p>${details ? `<p style="color: #666; font-size: 0.9em;">${details}</p>` : ''}<p><a href="${appUrl}/dashboard">Retour au dashboard</a></p></body></html>`,
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'text/html; charset=utf-8' } }
+        )
+      }
+
       const urlObj = new URL(req.url)
       const code = urlObj.searchParams.get('code')
       const state = urlObj.searchParams.get('state')
-      if (!code) return new Response(JSON.stringify({ message: 'Missing code' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+      const errorParam = urlObj.searchParams.get('error')
+
+      // Si Google renvoie une erreur
+      if (errorParam) {
+        const errorDescription = urlObj.searchParams.get('error_description') || 'Erreur inconnue'
+        console.error('Google OAuth error:', errorParam, errorDescription)
+        return redirectToApp(false, `Erreur Google: ${errorDescription}`)
+      }
+
+      // Vérifier que le code est présent
+      if (!code) {
+        console.error('Missing code in callback')
+        return errorHtml('Code manquant', 'Le code d\'autorisation Google est manquant. Veuillez réessayer la connexion.', 'URL appelée: ' + req.url)
+      }
+
+      // Vérifier que le state (userId) est présent
+      if (!state) {
+        console.error('Missing state (userId) in callback')
+        return errorHtml('Identifiant utilisateur manquant', 'L\'identifiant utilisateur n\'a pas été transmis. Veuillez réessayer la connexion.', 'Le paramètre "state" est requis')
+      }
+
       const clientId = Deno.env.get('GOOGLE_CLIENT_ID') ?? ''
       const clientSecret = Deno.env.get('GOOGLE_CLIENT_SECRET') ?? ''
-      const redirectEnv = Deno.env.get('GOOGLE_REDIRECT_URI')
-      // Construire l'URL de callback depuis l'URL de la requête si SUPABASE_URL n'est pas défini
-      const supabaseUrl = Deno.env.get('SUPABASE_URL') || (() => {
-        const reqUrl = new URL(req.url)
-        return `${reqUrl.protocol}//${reqUrl.host}`
+      
+      if (!clientId || !clientSecret) {
+        console.error('Missing Google credentials')
+        return errorHtml('Configuration manquante', 'Les identifiants Google ne sont pas configurés côté serveur.', 'GOOGLE_CLIENT_ID ou GOOGLE_CLIENT_SECRET manquant')
+      }
+
+      // Construire l'URI de redirection - IMPORTANT: utiliser l'URL exacte que Google a appelée
+      // Google vérifie que l'URI utilisée dans l'échange correspond exactement à celle de la redirection
+      const reqUrlObj = new URL(req.url)
+      // Construire l'URI de callback à partir de l'URL de la requête
+      // Si l'URL est http://host/api/google/callback, on doit normaliser vers https://host/functions/v1/api/google/callback
+      const actualRedirectUri = (() => {
+        // Utiliser l'URI configurée si disponible
+        const redirectEnv = Deno.env.get('GOOGLE_REDIRECT_URI')
+        if (redirectEnv && redirectEnv.length > 0 && redirectEnv.startsWith('https://')) {
+          console.log('Using configured GOOGLE_REDIRECT_URI:', redirectEnv)
+          return redirectEnv
+        }
+        // Sinon, construire depuis l'URL de la requête en normalisant vers HTTPS et /functions/v1/
+        const protocol = 'https://' // Toujours HTTPS pour Google OAuth
+        const host = reqUrlObj.host
+        // Normaliser le path : /api/google/callback -> /functions/v1/api/google/callback
+        let normalizedPath = reqUrlObj.pathname
+        if (normalizedPath.startsWith('/api/')) {
+          normalizedPath = '/functions/v1' + normalizedPath
+        } else if (!normalizedPath.startsWith('/functions/v1/')) {
+          normalizedPath = '/functions/v1' + normalizedPath
+        }
+        const constructed = `${protocol}${host}${normalizedPath}`
+        console.log('Constructed redirect URI from request:', constructed)
+        return constructed
       })()
-      const defaultCallback = `${supabaseUrl}/functions/v1/api/google/callback`
-      const redirectUri = (redirectEnv && redirectEnv.length > 0) ? redirectEnv : defaultCallback
-      const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          code,
-          client_id: clientId,
-          client_secret: clientSecret,
-          redirect_uri: redirectUri,
-          grant_type: 'authorization_code'
+
+      console.log('Exchanging code for token, redirectUri:', actualRedirectUri)
+
+      // Échanger le code contre un token
+      try {
+        const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            code,
+            client_id: clientId,
+            client_secret: clientSecret,
+            redirect_uri: actualRedirectUri,
+            grant_type: 'authorization_code'
+          })
         })
-      })
-      const tokenTxt = await tokenRes.text()
-      if (!tokenRes.ok) return new Response(tokenTxt, { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
-      const tokenJson = JSON.parse(tokenTxt)
-      const userId = state || ''
-      if (!userId) return new Response(JSON.stringify({ message: 'Missing userId (state)' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
-      const now = new Date().toISOString()
-      const expiryDate = tokenJson.expires_in ? new Date(Date.now() + tokenJson.expires_in * 1000).toISOString() : null
-      const { data: existing } = await supabase.from('GoogleToken').select('*').eq('userId', userId).single()
-      if (existing) {
-        await supabase.from('GoogleToken').update({
-          accessToken: tokenJson.access_token,
-          refreshToken: tokenJson.refresh_token ?? existing.refreshToken,
-          scope: tokenJson.scope,
-          tokenType: tokenJson.token_type,
-          expiryDate,
-          updatedAt: now
-        }).eq('userId', userId)
-      } else {
-        await supabase.from('GoogleToken').insert({
-          userId,
-          accessToken: tokenJson.access_token,
-          refreshToken: tokenJson.refresh_token,
-          scope: tokenJson.scope,
-          tokenType: tokenJson.token_type,
-          expiryDate,
-          createdAt: now,
-          updatedAt: now
+        
+        const tokenTxt = await tokenRes.text()
+        
+        if (!tokenRes.ok) {
+          console.error('Token exchange failed:', tokenRes.status, tokenTxt)
+          let errorMsg = 'Échec de l\'échange du code d\'autorisation'
+          try {
+            const errorJson = JSON.parse(tokenTxt)
+            errorMsg = errorJson.error_description || errorJson.error || errorMsg
+            // Vérifier si c'est une erreur de redirect_uri mismatch
+            if (errorJson.error === 'redirect_uri_mismatch') {
+              errorMsg = `URI de redirection incorrecte. Vérifiez que l'URI dans Google Cloud Console correspond exactement à: ${actualRedirectUri}`
+            }
+          } catch {
+            errorMsg = tokenTxt.substring(0, 200)
+          }
+          return redirectToApp(false, errorMsg)
+        }
+
+        const tokenJson = JSON.parse(tokenTxt)
+        
+        if (!tokenJson.access_token) {
+          console.error('No access token in response')
+          return redirectToApp(false, 'Token d\'accès manquant dans la réponse Google')
+        }
+
+        const userId = state
+        const now = new Date().toISOString()
+        const expiryDate = tokenJson.expires_in ? new Date(Date.now() + tokenJson.expires_in * 1000).toISOString() : null
+
+        // Stocker ou mettre à jour le token
+        const { data: existing } = await supabase.from('GoogleToken').select('*').eq('userId', userId).single()
+        
+        if (existing) {
+          const { error: updateError } = await supabase.from('GoogleToken').update({
+            accessToken: tokenJson.access_token,
+            refreshToken: tokenJson.refresh_token ?? existing.refreshToken,
+            scope: tokenJson.scope,
+            tokenType: tokenJson.token_type,
+            expiryDate,
+            updatedAt: now
+          }).eq('userId', userId)
+          
+          if (updateError) {
+            console.error('Error updating token:', updateError)
+            return redirectToApp(false, 'Erreur lors de la mise à jour du token')
+          }
+        } else {
+          const { error: insertError } = await supabase.from('GoogleToken').insert({
+            userId,
+            accessToken: tokenJson.access_token,
+            refreshToken: tokenJson.refresh_token,
+            scope: tokenJson.scope,
+            tokenType: tokenJson.token_type,
+            expiryDate,
+            createdAt: now,
+            updatedAt: now
+          })
+          
+          if (insertError) {
+            console.error('Error inserting token:', insertError)
+            return redirectToApp(false, 'Erreur lors de l\'enregistrement du token')
+          }
+        }
+
+        console.log('Google OAuth successful for userId:', userId)
+        return redirectToApp(true)
+
+      } catch (error) {
+        console.error('Unexpected error in token exchange:', error)
+        return redirectToApp(false, `Erreur inattendue: ${error instanceof Error ? error.message : String(error)}`)
+      }
+      } catch (outerError) {
+        // Catch global pour toutes les erreurs non capturées (erreurs de syntaxe, variables non définies, etc.)
+        console.error('Fatal error in Google callback:', outerError)
+        const webAppUrl = Deno.env.get('WEB_APP_URL') || 'https://crm-codex.vercel.app'
+        const errorMsg = outerError instanceof Error ? outerError.message : String(outerError)
+        const errorHtml = `<html><head><meta charset="utf-8"><title>Erreur fatale</title></head><body style="font-family: sans-serif; padding: 2rem;"><h1>Erreur fatale dans le callback Google</h1><p>${errorMsg}</p><p><a href="${webAppUrl}/dashboard">Retour au dashboard</a></p><pre style="background: #f5f5f5; padding: 1rem; overflow: auto;">${JSON.stringify({ url: req.url, error: errorMsg }, null, 2)}</pre></body></html>`
+        return new Response(errorHtml, { 
+          status: 500, 
+          headers: { ...corsHeaders, 'Content-Type': 'text/html; charset=utf-8' } 
         })
       }
-      // S'assurer que WEB_APP_URL est valide (pas undefined/null/chaîne vide)
-      const webAppUrlRaw = Deno.env.get('WEB_APP_URL')
-      const appUrl = (webAppUrlRaw && webAppUrlRaw !== 'undefined' && webAppUrlRaw.length > 0) 
-        ? webAppUrlRaw 
-        : 'https://crm-codex.vercel.app'
-      return new Response(null, { status: 302, headers: { ...corsHeaders, Location: `${appUrl}/dashboard?google=connected` } })
     }
 
     // ===== AUTHENTICATED ROUTES =====

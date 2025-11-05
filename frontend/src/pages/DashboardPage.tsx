@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { 
   PlusIcon, 
   UserGroupIcon, 
@@ -22,6 +22,7 @@ const STAGES = {
 
 export function DashboardPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [stats, setStats] = useState({
     totalContacts: 0,
     totalCompanies: 0,
@@ -40,7 +41,21 @@ export function DashboardPage() {
 
   useEffect(() => {
     void loadStats();
-  }, []);
+    
+    // Afficher un message si Google OAuth callback
+    const google = searchParams.get('google');
+    const message = searchParams.get('message');
+    if (google === 'connected') {
+      // Afficher un toast de succès (on peut ajouter un système de toast plus tard)
+      console.log('Google OAuth: Connexion réussie');
+      // Nettoyer les paramètres après affichage
+      setSearchParams({}, { replace: true });
+    } else if (google === 'error') {
+      // Afficher un message d'erreur
+      alert(`Erreur Google OAuth: ${message || 'Erreur inconnue'}`);
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   const loadStats = async () => {
     try {

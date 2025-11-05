@@ -8,6 +8,7 @@ import { CompanyDetailPage } from './pages/CompanyDetailPage';
 import { ContactDetailPage } from './pages/ContactDetailPage';
 import { ContactsListPage } from './pages/ContactsListPage';
 import { DashboardPage } from './pages/DashboardPage';
+import { GoogleCallbackPage } from './pages/GoogleCallbackPage';
 import { ImportPage } from './pages/ImportPage';
 import { OpportunitiesPage } from './pages/OpportunitiesPage';
 import { OpportunityDetailPage } from './pages/OpportunityDetailPage';
@@ -27,6 +28,7 @@ function App() {
           <Route path="/clients" element={<CompaniesPage />} />
           <Route path="/clients/:id" element={<CompanyDetailPage />} />
           <Route path="/import" element={<ImportPage />} />
+          <Route path="/auth/google/callback" element={<GoogleCallbackPage />} />
           
           {/* Redirections pour les anciennes URLs */}
           <Route path="/companies" element={<Navigate to="/clients" replace />} />
