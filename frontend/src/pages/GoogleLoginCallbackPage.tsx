@@ -39,14 +39,24 @@ export function GoogleLoginCallbackPage() {
         }
 
         // Appeler l'endpoint d'authentification Google
+        console.log('Appel /api/auth/google avec code:', code?.substring(0, 20) + '...')
         const response = await api.post('/api/auth/google', { code });
+        console.log('Réponse /api/auth/google:', { 
+          hasAccessToken: !!response.data.accessToken, 
+          hasRefreshToken: !!response.data.refreshToken,
+          message: response.data.message 
+        })
         
         if (response.data.accessToken && response.data.refreshToken) {
           // Stocker les tokens dans localStorage
           localStorage.setItem('accessToken', response.data.accessToken);
           localStorage.setItem('refreshToken', response.data.refreshToken);
+          console.log('Tokens stockés dans localStorage, redirection vers /dashboard')
           
-          // Forcer le rechargement pour que AuthGate détecte les nouveaux tokens
+          // Nettoyer l'URL pour retirer les query params
+          window.history.replaceState({}, '', '/dashboard');
+          
+          // Forcer le rechargement complet pour que AuthGate détecte les nouveaux tokens
           window.location.href = '/dashboard';
           return;
         } else {
@@ -59,6 +69,12 @@ export function GoogleLoginCallbackPage() {
         }
       } catch (err: any) {
         console.error('Erreur lors du traitement du callback Google login:', err);
+        console.error('Détails erreur:', {
+          status: err.response?.status,
+          statusText: err.response?.statusText,
+          data: err.response?.data,
+          message: err.message
+        });
         const errorMessage = err.response?.data?.message || err.message || 'Erreur inconnue';
         setError(errorMessage);
         setProcessing(false);
