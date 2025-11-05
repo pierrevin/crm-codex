@@ -321,20 +321,42 @@ serve(async (req) => {
       })()
       const defaultCallback = `${supabaseUrl}/functions/v1/api/google/callback`
       const redirectUri = (redirectEnv && redirectEnv.length > 0) ? redirectEnv : defaultCallback
-      const webAppUrl = Deno.env.get('WEB_APP_URL') || 'https://crm-codex.vercel.app'
+      const webAppUrlRaw = Deno.env.get('WEB_APP_URL')
+      const webAppUrl = webAppUrlRaw || 'https://crm-codex.vercel.app'
+      
+      // Calculer les URIs de redirection utilisées
+      const loginRedirectUri = webAppUrlRaw && 
+        typeof webAppUrlRaw === 'string' && 
+        webAppUrlRaw !== 'undefined' && 
+        webAppUrlRaw !== 'null' &&
+        webAppUrlRaw.length > 0 &&
+        webAppUrlRaw.startsWith('http')
+        ? `${webAppUrlRaw}/auth/google/login`
+        : 'https://crm-codex.vercel.app/auth/google/login'
+      
+      const callbackRedirectUri = webAppUrlRaw && 
+        typeof webAppUrlRaw === 'string' && 
+        webAppUrlRaw !== 'undefined' && 
+        webAppUrlRaw !== 'null' &&
+        webAppUrlRaw.length > 0 &&
+        webAppUrlRaw.startsWith('http')
+        ? `${webAppUrlRaw}/auth/google/callback`
+        : 'https://crm-codex.vercel.app/auth/google/callback'
       
       const status = {
         configured: {
           clientId: !!clientId && clientId.length > 0,
           clientSecret: !!clientSecret && clientSecret.length > 0,
           redirectUri: !!redirectEnv && redirectEnv.length > 0,
-          webAppUrl: !!Deno.env.get('WEB_APP_URL'),
+          webAppUrl: !!webAppUrlRaw,
         },
         values: {
           clientId: clientId ? `${clientId.substring(0, 20)}...` : 'non configuré',
           redirectUri: redirectUri,
           redirectUriValid: redirectUri.startsWith('https://'),
           webAppUrl: webAppUrl,
+          loginRedirectUri: loginRedirectUri,
+          callbackRedirectUri: callbackRedirectUri,
         },
         recommendations: [] as string[]
       }
@@ -354,6 +376,12 @@ serve(async (req) => {
       if (!status.configured.webAppUrl) {
         status.recommendations.push('WEB_APP_URL non configuré, utilisation de la valeur par défaut')
       }
+      
+      // Recommandations spécifiques pour les URIs de redirection
+      status.recommendations.push(`⚠️ IMPORTANT: Ajoutez ces URIs EXACTES dans Google Cloud Console (OAuth 2.0 Client IDs → Authorized redirect URIs):`)
+      status.recommendations.push(`  1. ${loginRedirectUri}`)
+      status.recommendations.push(`  2. ${callbackRedirectUri}`)
+      status.recommendations.push(`  (Vérifiez qu'il n'y a PAS de trailing slash et que c'est exactement HTTPS)`)
       
       return new Response(
         JSON.stringify(status, null, 2),
@@ -396,14 +424,21 @@ serve(async (req) => {
       }
       
       console.log('Using frontend redirect URI:', redirectUri, 'isLogin:', isLogin)
+      console.log('WEB_APP_URL from env:', webAppUrlRaw)
       
       // Valider que l'URI est valide
       if (!redirectUri || !redirectUri.startsWith('https://')) {
         return new Response(
-          JSON.stringify({ error: 'Invalid redirect URI configuration', redirectUri }),
+          JSON.stringify({ error: 'Invalid redirect URI configuration', redirectUri, webAppUrl: webAppUrlRaw }),
           { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
+      
+      // Log l'URI exacte qui sera utilisée (pour debug)
+      console.log('Final redirect URI:', redirectUri)
+      console.log('URI length:', redirectUri.length)
+      console.log('URI ends with /auth/google/login:', redirectUri.endsWith('/auth/google/login'))
+      console.log('URI ends with /auth/google/callback:', redirectUri.endsWith('/auth/google/callback'))
       
       // Scopes différents selon le contexte
       const scopes = isLogin 
