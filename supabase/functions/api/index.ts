@@ -1288,18 +1288,30 @@ serve(async (req) => {
           console.log('userId:', userId)
           
           if (!rootId) {
-            console.error('GOOGLE_DRIVE_ROOT_FOLDER_ID non configuré dans les secrets Supabase')
+            console.error('❌ GOOGLE_DRIVE_ROOT_FOLDER_ID non configuré dans les secrets Supabase')
             // Ne pas bloquer la création de l'opportunité, juste logger l'erreur
           } else {
-            const at = await getValidAccessToken(userId)
-            console.log('Token Google valide:', !!at, at ? `${at.substring(0, 20)}...` : 'MANQUANT')
+            console.log('✅ rootId trouvé, récupération du token Google...')
+            let at: string | null = null
+            try {
+              at = await getValidAccessToken(userId)
+              console.log('Token Google récupéré:', !!at, at ? `${at.substring(0, 20)}...` : 'MANQUANT')
+            } catch (tokenError) {
+              console.error('❌ Erreur lors de la récupération du token Google:', tokenError)
+              console.error('Stack:', tokenError instanceof Error ? tokenError.stack : 'N/A')
+            }
             
             if (!at) {
-              console.error('Token Google manquant ou invalide pour userId:', userId)
+              console.error('❌ Token Google manquant ou invalide pour userId:', userId)
               // Ne pas bloquer la création de l'opportunité, juste logger l'erreur
             } else {
+              console.log('✅ Token Google valide, récupération de l\'entreprise...')
               // Récupérer l'entreprise
-              const { data: company } = await supabase.from('Company').select('*').eq('id', data.companyId).single()
+              const { data: company, error: companyError } = await supabase.from('Company').select('*').eq('id', data.companyId).single()
+              if (companyError) {
+                console.error('❌ Erreur récupération entreprise:', companyError)
+              }
+              console.log('Entreprise récupérée:', !!company, company ? company.name : 'NON TROUVÉE')
               if (company) {
                 // Créer/assurer le dossier entreprise (s'il n'existe pas déjà)
                 // Vérification initiale
