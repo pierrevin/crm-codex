@@ -17,6 +17,11 @@ import { OpportunityDetailPage } from './pages/OpportunityDetailPage';
 function App() {
   return (
     <Routes>
+      {/* Routes publiques (pas besoin d'authentification) */}
+      <Route path="/auth/google/callback" element={<GoogleCallbackPage />} />
+      <Route path="/auth/google/login" element={<GoogleLoginCallbackPage />} />
+      
+      {/* Routes protégées (nécessitent une authentification) */}
       <Route element={<AuthGate />}>
         <Route element={<AppLayout />}>
           <Route index element={<DashboardPage />} />
@@ -29,8 +34,6 @@ function App() {
           <Route path="/clients" element={<CompaniesPage />} />
           <Route path="/clients/:id" element={<CompanyDetailPage />} />
           <Route path="/import" element={<ImportPage />} />
-          <Route path="/auth/google/callback" element={<GoogleCallbackPage />} />
-          <Route path="/auth/google/login" element={<GoogleLoginCallbackPage />} />
           
           {/* Redirections pour les anciennes URLs */}
           <Route path="/companies" element={<Navigate to="/clients" replace />} />
