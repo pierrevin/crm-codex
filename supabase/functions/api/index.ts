@@ -1280,9 +1280,22 @@ serve(async (req) => {
       if (data?.companyId) {
         try {
           const rootId = Deno.env.get('GOOGLE_DRIVE_ROOT_FOLDER_ID') ?? ''
-          if (rootId) {
+          console.log('=== Création dossiers Drive ===')
+          console.log('rootId configuré:', !!rootId, rootId ? `${rootId.substring(0, 10)}...` : 'MANQUANT')
+          console.log('companyId:', data.companyId)
+          console.log('opportunityId:', newId)
+          
+          if (!rootId) {
+            console.error('GOOGLE_DRIVE_ROOT_FOLDER_ID non configuré dans les secrets Supabase')
+            // Ne pas bloquer la création de l'opportunité, juste logger l'erreur
+          } else {
             const at = await getValidAccessToken(userId)
-            if (at) {
+            console.log('Token Google valide:', !!at, at ? `${at.substring(0, 20)}...` : 'MANQUANT')
+            
+            if (!at) {
+              console.error('Token Google manquant ou invalide pour userId:', userId)
+              // Ne pas bloquer la création de l'opportunité, juste logger l'erreur
+            } else {
               // Récupérer l'entreprise
               const { data: company } = await supabase.from('Company').select('*').eq('id', data.companyId).single()
               if (company) {
@@ -1337,23 +1350,30 @@ serve(async (req) => {
                 const stage = data.stage || 'QUALIFICATION'
                 const oppFolderName = `${yyyymmdd}_${titleSane}_${stage}`
                 
+                console.log('Création dossier opportunité:', oppFolderName, 'dans companyFolderId:', companyFolderId)
                 const createdOppFolder = await createFolder(at, oppFolderName, companyFolderId)
-                console.log('Dossier opportunité créé:', createdOppFolder.id, 'pour opportunité:', newId)
+                console.log('✅ Dossier opportunité créé dans Drive:', createdOppFolder.id, 'pour opportunité:', newId)
                 
                 // Mettre à jour l'opportunité avec le folderId
-                const { error: updateOppError } = await supabase
+                const { error: updateOppError, data: updatedOpp } = await supabase
                   .from('Opportunity')
                   .update({ googleDriveFolderId: createdOppFolder.id, updatedAt: now })
                   .eq('id', newId)
+                  .select('googleDriveFolderId')
+                  .single()
                 
                 if (updateOppError) {
-                  console.error('Erreur mise à jour googleDriveFolderId opportunité:', updateOppError)
+                  console.error('❌ Erreur mise à jour googleDriveFolderId opportunité:', updateOppError)
+                  console.error('Détails erreur:', JSON.stringify(updateOppError, null, 2))
                 } else {
-                  console.log('googleDriveFolderId sauvegardé pour opportunité:', newId, '=', createdOppFolder.id)
+                  console.log('✅ googleDriveFolderId sauvegardé pour opportunité:', newId, '=', createdOppFolder.id)
+                  console.log('Vérification en base:', updatedOpp?.googleDriveFolderId === createdOppFolder.id ? 'OK' : 'ERREUR')
                 }
                 
                 // Mettre à jour l'objet data pour inclure le googleDriveFolderId dans la réponse
                 data.googleDriveFolderId = createdOppFolder.id
+              } else {
+                console.warn('Entreprise non trouvée pour companyId:', data.companyId)
               }
             }
           }
