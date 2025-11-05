@@ -2348,7 +2348,7 @@ serve(async (req) => {
                     unit: 'forfait',
                     unitPriceHT: defaultAmount.toString(),
                     discountAmount: null,
-                    taxRate: '0.2',
+                    taxRate: '0',
                     vatExemptionReason: null,
                     totalHT: defaultAmount.toString(),
                     order: 0,
@@ -2369,7 +2369,7 @@ serve(async (req) => {
                       opportunityId: id,
                       companyId: fullOpportunity.companyId || null,
                       totalHT: defaultAmount.toString(),
-                      totalTTC: (defaultAmount * 1.2).toString(),
+                      totalTTC: defaultAmount.toString(),
                       createdAt: now,
                       updatedAt: now
                     })

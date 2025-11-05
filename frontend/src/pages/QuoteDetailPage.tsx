@@ -58,7 +58,7 @@ export function QuoteDetailPage() {
           quantity: 1,
           unit: 'heures',
           unitPriceHT: 0,
-          taxRate: 0.2,
+          taxRate: 0,
           order: 0
         }]
       };
@@ -88,7 +88,7 @@ export function QuoteDetailPage() {
           quantity: 1,
           unit: 'forfait',
           unitPriceHT: opportunity.amount || 0,
-          taxRate: 0.2,
+          taxRate: 0,
           order: 0
         }]
       };
@@ -108,7 +108,7 @@ export function QuoteDetailPage() {
           quantity: 1,
           unit: 'heures',
           unitPriceHT: 0,
-          taxRate: 0.2,
+          taxRate: 0,
           order: 0
         }]
       });
