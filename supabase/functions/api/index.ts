@@ -1277,6 +1277,7 @@ serve(async (req) => {
 
       // Créer les dossiers Drive (entreprise + opportunité) si l'opportunité a une entreprise
       // Le dossier entreprise n'est créé QUE lors de la création d'une opportunité (pas de dossiers vides)
+      console.log('Vérification création dossiers Drive:', { hasCompanyId: !!data?.companyId, companyId: data?.companyId, opportunityId: newId })
       if (data?.companyId) {
         try {
           const rootId = Deno.env.get('GOOGLE_DRIVE_ROOT_FOLDER_ID') ?? ''
@@ -1284,6 +1285,7 @@ serve(async (req) => {
           console.log('rootId configuré:', !!rootId, rootId ? `${rootId.substring(0, 10)}...` : 'MANQUANT')
           console.log('companyId:', data.companyId)
           console.log('opportunityId:', newId)
+          console.log('userId:', userId)
           
           if (!rootId) {
             console.error('GOOGLE_DRIVE_ROOT_FOLDER_ID non configuré dans les secrets Supabase')
