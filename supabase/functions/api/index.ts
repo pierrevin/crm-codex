@@ -309,6 +309,93 @@ serve(async (req) => {
       )
     }
 
+    // ===== GOOGLE OAUTH (PUBLIC) =====
+    if (path === 'google/auth-url' && method === 'GET') {
+      const clientId = Deno.env.get('GOOGLE_CLIENT_ID') ?? ''
+      const redirectEnv = Deno.env.get('GOOGLE_REDIRECT_URI')
+      // Construire l'URL de callback depuis l'URL de la requête si SUPABASE_URL n'est pas défini
+      const supabaseUrl = Deno.env.get('SUPABASE_URL') || (() => {
+        const reqUrl = new URL(req.url)
+        return `${reqUrl.protocol}//${reqUrl.host}`
+      })()
+      const defaultCallback = `${supabaseUrl}/functions/v1/api/google/callback`
+      const redirectUri = (redirectEnv && redirectEnv.length > 0) ? redirectEnv : defaultCallback
+      const scopes = [ 'https://www.googleapis.com/auth/drive' ]
+      const u = new URL('https://accounts.google.com/o/oauth2/v2/auth')
+      u.searchParams.set('client_id', clientId)
+      u.searchParams.set('redirect_uri', redirectUri)
+      u.searchParams.set('response_type', 'code')
+      u.searchParams.set('access_type', 'offline')
+      u.searchParams.set('prompt', 'consent')
+      u.searchParams.set('scope', scopes.join(' '))
+      const state = new URL(req.url).searchParams.get('state') ?? ''
+      if (state) u.searchParams.set('state', state)
+      return new Response(JSON.stringify({ url: u.toString() }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+    }
+
+    if (path === 'google/callback' && method === 'GET') {
+      const urlObj = new URL(req.url)
+      const code = urlObj.searchParams.get('code')
+      const state = urlObj.searchParams.get('state')
+      if (!code) return new Response(JSON.stringify({ message: 'Missing code' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+      const clientId = Deno.env.get('GOOGLE_CLIENT_ID') ?? ''
+      const clientSecret = Deno.env.get('GOOGLE_CLIENT_SECRET') ?? ''
+      const redirectEnv = Deno.env.get('GOOGLE_REDIRECT_URI')
+      // Construire l'URL de callback depuis l'URL de la requête si SUPABASE_URL n'est pas défini
+      const supabaseUrl = Deno.env.get('SUPABASE_URL') || (() => {
+        const reqUrl = new URL(req.url)
+        return `${reqUrl.protocol}//${reqUrl.host}`
+      })()
+      const defaultCallback = `${supabaseUrl}/functions/v1/api/google/callback`
+      const redirectUri = (redirectEnv && redirectEnv.length > 0) ? redirectEnv : defaultCallback
+      const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          code,
+          client_id: clientId,
+          client_secret: clientSecret,
+          redirect_uri: redirectUri,
+          grant_type: 'authorization_code'
+        })
+      })
+      const tokenTxt = await tokenRes.text()
+      if (!tokenRes.ok) return new Response(tokenTxt, { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+      const tokenJson = JSON.parse(tokenTxt)
+      const userId = state || ''
+      if (!userId) return new Response(JSON.stringify({ message: 'Missing userId (state)' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+      const now = new Date().toISOString()
+      const expiryDate = tokenJson.expires_in ? new Date(Date.now() + tokenJson.expires_in * 1000).toISOString() : null
+      const { data: existing } = await supabase.from('GoogleToken').select('*').eq('userId', userId).single()
+      if (existing) {
+        await supabase.from('GoogleToken').update({
+          accessToken: tokenJson.access_token,
+          refreshToken: tokenJson.refresh_token ?? existing.refreshToken,
+          scope: tokenJson.scope,
+          tokenType: tokenJson.token_type,
+          expiryDate,
+          updatedAt: now
+        }).eq('userId', userId)
+      } else {
+        await supabase.from('GoogleToken').insert({
+          userId,
+          accessToken: tokenJson.access_token,
+          refreshToken: tokenJson.refresh_token,
+          scope: tokenJson.scope,
+          tokenType: tokenJson.token_type,
+          expiryDate,
+          createdAt: now,
+          updatedAt: now
+        })
+      }
+      // S'assurer que WEB_APP_URL est valide (pas undefined/null/chaîne vide)
+      const webAppUrlRaw = Deno.env.get('WEB_APP_URL')
+      const appUrl = (webAppUrlRaw && webAppUrlRaw !== 'undefined' && webAppUrlRaw.length > 0) 
+        ? webAppUrlRaw 
+        : 'https://crm-codex.vercel.app'
+      return new Response(null, { status: 302, headers: { ...corsHeaders, Location: `${appUrl}/dashboard?google=connected` } })
+    }
+
     // ===== AUTHENTICATED ROUTES =====
     // Extract and verify JWT token
     // IMPORTANT: Supabase Edge Functions require 'apikey' header for platform auth
@@ -332,6 +419,136 @@ serve(async (req) => {
 
     const userId = payload.userId
 
+    // ==== Helpers Google Drive ====
+    async function getGoogleTokenRecord(uid: string) {
+      const { data } = await supabase.from('GoogleToken').select('*').eq('userId', uid).single()
+      return data as any | null
+    }
+
+    async function refreshAccessToken(refreshToken: string) {
+      const clientId = Deno.env.get('GOOGLE_CLIENT_ID') ?? ''
+      const clientSecret = Deno.env.get('GOOGLE_CLIENT_SECRET') ?? ''
+      const res = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: clientId,
+          client_secret: clientSecret,
+          refresh_token: refreshToken,
+          grant_type: 'refresh_token'
+        })
+      })
+      if (!res.ok) return null
+      const json = await res.json()
+      return json as any
+    }
+
+    function sanitizeName(name: string) {
+      return (name || 'untitled').replace(/[^a-zA-Z0-9 _-]+/g, '_').substring(0, 200)
+    }
+
+    async function getValidAccessToken(uid: string) {
+      const rec = await getGoogleTokenRecord(uid)
+      if (!rec) return null
+      if (rec.expiryDate && new Date(rec.expiryDate) > new Date(Date.now() + 60000)) {
+        return rec.accessToken as string
+      }
+      if (!rec.refreshToken) return rec.accessToken as string
+      const refreshed = await refreshAccessToken(rec.refreshToken as string)
+      if (refreshed?.access_token) {
+        const expiryDate = refreshed.expires_in ? new Date(Date.now() + refreshed.expires_in * 1000).toISOString() : rec.expiryDate
+        await supabase.from('GoogleToken').update({ accessToken: refreshed.access_token, expiryDate, updatedAt: new Date().toISOString() }).eq('userId', uid)
+        return refreshed.access_token as string
+      }
+      return rec.accessToken as string
+    }
+
+    async function findFolderByName(accessToken: string, name: string, parentId?: string) {
+      const q = parentId ? `name = '${name.replace(/'/g, "\\'")}' and mimeType = 'application/vnd.google-apps.folder' and '${parentId}' in parents and trashed = false` : `name = '${name.replace(/'/g, "\\'")}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`
+      const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      })
+      const json = await res.json()
+      return (json.files && json.files[0]) || null
+    }
+
+    async function createFolder(accessToken: string, name: string, parentId?: string) {
+      const body: any = { name, mimeType: 'application/vnd.google-apps.folder' }
+      if (parentId) body.parents = [parentId]
+      const res = await fetch('https://www.googleapis.com/drive/v3/files', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      })
+      if (!res.ok) throw new Error('Failed to create folder')
+      return await res.json()
+    }
+
+    async function renameFile(accessToken: string, fileId: string, newName: string) {
+      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newName })
+      })
+      if (!res.ok) throw new Error('Failed to rename file')
+      return await res.json()
+    }
+
+    // ===== DRIVE ROUTES =====
+    if (path === 'drive/ensure-company' && method === 'POST') {
+      const { companyId, companyName } = await req.json()
+      const rootId = Deno.env.get('GOOGLE_DRIVE_ROOT_FOLDER_ID') ?? ''
+      if (!rootId) return new Response(JSON.stringify({ message: 'Missing GOOGLE_DRIVE_ROOT_FOLDER_ID' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+      const at = await getValidAccessToken(userId)
+      if (!at) return new Response(JSON.stringify({ message: 'Missing Google token. Connectez Google.' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+      const { data: company } = await supabase.from('Company').select('*').eq('id', companyId).single()
+      const safeName = sanitizeName(companyName || company?.name || companyId)
+      let folderId = company?.googleDriveFolderId
+      if (!folderId) {
+        const found = await findFolderByName(at, safeName, rootId)
+        if (found) {
+          folderId = found.id
+        } else {
+          const created = await createFolder(at, safeName, rootId)
+          folderId = created.id
+        }
+        await supabase.from('Company').update({ googleDriveFolderId: folderId, updatedAt: new Date().toISOString() }).eq('id', companyId)
+      }
+      return new Response(JSON.stringify({ folderId }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+    }
+
+    if (path === 'drive/ensure-opportunity' && method === 'POST') {
+      const { companyId, opportunityId, opportunityTitle } = await req.json()
+      const at = await getValidAccessToken(userId)
+      if (!at) return new Response(JSON.stringify({ message: 'Missing Google token. Connectez Google.' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+      const { data: company } = await supabase.from('Company').select('id, name, googleDriveFolderId').eq('id', companyId).single()
+      if (!company?.googleDriveFolderId) return new Response(JSON.stringify({ message: 'Company folder missing. Call ensure-company first.' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+      const { data: opp } = await supabase.from('Opportunity').select('*').eq('id', opportunityId).single()
+      let oppFolderId = opp?.googleDriveFolderId
+      const safeName = sanitizeName(opportunityTitle || opp?.title || opportunityId)
+      if (!oppFolderId) {
+        const found = await findFolderByName(at, safeName, company.googleDriveFolderId)
+        if (found) {
+          oppFolderId = found.id
+        } else {
+          const created = await createFolder(at, safeName, company.googleDriveFolderId)
+          oppFolderId = created.id
+        }
+        await supabase.from('Opportunity').update({ googleDriveFolderId: oppFolderId, updatedAt: new Date().toISOString() }).eq('id', opportunityId)
+      }
+      return new Response(JSON.stringify({ folderId: oppFolderId }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+    }
+
+    if (path === 'drive/rename-opportunity' && method === 'POST') {
+      const { opportunityId, newName } = await req.json()
+      const at = await getValidAccessToken(userId)
+      if (!at) return new Response(JSON.stringify({ message: 'Missing Google token. Connectez Google.' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+      const { data: opp } = await supabase.from('Opportunity').select('id, googleDriveFolderId').eq('id', opportunityId).single()
+      if (!opp?.googleDriveFolderId) return new Response(JSON.stringify({ message: 'Opportunity folder missing' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+      const safe = sanitizeName(newName || '')
+      await renameFile(at, opp.googleDriveFolderId, safe)
+      return new Response(JSON.stringify({ status: 'ok' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+    }
     // ===== USER ROUTES =====
     if (path === 'users/me' && method === 'GET') {
       const { data: user } = await supabase
