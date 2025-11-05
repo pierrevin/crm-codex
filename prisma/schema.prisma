@@ -31,6 +31,14 @@ enum ImportStatus {
   FAILED
 }
 
+enum QuoteStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
 model User {
   id                 String          @id @default(cuid())
   email              String          @unique
@@ -97,6 +105,7 @@ model Company {
   nextActivityAt    DateTime?
   contacts   Contact[]
   opportunities Opportunity[]
+  quotes     Quote[]
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt
 }
@@ -137,6 +146,7 @@ model Opportunity {
   owner       User?            @relation("OpportunityOwner", fields: [ownerId], references: [id])
   ownerId     String?
   activities  Activity[]
+  quotes      Quote[]
   // Intégrations externes
   googleDriveFolderId String?
   tiimeQuoteId        String?
@@ -195,4 +205,46 @@ model Tag {
   name      String    @unique
   slug      String?   @unique
   companies Company[]
+}
+
+model Quote {
+  id                String        @id @default(cuid())
+  label             String        // Libellé du devis
+  quoteNumber       String?       // Numéro de devis (auto-généré ou manuel)
+  issueDate         DateTime      // Date d'émission
+  validityEndDate   DateTime?     // Date de fin de validité
+  freeField         String?       // Champ libre
+  status            QuoteStatus   @default(DRAFT)
+  totalHT           Decimal?      @db.Decimal(18, 2)
+  totalTTC          Decimal?      @db.Decimal(18, 2)
+  // Relations
+  opportunity       Opportunity?  @relation(fields: [opportunityId], references: [id])
+  opportunityId     String?
+  company           Company?      @relation(fields: [companyId], references: [id])
+  companyId         String?       // Peut être lié directement à l'entreprise
+  // Intégrations externes
+  tiimeQuoteId      String?       // ID du devis dans Tiime (si créé via Make)
+  quoteUrl          String?       // URL du devis (PDF, etc.)
+  items             QuoteItem[]
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+}
+
+model QuoteItem {
+  id                String   @id @default(cuid())
+  label             String   // Libellé de la ligne
+  description       String?  // Description détaillée
+  quantity          Decimal  @db.Decimal(18, 2)
+  unit              String   // Unité (heures, unités, jours, etc.)
+  unitPriceHT       Decimal  @db.Decimal(18, 2) // Prix unitaire HT
+  discountAmount    Decimal? @db.Decimal(18, 2) // Montant de remise
+  taxRate           Decimal  @db.Decimal(5, 4) // Taux TVA (0.2 pour 20%, 0.1 pour 10%, etc.)
+  vatExemptionReason String? // Motif d'exonération TVA
+  totalHT           Decimal  @db.Decimal(18, 2) // Total HT de la ligne (calculé)
+  order             Int      // Ordre d'affichage
+  // Relations
+  quote             Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  quoteId           String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 }

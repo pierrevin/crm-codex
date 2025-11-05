@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { TrashIcon } from '@heroicons/react/24/outline';
+import { TrashIcon, PlusIcon } from '@heroicons/react/24/outline';
 
 import api from '../services/apiClient';
 import { CompanySearchSelect } from '../components/CompanySearchSelect';
@@ -46,14 +46,26 @@ export function OpportunityDetailPage() {
   const [driveFolderId, setDriveFolderId] = useState<string | undefined>(undefined);
   const [quoteUrl, setQuoteUrl] = useState<string | undefined>(undefined);
   const [invoiceUrls, setInvoiceUrls] = useState<string[]>([]);
+  const [quotes, setQuotes] = useState<any[]>([]);
 
   useEffect(() => {
     void loadContacts();
     void loadCompanies();
     if (!isNew && id) {
       void loadOpportunity(id);
+      void loadQuotes(id);
     }
   }, [id, isNew]);
+
+  const loadQuotes = async (opportunityId: string) => {
+    try {
+      const { data } = await api.get('/api/quotes', { params: { opportunityId } });
+      setQuotes(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error('Erreur chargement devis:', error);
+      setQuotes([]);
+    }
+  };
 
   const loadContacts = async () => {
     try {
@@ -76,15 +88,15 @@ export function OpportunityDetailPage() {
   const loadOpportunity = async (opportunityId: string) => {
     setLoading(true);
     try {
-      const { data } = await api.get<OpportunityResponse>(`/api/opportunities/${opportunityId}`);
-      setOpportunity({
-        title: data.title,
-        stage: data.stage,
-        amount: data.amount,
-        closeDate: data.closeDate,
-        contactId: data.contact?.id,
-        companyId: data.company?.id
-      });
+    const { data } = await api.get<OpportunityResponse>(`/api/opportunities/${opportunityId}`);
+    setOpportunity({
+      title: data.title,
+      stage: data.stage,
+      amount: data.amount,
+      closeDate: data.closeDate,
+      contactId: data.contact?.id,
+      companyId: data.company?.id
+    });
       setDriveFolderId(data.googleDriveFolderId);
       setQuoteUrl(data.quoteUrl);
       setInvoiceUrls(data.invoiceUrls || []);
@@ -201,6 +213,57 @@ export function OpportunityDetailPage() {
           </div>
         </div>
       )}
+
+      {/* Section Devis */}
+      {!isNew && id && (
+        <div className="mb-6 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-lg font-semibold text-slate-900">Devis</h2>
+            <button
+              type="button"
+              onClick={() => navigate(`/quotes/new?opportunityId=${id}`)}
+              className="flex items-center gap-2 px-3 py-1.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition text-sm"
+            >
+              <PlusIcon className="w-4 h-4" />
+              Créer un devis
+            </button>
+          </div>
+          
+          {quotes.length === 0 ? (
+            <p className="text-sm text-slate-500">Aucun devis pour cette opportunité</p>
+          ) : (
+            <div className="space-y-2">
+              {quotes.map((quote) => (
+                <div
+                  key={quote.id}
+                  className="flex items-center justify-between p-3 border border-slate-200 rounded-md hover:bg-slate-50"
+                >
+                  <div className="flex-1">
+                    <div className="font-medium text-slate-900">{quote.label}</div>
+                    <div className="text-sm text-slate-500">
+                      {quote.quoteNumber && `N° ${quote.quoteNumber} • `}
+                      {quote.status === 'DRAFT' && 'Brouillon'}
+                      {quote.status === 'SENT' && 'Envoyé'}
+                      {quote.status === 'ACCEPTED' && 'Accepté'}
+                      {quote.status === 'REJECTED' && 'Refusé'}
+                      {quote.status === 'EXPIRED' && 'Expiré'}
+                      {quote.totalTTC && ` • ${parseFloat(quote.totalTTC).toFixed(2)} € TTC`}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/quotes/${quote.id}`)}
+                    className="ml-4 px-3 py-1.5 text-sm text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-md transition"
+                  >
+                    Voir
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <form onSubmit={onSubmit} className="space-y-4 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
         <div>
           <label className="block text-sm font-medium text-slate-700">Titre *</label>

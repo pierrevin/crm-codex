@@ -13,6 +13,8 @@ import { GoogleLoginCallbackPage } from './pages/GoogleLoginCallbackPage';
 import { ImportPage } from './pages/ImportPage';
 import { OpportunitiesPage } from './pages/OpportunitiesPage';
 import { OpportunityDetailPage } from './pages/OpportunityDetailPage';
+import { QuoteDetailPage } from './pages/QuoteDetailPage';
+import { WebhooksPage } from './pages/WebhooksPage';
 
 function App() {
   return (
@@ -30,9 +32,11 @@ function App() {
           <Route path="/contacts/:id" element={<ContactDetailPage />} />
           <Route path="/opportunites" element={<OpportunitiesPage />} />
           <Route path="/opportunites/:id" element={<OpportunityDetailPage />} />
+          <Route path="/quotes/:id" element={<QuoteDetailPage />} />
           <Route path="/activities" element={<ActivitiesPage />} />
           <Route path="/entreprises" element={<CompaniesPage />} />
           <Route path="/entreprises/:id" element={<CompanyDetailPage />} />
+          <Route path="/webhooks" element={<WebhooksPage />} />
           
           {/* Redirections pour les anciennes URLs */}
           <Route path="/companies" element={<Navigate to="/entreprises" replace />} />

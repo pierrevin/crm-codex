@@ -13,6 +13,63 @@ const supabase = createClient(
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
 )
 
+// Helper function to trigger webhooks for Make automation
+async function triggerWebhooks(event: string, payload: unknown): Promise<void> {
+  try {
+    // Récupérer tous les webhooks enregistrés pour cet événement
+    const { data: webhooks, error } = await supabase
+      .from('Webhook')
+      .select('*')
+      .eq('event', event)
+    
+    if (error) {
+      console.error(`[Webhook] Erreur lors de la récupération des webhooks pour ${event}:`, error)
+      return
+    }
+    
+    if (!webhooks || webhooks.length === 0) {
+      console.log(`[Webhook] Aucun webhook enregistré pour l'événement: ${event}`)
+      return
+    }
+    
+    const secret = Deno.env.get('MAKE_WEBHOOK_SECRET') ?? ''
+    const sentAt = new Date().toISOString()
+    
+    // Envoyer les webhooks de manière asynchrone (non-bloquante)
+    const webhookPromises = webhooks.map(async (hook) => {
+      try {
+        const response = await fetch(hook.url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(secret ? { 'x-make-signature': secret } : {})
+          },
+          body: JSON.stringify({
+            event,
+            payload,
+            sentAt
+          })
+        })
+        
+        if (!response.ok) {
+          console.error(`[Webhook] Échec webhook ${hook.id} (${hook.url}): ${response.status} ${response.statusText}`)
+        } else {
+          console.log(`[Webhook] Webhook ${hook.id} envoyé avec succès pour ${event}`)
+        }
+      } catch (error) {
+        // Ne pas bloquer l'opération principale en cas d'erreur
+        console.error(`[Webhook] Erreur lors de l'envoi du webhook ${hook.id} (${hook.url}):`, error)
+      }
+    })
+    
+    // Attendre que tous les webhooks soient envoyés (mais ne pas bloquer si ça échoue)
+    await Promise.allSettled(webhookPromises)
+  } catch (error) {
+    // Erreur silencieuse - ne jamais bloquer les opérations principales
+    console.error(`[Webhook] Erreur générale lors du déclenchement des webhooks pour ${event}:`, error)
+  }
+}
+
 serve(async (req) => {
   // Handle CORS
   const corsResponse = handleCors(req)
@@ -831,6 +888,157 @@ serve(async (req) => {
       )
     }
 
+    // ===== MAKE CALLBACKS ROUTES (public avec vérification signature) =====
+    if (path === 'integrations/make/tiime/quote' && method === 'POST') {
+      const signature = req.headers.get('x-make-signature') || ''
+      const expectedSecret = Deno.env.get('MAKE_WEBHOOK_SECRET') ?? ''
+      
+      if (!expectedSecret || signature !== expectedSecret) {
+        return new Response(
+          JSON.stringify({ message: 'Invalid signature' }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      const body = await req.json()
+      const { opportunityId, tiimeQuoteId, quoteUrl } = body
+      
+      if (!opportunityId || !tiimeQuoteId || !quoteUrl) {
+        return new Response(
+          JSON.stringify({ message: 'opportunityId, tiimeQuoteId, and quoteUrl are required' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      const { error } = await supabase
+        .from('Opportunity')
+        .update({ tiimeQuoteId, quoteUrl: quoteUrl, updatedAt: new Date().toISOString() })
+        .eq('id', opportunityId)
+      
+      if (error) {
+        console.error('[Make Callback] Erreur mise à jour quote:', error)
+        return new Response(
+          JSON.stringify({ message: error.message }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      return new Response(
+        JSON.stringify({ status: 'ok' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (path === 'integrations/make/tiime/invoice' && method === 'POST') {
+      const signature = req.headers.get('x-make-signature') || ''
+      const expectedSecret = Deno.env.get('MAKE_WEBHOOK_SECRET') ?? ''
+      
+      if (!expectedSecret || signature !== expectedSecret) {
+        return new Response(
+          JSON.stringify({ message: 'Invalid signature' }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      const body = await req.json()
+      const { opportunityId, tiimeInvoiceId, invoiceUrl } = body
+      
+      if (!opportunityId || !tiimeInvoiceId || !invoiceUrl) {
+        return new Response(
+          JSON.stringify({ message: 'opportunityId, tiimeInvoiceId, and invoiceUrl are required' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      // Vérifier que l'opportunité existe et récupérer les invoices existantes
+      const { data: opp } = await supabase
+        .from('Opportunity')
+        .select('id, tiimeInvoiceIds, invoiceUrls')
+        .eq('id', opportunityId)
+        .single()
+      
+      if (!opp) {
+        return new Response(
+          JSON.stringify({ status: 'ignored', message: 'Opportunity not found' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      // Gérer les tableaux d'invoices
+      const currentInvoiceIds = Array.isArray(opp.tiimeInvoiceIds) ? [...opp.tiimeInvoiceIds] : []
+      const currentInvoiceUrls = Array.isArray(opp.invoiceUrls) ? [...opp.invoiceUrls] : []
+      
+      // Ajouter la nouvelle invoice si elle n'existe pas déjà
+      if (!currentInvoiceIds.includes(tiimeInvoiceId)) {
+        currentInvoiceIds.push(tiimeInvoiceId)
+      }
+      if (!currentInvoiceUrls.includes(invoiceUrl)) {
+        currentInvoiceUrls.push(invoiceUrl)
+      }
+      
+      const { error } = await supabase
+        .from('Opportunity')
+        .update({ 
+          tiimeInvoiceIds: currentInvoiceIds,
+          invoiceUrls: currentInvoiceUrls,
+          updatedAt: new Date().toISOString() 
+        })
+        .eq('id', opportunityId)
+      
+      if (error) {
+        console.error('[Make Callback] Erreur mise à jour invoice:', error)
+        return new Response(
+          JSON.stringify({ message: error.message }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      return new Response(
+        JSON.stringify({ status: 'ok' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (path === 'integrations/make/tiime/company' && method === 'POST') {
+      const signature = req.headers.get('x-make-signature') || ''
+      const expectedSecret = Deno.env.get('MAKE_WEBHOOK_SECRET') ?? ''
+      
+      if (!expectedSecret || signature !== expectedSecret) {
+        return new Response(
+          JSON.stringify({ message: 'Invalid signature' }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      const body = await req.json()
+      const { companyId, tiimeId } = body
+      
+      if (!companyId || !tiimeId) {
+        return new Response(
+          JSON.stringify({ message: 'companyId and tiimeId are required' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      const { error } = await supabase
+        .from('Company')
+        .update({ tiimeId, updatedAt: new Date().toISOString() })
+        .eq('id', companyId)
+      
+      if (error) {
+        console.error('[Make Callback] Erreur mise à jour company:', error)
+        return new Response(
+          JSON.stringify({ message: error.message }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      return new Response(
+        JSON.stringify({ status: 'ok' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     // ===== AUTHENTICATED ROUTES =====
     // Skip auth check for public routes (already handled above)
     const publicRoutes = ['google/callback', 'google/auth-url', 'google/status', 'auth/login', 'auth/google', 'auth/refresh', 'auth/health', 'auth/bootstrap-admin', 'auth/test-login']
@@ -1134,6 +1342,353 @@ serve(async (req) => {
       return new Response(null, { status: 204, headers: corsHeaders })
     }
 
+    // ===== WEBHOOKS ROUTES =====
+    if (path === 'webhooks' && method === 'GET') {
+      const { data, error } = await supabase
+        .from('Webhook')
+        .select('*')
+        .order('createdAt', { ascending: false })
+      
+      if (error) throw error
+      
+      return new Response(
+        JSON.stringify(data),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (path === 'webhooks' && method === 'POST') {
+      const body = await req.json()
+      const { url, event } = body
+      
+      if (!url || !event) {
+        return new Response(
+          JSON.stringify({ message: 'url and event are required' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      // Validation basique de l'URL
+      try {
+        new URL(url)
+      } catch {
+        return new Response(
+          JSON.stringify({ message: 'Invalid URL format' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      const { data, error } = await supabase
+        .from('Webhook')
+        .insert({ url, event })
+        .select()
+        .single()
+      
+      if (error) throw error
+      
+      return new Response(
+        JSON.stringify(data),
+        { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (path.startsWith('webhooks/') && method === 'DELETE') {
+      const id = path.split('/')[1]
+      const { error } = await supabase
+        .from('Webhook')
+        .delete()
+        .eq('id', id)
+      
+      if (error) throw error
+      
+      return new Response(null, { status: 204, headers: corsHeaders })
+    }
+
+    if (path === 'webhooks/events' && method === 'GET') {
+      const events = [
+        {
+          name: 'opportunity.created',
+          description: 'Déclenché lorsqu\'une nouvelle opportunité est créée',
+          payload: { opportunity: 'Opportunity object' }
+        },
+        {
+          name: 'opportunity.updated',
+          description: 'Déclenché lorsqu\'une opportunité est modifiée (hors changement de stage)',
+          payload: { opportunity: 'Opportunity object' }
+        },
+        {
+          name: 'opportunity.stage_changed',
+          description: 'Déclenché lorsque le stage d\'une opportunité change',
+          payload: { opportunity: 'Opportunity object', oldStage: 'string', newStage: 'string' }
+        },
+        {
+          name: 'company.created',
+          description: 'Déclenché lorsqu\'une nouvelle entreprise est créée',
+          payload: { company: 'Company object' }
+        },
+        {
+          name: 'company.updated',
+          description: 'Déclenché lorsqu\'une entreprise est modifiée',
+          payload: { company: 'Company object' }
+        },
+        {
+          name: 'quote.created',
+          description: 'Déclenché lorsqu\'un nouveau devis est créé',
+          payload: { quote: 'Quote object with items' }
+        },
+        {
+          name: 'quote.updated',
+          description: 'Déclenché lorsqu\'un devis est modifié',
+          payload: { quote: 'Quote object with items' }
+        }
+      ]
+      
+      return new Response(
+        JSON.stringify(events),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // ===== QUOTES ROUTES =====
+    // Helper function to calculate totals from items
+    function calculateQuoteTotals(items: any[]): { totalHT: number, totalTTC: number } {
+      let totalHT = 0
+      let maxTaxRate = 0
+      
+      items.forEach((item: any) => {
+        const lineHT = (Number(item.quantity) * Number(item.unitPriceHT)) - (Number(item.discountAmount) || 0)
+        totalHT += lineHT
+        if (Number(item.taxRate) > maxTaxRate) {
+          maxTaxRate = Number(item.taxRate)
+        }
+      })
+      
+      const totalTTC = totalHT * (1 + maxTaxRate)
+      
+      return { totalHT, totalTTC }
+    }
+
+    if (path === 'quotes' && method === 'GET') {
+      const opportunityId = url.searchParams.get('opportunityId')
+      const companyId = url.searchParams.get('companyId')
+      const status = url.searchParams.get('status')
+      
+      let query = supabase
+        .from('Quote')
+        .select('*, items:QuoteItem(*), opportunity:Opportunity(id, title), company:Company(id, name)')
+        .order('createdAt', { ascending: false })
+      
+      if (opportunityId) {
+        query = query.eq('opportunityId', opportunityId)
+      }
+      if (companyId) {
+        query = query.eq('companyId', companyId)
+      }
+      if (status) {
+        query = query.eq('status', status)
+      }
+      
+      const { data, error } = await query
+      
+      if (error) throw error
+      
+      return new Response(
+        JSON.stringify(data),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (path.startsWith('quotes/') && method === 'GET') {
+      const id = path.split('/')[1]
+      const { data, error } = await supabase
+        .from('Quote')
+        .select('*, items:QuoteItem(*), opportunity:Opportunity(id, title, companyId), company:Company(id, name)')
+        .eq('id', id)
+        .single()
+
+      if (error) throw error
+
+      return new Response(
+        JSON.stringify(data),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (path === 'quotes' && method === 'POST') {
+      const body = await req.json()
+      const { items, ...quoteData } = body
+      
+      if (!items || !Array.isArray(items) || items.length === 0) {
+        return new Response(
+          JSON.stringify({ message: 'At least one item is required' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      // Calculer les totaux de chaque ligne
+      const itemsWithTotals = items.map((item: any, index: number) => {
+        const lineHT = (Number(item.quantity) * Number(item.unitPriceHT)) - (Number(item.discountAmount) || 0)
+        return {
+          ...item,
+          totalHT: lineHT,
+          order: item.order ?? index
+        }
+      })
+      
+      // Calculer les totaux du devis
+      const { totalHT, totalTTC } = calculateQuoteTotals(itemsWithTotals)
+      
+      const now = new Date().toISOString()
+      const quoteId = crypto.randomUUID()
+      
+      // Créer le devis
+      const { data: quote, error: quoteError } = await supabase
+        .from('Quote')
+        .insert({
+          id: quoteId,
+          ...quoteData,
+          totalHT: totalHT.toString(),
+          totalTTC: totalTTC.toString(),
+          createdAt: now,
+          updatedAt: now
+        })
+        .select()
+        .single()
+      
+      if (quoteError) throw quoteError
+      
+      // Créer les lignes de devis
+      const itemsToInsert = itemsWithTotals.map((item: any) => ({
+        id: crypto.randomUUID(),
+        label: item.label,
+        description: item.description || null,
+        quantity: item.quantity.toString(),
+        unit: item.unit,
+        unitPriceHT: item.unitPriceHT.toString(),
+        discountAmount: item.discountAmount ? item.discountAmount.toString() : null,
+        taxRate: item.taxRate.toString(),
+        vatExemptionReason: item.vatExemptionReason || null,
+        totalHT: item.totalHT.toString(),
+        order: item.order,
+        quoteId: quoteId,
+        createdAt: now,
+        updatedAt: now
+      }))
+      
+      const { error: itemsError } = await supabase
+        .from('QuoteItem')
+        .insert(itemsToInsert)
+      
+      if (itemsError) throw itemsError
+      
+      // Récupérer le devis complet avec ses lignes
+      const { data: fullQuote, error: fetchError } = await supabase
+        .from('Quote')
+        .select('*, items:QuoteItem(*), opportunity:Opportunity(id, title), company:Company(id, name)')
+        .eq('id', quoteId)
+        .single()
+      
+      if (fetchError) throw fetchError
+      
+      // Déclencher webhook quote.created
+      if (fullQuote) {
+        triggerWebhooks('quote.created', fullQuote).catch(err => 
+          console.error('[Webhook] Erreur déclenchement quote.created:', err)
+        )
+      }
+
+      return new Response(
+        JSON.stringify(fullQuote),
+        { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (path.startsWith('quotes/') && method === 'PATCH') {
+      const id = path.split('/')[1]
+      const body = await req.json()
+      const { items, ...quoteData } = body
+      
+      const now = new Date().toISOString()
+      let updateData: any = { ...quoteData, updatedAt: now }
+      
+      // Si des items sont fournis, recalculer les totaux
+      if (items && Array.isArray(items) && items.length > 0) {
+        const itemsWithTotals = items.map((item: any, index: number) => {
+          const lineHT = (Number(item.quantity) * Number(item.unitPriceHT)) - (Number(item.discountAmount) || 0)
+          return {
+            ...item,
+            totalHT: lineHT,
+            order: item.order ?? index
+          }
+        })
+        
+        const { totalHT, totalTTC } = calculateQuoteTotals(itemsWithTotals)
+        updateData.totalHT = totalHT.toString()
+        updateData.totalTTC = totalTTC.toString()
+        
+        // Supprimer les anciennes lignes et créer les nouvelles
+        await supabase.from('QuoteItem').delete().eq('quoteId', id)
+        
+        const itemsToInsert = itemsWithTotals.map((item: any) => ({
+          id: crypto.randomUUID(),
+          label: item.label,
+          description: item.description || null,
+          quantity: item.quantity.toString(),
+          unit: item.unit,
+          unitPriceHT: item.unitPriceHT.toString(),
+          discountAmount: item.discountAmount ? item.discountAmount.toString() : null,
+          taxRate: item.taxRate.toString(),
+          vatExemptionReason: item.vatExemptionReason || null,
+          totalHT: item.totalHT.toString(),
+          order: item.order,
+          quoteId: id,
+          createdAt: now,
+          updatedAt: now
+        }))
+        
+        const { error: itemsError } = await supabase
+          .from('QuoteItem')
+          .insert(itemsToInsert)
+        
+        if (itemsError) throw itemsError
+      }
+      
+      const { data, error } = await supabase
+        .from('Quote')
+        .update(updateData)
+        .eq('id', id)
+        .select('*, items:QuoteItem(*), opportunity:Opportunity(id, title), company:Company(id, name)')
+        .single()
+
+      if (error) throw error
+      
+      // Déclencher webhook quote.updated
+      if (data) {
+        triggerWebhooks('quote.updated', data).catch(err => 
+          console.error('[Webhook] Erreur déclenchement quote.updated:', err)
+        )
+      }
+
+      return new Response(
+        JSON.stringify(data),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (path.startsWith('quotes/') && method === 'DELETE') {
+      const id = path.split('/')[1]
+      
+      // Les QuoteItem seront supprimés automatiquement grâce à onDelete: Cascade
+      const { error } = await supabase
+        .from('Quote')
+        .delete()
+        .eq('id', id)
+      
+      if (error) throw error
+
+      return new Response(null, { status: 204, headers: corsHeaders })
+    }
+
     // ===== COMPANIES ROUTES =====
     if (path === 'companies' && method === 'GET') {
       const search = url.searchParams.get('search')
@@ -1215,6 +1770,13 @@ serve(async (req) => {
         .single()
 
       if (error) throw error
+
+      // Déclencher webhook company.created
+      if (data) {
+        triggerWebhooks('company.created', data).catch(err => 
+          console.error('[Webhook] Erreur déclenchement company.created:', err)
+        )
+      }
 
       return new Response(
         JSON.stringify(data),
@@ -1323,6 +1885,13 @@ serve(async (req) => {
           // Créer la relation
           await supabase.from('_CompanyToTag').insert({ A: id, B: tagId })
         }
+      }
+
+      // Déclencher webhook company.updated
+      if (data) {
+        triggerWebhooks('company.updated', data).catch(err => 
+          console.error('[Webhook] Erreur déclenchement company.updated:', err)
+        )
       }
 
       return new Response(
@@ -1689,8 +2258,16 @@ serve(async (req) => {
         console.log('Opportunité finale:', { id: finalOpportunity?.id, googleDriveFolderId: finalOpportunity?.googleDriveFolderId, companyGoogleDriveFolderId: finalOpportunity?.company?.googleDriveFolderId })
       }
 
+      // Déclencher webhook opportunity.created
+      const opportunityForWebhook = finalOpportunity || data
+      if (opportunityForWebhook) {
+        triggerWebhooks('opportunity.created', opportunityForWebhook).catch(err => 
+          console.error('[Webhook] Erreur déclenchement opportunity.created:', err)
+        )
+      }
+
       return new Response(
-        JSON.stringify(finalOpportunity || data),
+        JSON.stringify(opportunityForWebhook),
         { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -1714,6 +2291,14 @@ serve(async (req) => {
     if (path.startsWith('opportunities/') && method === 'PATCH') {
       const id = path.split('/')[1]
       const body = await req.json()
+      
+      // Récupérer l'ancienne version pour détecter les changements (notamment stage)
+      const { data: oldOpportunity } = await supabase
+        .from('Opportunity')
+        .select('stage')
+        .eq('id', id)
+        .single()
+      
       const { data, error } = await supabase
         .from('Opportunity')
         .update({ ...body, updatedAt: new Date().toISOString() })
@@ -1722,6 +2307,25 @@ serve(async (req) => {
         .single()
 
       if (error) throw error
+
+      // Déclencher webhooks selon le type de changement
+      if (data) {
+        // Détecter changement de stage
+        if (body.stage && oldOpportunity && oldOpportunity.stage !== body.stage) {
+          triggerWebhooks('opportunity.stage_changed', {
+            opportunity: data,
+            oldStage: oldOpportunity.stage,
+            newStage: body.stage
+          }).catch(err => 
+            console.error('[Webhook] Erreur déclenchement opportunity.stage_changed:', err)
+          )
+        } else {
+          // Mise à jour normale (hors changement de stage)
+          triggerWebhooks('opportunity.updated', data).catch(err => 
+            console.error('[Webhook] Erreur déclenchement opportunity.updated:', err)
+          )
+        }
+      }
 
       return new Response(
         JSON.stringify(data),

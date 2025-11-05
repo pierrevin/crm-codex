@@ -8,7 +8,8 @@ const navItems = [
   { to: '/dashboard', label: 'Tableau de bord' },
   { to: '/entreprises', label: 'Entreprises' },
   { to: '/contacts', label: 'Contacts' },
-  { to: '/opportunites', label: 'Opportunités' }
+  { to: '/opportunites', label: 'Opportunités' },
+  { to: '/webhooks', label: 'Webhooks' }
 ];
 
 export function AppLayout() {
