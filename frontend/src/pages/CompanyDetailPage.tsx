@@ -636,7 +636,7 @@ export function CompanyDetailPage() {
               />
               <button
                 type="button"
-                onClick={handleSearchSirene}
+                onClick={() => handleSearchSirene()}
                 disabled={isSearchingSirene || (!editSiret && !editName)}
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-xs bg-indigo-50 text-indigo-600 px-2 py-1 rounded hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed"
                 title="Rechercher dans Sirene"
@@ -807,7 +807,7 @@ export function CompanyDetailPage() {
                     />
                     <button
                       type="button"
-                      onClick={handleSearchSirene}
+                      onClick={() => handleSearchSirene()}
                       disabled={isSearchingSirene || (!editSiret && !editName)}
                       className="absolute right-2 top-1/2 -translate-y-1/2 text-xs bg-indigo-50 text-indigo-600 px-2 py-1 rounded hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed"
                       title="Rechercher dans Sirene"
