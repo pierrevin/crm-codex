@@ -195,7 +195,7 @@ export function CompanyDetailPage() {
 
     try {
       await api.delete(`/api/companies/${id}`);
-      navigate('/clients');
+      navigate('/entreprises');
     } catch (error: any) {
       console.error('Erreur suppression:', error);
       alert(error.response?.data?.message || 'Erreur lors de la suppression');
@@ -467,7 +467,7 @@ export function CompanyDetailPage() {
                   .map((t) => t.trim())
                   .filter((t) => t.length > 0)
               });
-              navigate(`/clients/${data.id}`);
+              navigate(`/entreprises/${data.id}`);
             } catch (error) {
               console.error('Erreur création:', error);
               alert('Erreur lors de la création');
@@ -719,7 +719,7 @@ export function CompanyDetailPage() {
           <div className="flex justify-end gap-3">
             <button
               type="button"
-              onClick={() => navigate('/clients')}
+              onClick={() => navigate('/entreprises')}
               className="rounded-md border border-slate-200 px-4 py-2 text-sm"
             >
               Annuler

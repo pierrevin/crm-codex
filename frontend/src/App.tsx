@@ -31,13 +31,14 @@ function App() {
           <Route path="/opportunites" element={<OpportunitiesPage />} />
           <Route path="/opportunites/:id" element={<OpportunityDetailPage />} />
           <Route path="/activities" element={<ActivitiesPage />} />
-          <Route path="/clients" element={<CompaniesPage />} />
-          <Route path="/clients/:id" element={<CompanyDetailPage />} />
-          <Route path="/import" element={<ImportPage />} />
+          <Route path="/entreprises" element={<CompaniesPage />} />
+          <Route path="/entreprises/:id" element={<CompanyDetailPage />} />
           
           {/* Redirections pour les anciennes URLs */}
-          <Route path="/companies" element={<Navigate to="/clients" replace />} />
-          <Route path="/companies/:id" element={<Navigate to="/clients/:id" replace />} />
+          <Route path="/companies" element={<Navigate to="/entreprises" replace />} />
+          <Route path="/companies/:id" element={<Navigate to="/entreprises/:id" replace />} />
+          <Route path="/clients" element={<Navigate to="/entreprises" replace />} />
+          <Route path="/clients/:id" element={<Navigate to="/entreprises/:id" replace />} />
           <Route path="/opportunities" element={<Navigate to="/opportunites" replace />} />
           <Route path="/opportunities/:id" element={<Navigate to="/opportunites/:id" replace />} />
         </Route>

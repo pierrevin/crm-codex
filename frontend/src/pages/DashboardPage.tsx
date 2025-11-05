@@ -203,7 +203,7 @@ export function DashboardPage() {
       {/* Statistiques principales - Cliquables */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Link
-          to="/clients"
+          to="/entreprises"
           className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm hover:shadow-md transition-shadow"
         >
           <div className="flex items-center justify-between">
@@ -265,7 +265,7 @@ export function DashboardPage() {
         <h2 className="text-lg font-semibold text-slate-900 mb-4">⚡ Créer rapidement</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <button
-            onClick={() => navigate('/clients/new')}
+            onClick={() => navigate('/entreprises/new')}
             className="flex items-center gap-3 rounded-lg bg-white border border-slate-200 p-4 hover:shadow-md transition-shadow"
           >
             <PlusIcon className="h-6 w-6 text-indigo-600" />

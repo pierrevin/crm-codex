@@ -6,10 +6,9 @@ import { useAuth } from '../hooks/useAuth';
 
 const navItems = [
   { to: '/dashboard', label: 'Tableau de bord' },
-  { to: '/clients', label: 'Entreprises' },
+  { to: '/entreprises', label: 'Entreprises' },
   { to: '/contacts', label: 'Contacts' },
-  { to: '/opportunites', label: 'Opportunités' },
-  { to: '/import', label: 'Import' }
+  { to: '/opportunites', label: 'Opportunités' }
 ];
 
 export function AppLayout() {

@@ -90,7 +90,7 @@ export function CompaniesPage() {
                 </p>
         </div>
         <button
-          onClick={() => navigate('/clients/new')}
+          onClick={() => navigate('/entreprises/new')}
           className="flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 transition-colors"
         >
           <PlusIcon className="h-4 w-4" />
@@ -130,7 +130,7 @@ export function CompaniesPage() {
             {recentCompaniesDetails.map((company) => (
               <Link
                 key={company.id}
-                to={`/clients/${company.id}`}
+                to={`/entreprises/${company.id}`}
                 className="group rounded-xl border border-slate-200 bg-white p-6 shadow-sm hover:shadow-md hover:border-indigo-300 transition-all duration-200"
               >
                 <div className="flex items-start justify-between mb-4">

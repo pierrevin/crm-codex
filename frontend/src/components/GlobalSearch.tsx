@@ -69,7 +69,7 @@ export function GlobalSearch() {
           id: c.id,
           title: c.name,
           subtitle: c.domain,
-          url: `/clients/${c.id}`
+          url: `/entreprises/${c.id}`
         }));
 
       const filteredContacts = contacts
