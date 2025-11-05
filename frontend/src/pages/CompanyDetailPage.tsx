@@ -234,6 +234,15 @@ export function CompanyDetailPage() {
     try {
       let searchType: 'siret' | 'siren' | 'name' = 'name';
       let searchValue = (searchName || '').trim();
+      let postalCode: string | undefined = (editAddressZip || '').trim() || undefined;
+      let city: string | undefined = (editAddressCity || '').trim() || undefined;
+
+      // Parsing enrichi: si le nom contient un CP (5 chiffres) ou une ville à la fin
+      const cpMatch = searchValue.match(/(\b\d{5}\b)/);
+      if (cpMatch) {
+        postalCode = cpMatch[1];
+        searchValue = searchValue.replace(cpMatch[1], '').trim();
+      }
 
       if (searchSiret && searchSiret.length >= 9 && !searchNameOverride) {
         const normalized = normalizeSiret(searchSiret);
@@ -251,7 +260,7 @@ export function CompanyDetailPage() {
         return;
       }
 
-      const response = await searchSirene({ type: searchType, value: searchValue });
+      const response = await searchSirene({ type: searchType, value: searchValue, postalCode, city });
       
       if (response.results.length === 0) {
         setSireneResults([]);
@@ -987,15 +996,11 @@ export function CompanyDetailPage() {
               <>
                 <button
                   type="button"
-                  onClick={handleFillFromSirene}
+                  onClick={() => handleSearchSirene()}
                   disabled={isFillingFromSirene || (!editSiret && !editName)}
                   className="flex items-center gap-2 rounded-md border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
-                  {isFillingFromSirene ? (
-                    <>⏳ Complétion...</>
-                  ) : (
-                    <>📥 Compléter depuis Sirene</>
-                  )}
+                  <>🔍 Rechercher dans Sirene</>
                 </button>
                 <button
                   onClick={() => { setIsEditing(false); setEditName(company.name); setEditDomain(company.domain || ''); }}

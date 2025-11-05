@@ -3,6 +3,8 @@ import api from './apiClient';
 export interface SireneSearchParams {
   type: 'siret' | 'siren' | 'name';
   value: string;
+  postalCode?: string;
+  city?: string;
 }
 
 export interface SireneResult {

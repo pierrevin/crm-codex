@@ -813,7 +813,7 @@ serve(async (req) => {
     // ===== SIRENE API ROUTES =====
     if (path === 'companies/sirene/search' && method === 'POST') {
       const body = await req.json()
-      const { type, value } = body
+      const { type, value, postalCode, city } = body
 
       if (!type || !value) {
         return new Response(
@@ -864,6 +864,14 @@ serve(async (req) => {
             )
           }
           apiUrl += `?q=${encodeURIComponent(searchName)}`
+          // Filtres optionnels
+          if (postalCode && /^(\d{5})$/.test(postalCode)) {
+            apiUrl += `&code_postal=${encodeURIComponent(postalCode)}`
+          }
+          if (city && city.trim().length > 1) {
+            // L'API ne propose pas un paramètre city officiel, on l'inclut dans q pour renforcer la recherche
+            apiUrl += `&q=${encodeURIComponent(searchName + ' ' + city.trim())}`
+          }
         } else {
           return new Response(
             JSON.stringify({ message: 'Type de recherche invalide. Utilisez siret, siren ou name' }),
