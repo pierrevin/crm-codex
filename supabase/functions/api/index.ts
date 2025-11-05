@@ -363,22 +363,24 @@ serve(async (req) => {
 
     if (path === 'google/auth-url' && method === 'GET') {
       const clientId = Deno.env.get('GOOGLE_CLIENT_ID') ?? ''
-      const redirectEnv = Deno.env.get('GOOGLE_REDIRECT_URI')
+      const webAppUrlRaw = Deno.env.get('WEB_APP_URL')
       
-      // Construire l'URI de redirection de manière robuste
-      let redirectUri = redirectEnv
-      
-      if (!redirectUri || redirectUri.length === 0 || redirectUri === 'undefined') {
-        // Construire depuis l'URL de la requête
-        const reqUrl = new URL(req.url)
-        const host = reqUrl.host
-        // Normaliser le host pour toujours utiliser HTTPS
-        const normalizedHost = host.replace(/^http:\/\//, '').replace(/^https:\/\//, '')
-        redirectUri = `https://${normalizedHost}/functions/v1/api/google/callback`
-        console.log('Constructed redirect URI from request:', redirectUri)
+      // Construire l'URI de redirection vers le frontend (solution professionnelle)
+      // Le frontend recevra le code OAuth et appellera ensuite l'Edge Function avec les bons headers
+      let redirectUri: string
+      if (webAppUrlRaw && 
+          typeof webAppUrlRaw === 'string' && 
+          webAppUrlRaw !== 'undefined' && 
+          webAppUrlRaw !== 'null' &&
+          webAppUrlRaw.length > 0 &&
+          webAppUrlRaw.startsWith('http')) {
+        redirectUri = `${webAppUrlRaw}/auth/google/callback`
       } else {
-        console.log('Using configured GOOGLE_REDIRECT_URI:', redirectUri)
+        // Fallback vers valeur par défaut
+        redirectUri = 'https://crm-codex.vercel.app/auth/google/callback'
       }
+      
+      console.log('Using frontend redirect URI:', redirectUri)
       
       // Valider que l'URI est valide
       if (!redirectUri || !redirectUri.startsWith('https://')) {
@@ -400,150 +402,79 @@ serve(async (req) => {
       return new Response(JSON.stringify({ url: u.toString() }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
 
-    if (path === 'google/callback' && method === 'GET') {
+    if (path === 'google/callback' && method === 'POST') {
       // Wrapper global pour capturer toutes les erreurs
       try {
-        console.log('=== Google OAuth Callback ===')
+        console.log('=== Google OAuth Callback (POST) ===')
         console.log('URL:', req.url)
         console.log('Method:', method)
         console.log('Path:', path)
         console.log('Headers Authorization:', req.headers.get('Authorization') ? 'Present' : 'Missing')
-        console.log('Headers x-user-authorization:', req.headers.get('x-user-authorization') ? 'Present' : 'Missing')
-        console.log('All headers:', Object.fromEntries(req.headers.entries()))
         
-        // Helper pour rediriger vers l'app avec un message d'erreur
-        // Utilise une redirection HTTP 302 standard (OAuth best practice)
-        const redirectToApp = (success: boolean, message?: string) => {
-        const webAppUrlRaw = Deno.env.get('WEB_APP_URL')
-        // Validation robuste : rejeter les valeurs invalides (undefined, null, chaîne vide, chaîne "undefined")
-        let appUrl = 'https://crm-codex.vercel.app' // valeur par défaut
-        if (webAppUrlRaw && 
-            typeof webAppUrlRaw === 'string' && 
-            webAppUrlRaw !== 'undefined' && 
-            webAppUrlRaw !== 'null' &&
-            webAppUrlRaw.length > 0 &&
-            webAppUrlRaw.startsWith('http')) {
-          appUrl = webAppUrlRaw
-        }
-        console.log('Redirecting to appUrl:', appUrl)
-        const params = new URLSearchParams()
-        if (success) {
-          params.set('google', 'connected')
-        } else {
-          params.set('google', 'error')
-          if (message) params.set('message', encodeURIComponent(message))
-        }
-        // Rediriger vers la page frontend dédiée pour une meilleure UX
-        const redirectUrl = `${appUrl}/auth/google/callback?${params.toString()}`
-        // Valider que l'URL est bien formée
-        try {
-          new URL(redirectUrl)
-          // Redirection HTTP 302 standard (OAuth flow standard)
-          return new Response(null, { 
-            status: 302, 
-            headers: { 
-              ...corsHeaders,
-              'Location': redirectUrl,
-              'Cache-Control': 'no-cache, no-store, must-revalidate',
-              'Pragma': 'no-cache',
-              'Expires': '0'
-            } 
-          })
-        } catch (err) {
-          // Fallback si l'URL est invalide
-          console.error('Invalid redirect URL:', redirectUrl, err)
+        // Helper pour retourner une réponse JSON
+        const returnResponse = (success: boolean, message?: string) => {
           return new Response(
-            JSON.stringify({ error: 'Invalid redirect URL', url: redirectUrl }),
+            JSON.stringify({ success, message: message || (success ? 'Google OAuth successful' : 'Google OAuth failed') }),
             { 
-              status: 500, 
-              headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+              status: success ? 200 : 400,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
             }
           )
         }
-      }
 
-      // Helper pour retourner une page HTML d'erreur
-      const errorHtml = (title: string, message: string, details?: string) => {
+        // Lire code et state depuis le body JSON (POST)
+        const body = await req.json().catch(() => ({}))
+        const code = body.code
+        const state = body.state
+        const errorParam = body.error
+
+        // Si Google renvoie une erreur
+        if (errorParam) {
+          const errorDescription = body.error_description || 'Erreur inconnue'
+          console.error('Google OAuth error:', errorParam, errorDescription)
+          return returnResponse(false, `Erreur Google: ${errorDescription}`)
+        }
+
+        // Vérifier que le code est présent
+        if (!code) {
+          console.error('Missing code in callback')
+          return returnResponse(false, 'Le code d\'autorisation Google est manquant')
+        }
+
+        // Vérifier que le state (userId) est présent
+        if (!state) {
+          console.error('Missing state (userId) in callback')
+          return returnResponse(false, 'L\'identifiant utilisateur n\'a pas été transmis')
+        }
+
+        const clientId = Deno.env.get('GOOGLE_CLIENT_ID') ?? ''
+        const clientSecret = Deno.env.get('GOOGLE_CLIENT_SECRET') ?? ''
+        
+        if (!clientId || !clientSecret) {
+          console.error('Missing Google credentials')
+          return returnResponse(false, 'Les identifiants Google ne sont pas configurés côté serveur')
+        }
+
+        // Construire l'URI de redirection - IMPORTANT: utiliser l'URI exacte configurée dans Google Cloud Console
+        // Elle doit correspondre à celle utilisée dans google/auth-url (frontend)
         const webAppUrlRaw = Deno.env.get('WEB_APP_URL')
-        // Validation robuste
-        let appUrl = 'https://crm-codex.vercel.app'
+        let actualRedirectUri: string
         if (webAppUrlRaw && 
             typeof webAppUrlRaw === 'string' && 
             webAppUrlRaw !== 'undefined' && 
             webAppUrlRaw !== 'null' &&
             webAppUrlRaw.length > 0 &&
             webAppUrlRaw.startsWith('http')) {
-          appUrl = webAppUrlRaw
+          actualRedirectUri = `${webAppUrlRaw}/auth/google/callback`
+        } else {
+          actualRedirectUri = 'https://crm-codex.vercel.app/auth/google/callback'
         }
-        return new Response(
-          `<html><head><meta charset="utf-8"><title>${title}</title></head><body style="font-family: sans-serif; padding: 2rem; max-width: 600px; margin: 0 auto;"><h1>${title}</h1><p>${message}</p>${details ? `<p style="color: #666; font-size: 0.9em;">${details}</p>` : ''}<p><a href="${appUrl}/dashboard">Retour au dashboard</a></p></body></html>`,
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'text/html; charset=utf-8' } }
-        )
-      }
+        console.log('Using redirect URI for token exchange:', actualRedirectUri)
 
-      const urlObj = new URL(req.url)
-      const code = urlObj.searchParams.get('code')
-      const state = urlObj.searchParams.get('state')
-      const errorParam = urlObj.searchParams.get('error')
+        console.log('Exchanging code for token, redirectUri:', actualRedirectUri)
 
-      // Si Google renvoie une erreur
-      if (errorParam) {
-        const errorDescription = urlObj.searchParams.get('error_description') || 'Erreur inconnue'
-        console.error('Google OAuth error:', errorParam, errorDescription)
-        return redirectToApp(false, `Erreur Google: ${errorDescription}`)
-      }
-
-      // Vérifier que le code est présent
-      if (!code) {
-        console.error('Missing code in callback')
-        return errorHtml('Code manquant', 'Le code d\'autorisation Google est manquant. Veuillez réessayer la connexion.', 'URL appelée: ' + req.url)
-      }
-
-      // Vérifier que le state (userId) est présent
-      if (!state) {
-        console.error('Missing state (userId) in callback')
-        return errorHtml('Identifiant utilisateur manquant', 'L\'identifiant utilisateur n\'a pas été transmis. Veuillez réessayer la connexion.', 'Le paramètre "state" est requis')
-      }
-
-      const clientId = Deno.env.get('GOOGLE_CLIENT_ID') ?? ''
-      const clientSecret = Deno.env.get('GOOGLE_CLIENT_SECRET') ?? ''
-      
-      if (!clientId || !clientSecret) {
-        console.error('Missing Google credentials')
-        return errorHtml('Configuration manquante', 'Les identifiants Google ne sont pas configurés côté serveur.', 'GOOGLE_CLIENT_ID ou GOOGLE_CLIENT_SECRET manquant')
-      }
-
-      // Construire l'URI de redirection - IMPORTANT: utiliser l'URL exacte que Google a appelée
-      // Google vérifie que l'URI utilisée dans l'échange correspond exactement à celle de la redirection
-      const reqUrlObj = new URL(req.url)
-      // Construire l'URI de callback à partir de l'URL de la requête
-      // Si l'URL est http://host/api/google/callback, on doit normaliser vers https://host/functions/v1/api/google/callback
-      const actualRedirectUri = (() => {
-        // Utiliser l'URI configurée si disponible
-        const redirectEnv = Deno.env.get('GOOGLE_REDIRECT_URI')
-        if (redirectEnv && redirectEnv.length > 0 && redirectEnv.startsWith('https://')) {
-          console.log('Using configured GOOGLE_REDIRECT_URI:', redirectEnv)
-          return redirectEnv
-        }
-        // Sinon, construire depuis l'URL de la requête en normalisant vers HTTPS et /functions/v1/
-        const protocol = 'https://' // Toujours HTTPS pour Google OAuth
-        const host = reqUrlObj.host
-        // Normaliser le path : /api/google/callback -> /functions/v1/api/google/callback
-        let normalizedPath = reqUrlObj.pathname
-        if (normalizedPath.startsWith('/api/')) {
-          normalizedPath = '/functions/v1' + normalizedPath
-        } else if (!normalizedPath.startsWith('/functions/v1/')) {
-          normalizedPath = '/functions/v1' + normalizedPath
-        }
-        const constructed = `${protocol}${host}${normalizedPath}`
-        console.log('Constructed redirect URI from request:', constructed)
-        return constructed
-      })()
-
-      console.log('Exchanging code for token, redirectUri:', actualRedirectUri)
-
-      // Échanger le code contre un token
-      try {
+        // Échanger le code contre un token
+        try {
         const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -566,19 +497,19 @@ serve(async (req) => {
             errorMsg = errorJson.error_description || errorJson.error || errorMsg
             // Vérifier si c'est une erreur de redirect_uri mismatch
             if (errorJson.error === 'redirect_uri_mismatch') {
-              errorMsg = `URI de redirection incorrecte. Vérifiez que l'URI dans Google Cloud Console correspond exactement à: ${actualRedirectUri}`
+                errorMsg = `URI de redirection incorrecte. Vérifiez que l'URI dans Google Cloud Console correspond exactement à: ${actualRedirectUri}`
             }
           } catch {
             errorMsg = tokenTxt.substring(0, 200)
           }
-          return redirectToApp(false, errorMsg)
+          return returnResponse(false, errorMsg)
         }
 
         const tokenJson = JSON.parse(tokenTxt)
         
         if (!tokenJson.access_token) {
           console.error('No access token in response')
-          return redirectToApp(false, 'Token d\'accès manquant dans la réponse Google')
+          return returnResponse(false, 'Token d\'accès manquant dans la réponse Google')
         }
 
         const userId = state
@@ -600,7 +531,7 @@ serve(async (req) => {
           
           if (updateError) {
             console.error('Error updating token:', updateError)
-            return redirectToApp(false, 'Erreur lors de la mise à jour du token')
+            return returnResponse(false, 'Erreur lors de la mise à jour du token')
           }
         } else {
           const { error: insertError } = await supabase.from('GoogleToken').insert({
@@ -616,28 +547,29 @@ serve(async (req) => {
           
           if (insertError) {
             console.error('Error inserting token:', insertError)
-            return redirectToApp(false, 'Erreur lors de l\'enregistrement du token')
+            return returnResponse(false, 'Erreur lors de l\'enregistrement du token')
           }
         }
 
         console.log('Google OAuth successful for userId:', userId)
-        return redirectToApp(true)
+        return returnResponse(true)
 
-      } catch (error) {
-        console.error('Unexpected error in token exchange:', error)
-        return redirectToApp(false, `Erreur inattendue: ${error instanceof Error ? error.message : String(error)}`)
-      }
-      } catch (outerError) {
-        // Catch global pour toutes les erreurs non capturées (erreurs de syntaxe, variables non définies, etc.)
-        console.error('Fatal error in Google callback:', outerError)
-        const webAppUrl = Deno.env.get('WEB_APP_URL') || 'https://crm-codex.vercel.app'
-        const errorMsg = outerError instanceof Error ? outerError.message : String(outerError)
-        const errorHtml = `<html><head><meta charset="utf-8"><title>Erreur fatale</title></head><body style="font-family: sans-serif; padding: 2rem;"><h1>Erreur fatale dans le callback Google</h1><p>${errorMsg}</p><p><a href="${webAppUrl}/dashboard">Retour au dashboard</a></p><pre style="background: #f5f5f5; padding: 1rem; overflow: auto;">${JSON.stringify({ url: req.url, error: errorMsg }, null, 2)}</pre></body></html>`
-        return new Response(errorHtml, { 
-          status: 500, 
-          headers: { ...corsHeaders, 'Content-Type': 'text/html; charset=utf-8' } 
-        })
-      }
+        } catch (error) {
+          console.error('Unexpected error in token exchange:', error)
+          return returnResponse(false, `Erreur inattendue: ${error instanceof Error ? error.message : String(error)}`)
+        }
+        } catch (outerError) {
+          // Catch global pour toutes les erreurs non capturées (erreurs de syntaxe, variables non définies, etc.)
+          console.error('Fatal error in Google callback:', outerError)
+          const errorMsg = outerError instanceof Error ? outerError.message : String(outerError)
+          return new Response(
+            JSON.stringify({ success: false, message: `Erreur fatale: ${errorMsg}` }),
+            { 
+              status: 500, 
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+            }
+          )
+        }
     }
 
     // ===== AUTHENTICATED ROUTES =====
