@@ -403,7 +403,13 @@ serve(async (req) => {
     if (path === 'google/callback' && method === 'GET') {
       // Wrapper global pour capturer toutes les erreurs
       try {
-        console.log('Google callback called, URL:', req.url)
+        console.log('=== Google OAuth Callback ===')
+        console.log('URL:', req.url)
+        console.log('Method:', method)
+        console.log('Path:', path)
+        console.log('Headers Authorization:', req.headers.get('Authorization') ? 'Present' : 'Missing')
+        console.log('Headers x-user-authorization:', req.headers.get('x-user-authorization') ? 'Present' : 'Missing')
+        console.log('All headers:', Object.fromEntries(req.headers.entries()))
         
         // Helper pour rediriger vers l'app avec un message d'erreur
         // Utilise une redirection HTTP 302 standard (OAuth best practice)
@@ -2134,6 +2140,7 @@ serve(async (req) => {
         )
       }
     }
+    } // Fin du bloc if (!isPublicRoute)
 
     // Route not found
     return new Response(
