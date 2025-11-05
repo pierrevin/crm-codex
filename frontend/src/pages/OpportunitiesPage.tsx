@@ -306,7 +306,7 @@ function CreateOpportunityModal({ onClose, onCreated }: { onClose: () => void; o
     }
 
     try {
-      await api.post('/api/opportunities', {
+      const { data: newOpportunity } = await api.post('/api/opportunities', {
         title,
         stage,
         amount: amount ? parseFloat(amount) : undefined,
@@ -316,6 +316,10 @@ function CreateOpportunityModal({ onClose, onCreated }: { onClose: () => void; o
       });
       onCreated();
       onClose();
+      // Naviguer vers la page de détail de l'opportunité créée pour voir le lien Drive
+      if (newOpportunity?.id) {
+        window.location.href = `/opportunites/${newOpportunity.id}`;
+      }
     } catch (error) {
       console.error('Erreur création opportunité:', error);
       alert('Erreur lors de la création');

@@ -1333,6 +1333,9 @@ serve(async (req) => {
                 const createdOppFolder = await createFolder(at, oppFolderName, companyFolderId)
                 // Mettre à jour l'opportunité avec le folderId
                 await supabase.from('Opportunity').update({ googleDriveFolderId: createdOppFolder.id, updatedAt: now }).eq('id', newId)
+                
+                // Mettre à jour l'objet data pour inclure le googleDriveFolderId dans la réponse
+                data.googleDriveFolderId = createdOppFolder.id
               }
             }
           }
@@ -1342,8 +1345,15 @@ serve(async (req) => {
         }
       }
 
+      // Re-sélectionner l'opportunité pour avoir toutes les données à jour (y compris googleDriveFolderId)
+      const { data: finalOpportunity } = await supabase
+        .from('Opportunity')
+        .select('*, contact:Contact(*), company:Company(*)')
+        .eq('id', newId)
+        .single()
+
       return new Response(
-        JSON.stringify(data),
+        JSON.stringify(finalOpportunity || data),
         { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }

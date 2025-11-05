@@ -100,11 +100,20 @@ export function OpportunityDetailPage() {
       companyId: opportunity.companyId || undefined
     };
     if (isNew) {
-      await api.post('/api/opportunities', payload);
+      const { data: newOpportunity } = await api.post('/api/opportunities', payload);
+      // Naviguer vers la page de détail de l'opportunité créée pour voir le lien Drive
+      if (newOpportunity?.id) {
+        navigate(`/opportunites/${newOpportunity.id}`);
+      } else {
+        navigate('/opportunites');
+      }
     } else if (id) {
       await api.patch(`/api/opportunities/${id}`, payload);
+      // Recharger les données pour avoir les mises à jour (dossiers Drive, etc.)
+      await loadOpportunity(id);
+    } else {
+      navigate('/opportunites');
     }
-    navigate('/opportunites');
   };
 
   const handleDelete = async () => {
