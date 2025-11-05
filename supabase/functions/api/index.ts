@@ -547,7 +547,9 @@ serve(async (req) => {
           
           if (insertError) {
             console.error('Error inserting token:', insertError)
-            return returnResponse(false, 'Erreur lors de l\'enregistrement du token')
+            console.error('Insert error details:', JSON.stringify(insertError, null, 2))
+            console.error('Token data:', { userId, hasAccessToken: !!tokenJson.access_token, hasRefreshToken: !!tokenJson.refresh_token })
+            return returnResponse(false, `Erreur lors de l'enregistrement du token: ${insertError.message || insertError.code || 'Erreur inconnue'}`)
           }
         }
 
