@@ -1306,7 +1306,7 @@ serve(async (req) => {
                   
                   // Mettre à jour UNIQUEMENT si l'entreprise n'a toujours pas de folderId (évite les doublons en cas de création simultanée)
                   // Utiliser une condition WHERE pour éviter les mises à jour inutiles
-                  const { data: updatedCompany } = await supabase
+                  const { data: updatedCompany, error: updateCompanyError } = await supabase
                     .from('Company')
                     .update({ googleDriveFolderId: companyFolderId, updatedAt: now })
                     .eq('id', data.companyId)
@@ -1314,10 +1314,17 @@ serve(async (req) => {
                     .select('googleDriveFolderId')
                     .single()
                   
+                  if (updateCompanyError) {
+                    console.error('Erreur mise à jour googleDriveFolderId entreprise:', updateCompanyError)
+                  } else {
+                    console.log('googleDriveFolderId sauvegardé pour entreprise:', data.companyId, '=', companyFolderId)
+                  }
+                  
                   // Si la mise à jour n'a pas fonctionné (car un autre processus a déjà créé le dossier), récupérer le folderId existant
                   if (!updatedCompany?.googleDriveFolderId) {
                     const { data: currentCompany } = await supabase.from('Company').select('googleDriveFolderId').eq('id', data.companyId).single()
                     if (currentCompany?.googleDriveFolderId) {
+                      console.log('Récupération googleDriveFolderId existant pour entreprise:', currentCompany.googleDriveFolderId)
                       companyFolderId = currentCompany.googleDriveFolderId
                     }
                   }
