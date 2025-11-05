@@ -12,15 +12,26 @@ api.interceptors.request.use((config) => {
 
   // Si l'API cible est une Edge Function Supabase
   const isSupabaseEdge = typeof api.defaults.baseURL === 'string' && api.defaults.baseURL.includes('.supabase.co/functions/v1');
-  if (isSupabaseEdge && anonKey) {
+  if (isSupabaseEdge) {
     // Sanitize valeurs (éviter caractères non ASCII dans headers)
     const sanitize = (s?: string) => (s ?? '').replace(/[^\x20-\x7E]/g, '').trim();
-    const anon = sanitize(anonKey);
+    
+    // ANON key est REQUIS pour toutes les requêtes Supabase Edge Functions
+    if (!anonKey) {
+      console.error('VITE_SUPABASE_ANON_KEY manquant ! Vérifiez la configuration Vercel.');
+    }
+    const anon = sanitize(anonKey || '');
     const at = sanitize(accessToken ?? '');
-    // Supabase requiert Authorization + apikey pour atteindre la fonction
-    (config.headers as any).Authorization = `Bearer ${anon}`;
-    (config.headers as any).apikey = anon;
-    // JWT utilisateur dans un header custom
+    
+    // Supabase requiert TOUJOURS Authorization + apikey (même pour routes publiques)
+    if (anon) {
+      (config.headers as any).Authorization = `Bearer ${anon}`;
+      (config.headers as any).apikey = anon;
+    } else {
+      console.warn('ANON key manquante, requête vers Supabase Edge Function peut échouer');
+    }
+    
+    // JWT utilisateur dans un header custom (seulement si présent)
     if (at) {
       (config.headers as any)['x-user-authorization'] = `Bearer ${at}`;
     }
