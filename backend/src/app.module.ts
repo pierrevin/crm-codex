@@ -14,6 +14,7 @@ import { OpportunitiesModule } from './opportunities/opportunities.module';
 import { PrismaModule } from './common/prisma/prisma.module';
 import { UsersModule } from './users/users.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
+import { IntegrationsModule } from './integrations/integrations.module';
 
 @Module({
   imports: [
@@ -36,7 +37,8 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     ActivitiesModule,
     ImportsModule,
     WebhooksModule,
-    GoogleModule
+    GoogleModule,
+    IntegrationsModule
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard }

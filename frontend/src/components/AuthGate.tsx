@@ -6,7 +6,7 @@ import { useAuth } from '../hooks/useAuth';
 export function AuthGate() {
   const { tokens, login, loading } = useAuth();
   const location = useLocation();
-  const [email, setEmail] = useState('admin@crm-codex.local');
+  const [email, setEmail] = useState('pierrevincenot@immediatlab.fr');
   const [password, setPassword] = useState('AdminCRM2024!');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);

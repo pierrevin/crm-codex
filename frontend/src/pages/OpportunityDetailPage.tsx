@@ -26,6 +26,10 @@ type OpportunityResponse = OpportunityPayload & {
   id: string;
   contact?: { id: string; firstName: string; lastName?: string } | null;
   company?: { id: string; name: string } | null;
+  googleDriveFolderId?: string;
+  tiimeQuoteId?: string;
+  quoteUrl?: string;
+  invoiceUrls?: string[];
 };
 
 export function OpportunityDetailPage() {
@@ -39,6 +43,9 @@ export function OpportunityDetailPage() {
   const [contacts, setContacts] = useState<any[]>([]);
   const [companies, setCompanies] = useState<any[]>([]);
   const [loading, setLoading] = useState(!isNew);
+  const [driveFolderId, setDriveFolderId] = useState<string | undefined>(undefined);
+  const [quoteUrl, setQuoteUrl] = useState<string | undefined>(undefined);
+  const [invoiceUrls, setInvoiceUrls] = useState<string[]>([]);
 
   useEffect(() => {
     void loadContacts();
@@ -77,6 +84,9 @@ export function OpportunityDetailPage() {
       contactId: data.contact?.id,
       companyId: data.company?.id
     });
+    setDriveFolderId(data.googleDriveFolderId);
+    setQuoteUrl(data.quoteUrl);
+    setInvoiceUrls(data.invoiceUrls || []);
     setLoading(false);
   };
 
@@ -132,6 +142,43 @@ export function OpportunityDetailPage() {
           </button>
         )}
       </div>
+      {!isNew && (
+        <div className="mb-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm flex items-center justify-between">
+          <div className="text-sm text-slate-700">Accès documents opportunité</div>
+          <div className="flex gap-2">
+            {driveFolderId && (
+              <a
+                href={`https://drive.google.com/drive/folders/${driveFolderId}`}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-md border border-green-200 px-3 py-2 text-xs text-green-700 hover:bg-green-50"
+              >
+                📂 Dossier Drive
+              </a>
+            )}
+            {quoteUrl && (
+              <a
+                href={quoteUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-md border border-indigo-200 px-3 py-2 text-xs text-indigo-700 hover:bg-indigo-50"
+              >
+                📄 Dernier devis
+              </a>
+            )}
+            {invoiceUrls && invoiceUrls.length > 0 && (
+              <a
+                href={invoiceUrls[invoiceUrls.length - 1]}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-md border border-amber-200 px-3 py-2 text-xs text-amber-700 hover:bg-amber-50"
+              >
+                🧾 Dernière facture
+              </a>
+            )}
+          </div>
+        </div>
+      )}
       <form onSubmit={onSubmit} className="space-y-4 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
         <div>
           <label className="block text-sm font-medium text-slate-700">Titre *</label>

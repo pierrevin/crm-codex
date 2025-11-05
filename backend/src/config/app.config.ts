@@ -12,8 +12,11 @@ type AppConfigKeys = {
     clientId: string;
     clientSecret: string;
     redirectUri: string;
+    scopes: string[];
   };
+  googleDriveRootFolderId: string;
   webAppUrl: string;
+  makeWebhookSecret: string;
   admin: {
     email: string;
     password: string;
@@ -33,9 +36,16 @@ export const appConfig = registerAs<AppConfig>('app', () => ({
   google: {
     clientId: process.env.GOOGLE_CLIENT_ID ?? '',
     clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? '',
-    redirectUri: process.env.GOOGLE_REDIRECT_URI ?? ''
+    redirectUri: process.env.GOOGLE_REDIRECT_URI ?? '',
+    scopes: [
+      'https://www.googleapis.com/auth/gmail.readonly',
+      'https://www.googleapis.com/auth/calendar.events',
+      'https://www.googleapis.com/auth/drive'
+    ]
   },
+  googleDriveRootFolderId: process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID ?? '',
   webAppUrl: process.env.WEB_APP_URL ?? 'http://localhost:5173',
+  makeWebhookSecret: process.env.MAKE_WEBHOOK_SECRET ?? '',
   admin: {
     email: process.env.ADMIN_EMAIL ?? 'admin@example.com',
     password: process.env.ADMIN_PASSWORD ?? 'ChangeMe123!'

@@ -78,6 +78,9 @@ model Company {
   legacyCode        String?
   locale            String?
   notes             String?
+  // Intégrations externes
+  tiimeId              String?
+  googleDriveFolderId  String?
   tags              Tag[]
   statusClient      Boolean   @default(false)
   statusProspect    Boolean   @default(false)
@@ -134,6 +137,12 @@ model Opportunity {
   owner       User?            @relation("OpportunityOwner", fields: [ownerId], references: [id])
   ownerId     String?
   activities  Activity[]
+  // Intégrations externes
+  googleDriveFolderId String?
+  tiimeQuoteId        String?
+  quoteUrl            String?
+  tiimeInvoiceIds     String[]   @db.Text
+  invoiceUrls         String[]   @db.Text
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
 }

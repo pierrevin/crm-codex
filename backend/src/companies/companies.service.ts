@@ -2,6 +2,8 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { GoogleService } from '../google/google.service';
+import { WebhooksService } from '../webhooks/webhooks.service';
 
 import { CreateCompanyDto } from './dto/create-company.dto';
 import { UpdateCompanyDto } from './dto/update-company.dto';
@@ -10,7 +12,9 @@ import { UpdateCompanyDto } from './dto/update-company.dto';
 export class CompaniesService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly audit: AuditService
+    private readonly audit: AuditService,
+    private readonly google: GoogleService,
+    private readonly webhooks: WebhooksService
   ) {}
 
   list() {
@@ -36,6 +40,13 @@ export class CompaniesService {
     }
     const company = await this.prisma.company.create({ data });
     await this.audit.log('company', company.id, 'created');
+    try { await this.webhooks.trigger('company.created', company); } catch {}
+    // Créer/assurer le dossier Drive de la société
+    try {
+      await this.google.ensureCompanyFolder(company as any);
+    } catch (e) {
+      // On n'échoue pas la création CRM si Drive n'est pas disponible
+    }
     return company;
   }
 
@@ -53,6 +64,13 @@ export class CompaniesService {
     }
     const company = await this.prisma.company.update({ where: { id }, data });
     await this.audit.log('company', id, 'updated');
+    try { await this.webhooks.trigger('company.updated', company); } catch {}
+    // S'assurer que le dossier Drive existe
+    try {
+      await this.google.ensureCompanyFolder(company as any);
+    } catch (e) {
+      // silencieux
+    }
     return company;
   }
 

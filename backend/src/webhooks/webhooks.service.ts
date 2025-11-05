@@ -1,5 +1,6 @@
 import { HttpService } from '@nestjs/axios';
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 
 import { AuditService } from '../audit/audit.service';
@@ -14,7 +15,8 @@ export class WebhooksService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly http: HttpService,
-    private readonly audit: AuditService
+    private readonly audit: AuditService,
+    private readonly config: ConfigService
   ) {}
 
   list() {
@@ -32,8 +34,13 @@ export class WebhooksService {
     await Promise.all(
       hooks.map(async (hook) => {
         try {
+          const secret = this.config.get<string>('app.makeWebhookSecret') ?? '';
           await firstValueFrom(
-            this.http.post(hook.url, { event, payload, sentAt: new Date().toISOString() })
+            this.http.post(
+              hook.url,
+              { event, payload, sentAt: new Date().toISOString() },
+              { headers: secret ? { 'x-make-signature': secret } : undefined }
+            )
           );
           this.logger.log(`Webhook ${hook.id} sent`);
         } catch (error) {

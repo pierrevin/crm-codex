@@ -5,13 +5,17 @@ import { google } from 'googleapis';
 import { ActivitiesService } from '../activities/activities.service';
 import { AppConfig } from '../config/app.config';
 import { UsersService } from '../users/users.service';
+import { PrismaService } from '../common/prisma/prisma.service';
+
+import { Opportunity, Company } from '@prisma/client';
 
 @Injectable()
 export class GoogleService {
   constructor(
     private readonly config: ConfigService,
     private readonly users: UsersService,
-    private readonly activities: ActivitiesService
+    private readonly activities: ActivitiesService,
+    private readonly prisma: PrismaService
   ) {}
 
   private getOAuthClient() {
@@ -29,12 +33,10 @@ export class GoogleService {
 
   async generateAuthUrl(userId: string) {
     const client = this.getOAuthClient();
+    const cfg = this.config.get<AppConfig>('app')!;
     const url = client.generateAuthUrl({
       access_type: 'offline',
-      scope: [
-        'https://www.googleapis.com/auth/gmail.readonly',
-        'https://www.googleapis.com/auth/calendar.events'
-      ],
+      scope: cfg.google.scopes,
       state: userId
     });
     return { url };
@@ -99,5 +101,70 @@ export class GoogleService {
       );
     }
     return { imported: events.length };
+  }
+
+  private async getDriveClient() {
+    const cfg = this.config.get<AppConfig>('app')!;
+    const adminEmail = cfg.admin.email;
+    const admin = await this.users.findByEmail(adminEmail);
+    if (!admin?.googleRefreshToken) {
+      throw new UnauthorizedException('Google (admin) non connecté');
+    }
+    const client = this.getOAuthClient();
+    client.setCredentials({ refresh_token: admin.googleRefreshToken });
+    return google.drive({ version: 'v3', auth: client });
+  }
+
+  private buildFolderUrl(id: string) {
+    return `https://drive.google.com/drive/folders/${id}`;
+  }
+
+  async ensureCompanyFolder(company: Company): Promise<{ id: string; url: string }> {
+    if (company.googleDriveFolderId) {
+      return { id: company.googleDriveFolderId, url: this.buildFolderUrl(company.googleDriveFolderId) };
+    }
+    const drive = await this.getDriveClient();
+    const cfg = this.config.get<AppConfig>('app')!;
+    const name = `${company.name} - ${company.id}`;
+    const { data } = await drive.files.create({
+      requestBody: {
+        name,
+        mimeType: 'application/vnd.google-apps.folder',
+        parents: cfg.googleDriveRootFolderId ? [cfg.googleDriveRootFolderId] : undefined
+      },
+      fields: 'id'
+    });
+    const id = data.id as string;
+    await this.prisma.company.update({ where: { id: company.id }, data: { googleDriveFolderId: id } });
+    return { id, url: this.buildFolderUrl(id) };
+  }
+
+  async ensureOpportunityFolder(company: Company, opportunity: Opportunity): Promise<{ id: string; url: string }> {
+    if (opportunity.googleDriveFolderId) {
+      return { id: opportunity.googleDriveFolderId, url: this.buildFolderUrl(opportunity.googleDriveFolderId) };
+    }
+    const { id: companyFolderId } = await this.ensureCompanyFolder(company);
+    const drive = await this.getDriveClient();
+    const createdAt = opportunity.createdAt ?? new Date();
+    const yyyymmdd = new Date(createdAt).toISOString().slice(0, 10).replace(/-/g, '');
+    const titleSane = (opportunity.title || 'Opportunity').substring(0, 60);
+    const name = `${yyyymmdd}_${titleSane}_${opportunity.id}`;
+    const { data } = await drive.files.create({
+      requestBody: {
+        name,
+        mimeType: 'application/vnd.google-apps.folder',
+        parents: [companyFolderId]
+      },
+      fields: 'id'
+    });
+    const id = data.id as string;
+    await this.prisma.opportunity.update({ where: { id: opportunity.id }, data: { googleDriveFolderId: id } });
+    return { id, url: this.buildFolderUrl(id) };
+  }
+
+  async renameOpportunityFolder(opportunity: Opportunity, newName: string) {
+    if (!opportunity.googleDriveFolderId) return;
+    const drive = await this.getDriveClient();
+    await drive.files.update({ fileId: opportunity.googleDriveFolderId, requestBody: { name: newName } });
   }
 }

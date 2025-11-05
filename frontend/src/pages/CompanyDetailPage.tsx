@@ -19,6 +19,7 @@ type Company = {
   id: string;
   name: string;
   domain?: string;
+  googleDriveFolderId?: string;
   isIndividual?: boolean;
   addressStreet?: string;
   addressZip?: string;
@@ -970,6 +971,16 @@ export function CompanyDetailPage() {
           <div className="flex gap-2">
             {!isEditing ? (
               <>
+                {company.googleDriveFolderId && (
+                  <a
+                    href={`https://drive.google.com/drive/folders/${company.googleDriveFolderId}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-2 rounded-md border border-green-200 px-3 py-2 text-sm text-green-700 hover:bg-green-50"
+                  >
+                    📂 Dossier Drive
+                  </a>
+                )}
                 <button
                   onClick={() => setIsEditing(true)}
                   className="flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50"
