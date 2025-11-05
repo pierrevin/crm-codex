@@ -1331,8 +1331,19 @@ serve(async (req) => {
                 const oppFolderName = `${yyyymmdd}_${titleSane}_${stage}`
                 
                 const createdOppFolder = await createFolder(at, oppFolderName, companyFolderId)
+                console.log('Dossier opportunité créé:', createdOppFolder.id, 'pour opportunité:', newId)
+                
                 // Mettre à jour l'opportunité avec le folderId
-                await supabase.from('Opportunity').update({ googleDriveFolderId: createdOppFolder.id, updatedAt: now }).eq('id', newId)
+                const { error: updateOppError } = await supabase
+                  .from('Opportunity')
+                  .update({ googleDriveFolderId: createdOppFolder.id, updatedAt: now })
+                  .eq('id', newId)
+                
+                if (updateOppError) {
+                  console.error('Erreur mise à jour googleDriveFolderId opportunité:', updateOppError)
+                } else {
+                  console.log('googleDriveFolderId sauvegardé pour opportunité:', newId, '=', createdOppFolder.id)
+                }
                 
                 // Mettre à jour l'objet data pour inclure le googleDriveFolderId dans la réponse
                 data.googleDriveFolderId = createdOppFolder.id
@@ -1342,15 +1353,22 @@ serve(async (req) => {
         } catch (driveError) {
           // Erreur silencieuse - ne pas bloquer la création de l'opportunité
           console.error('Erreur lors de la création des dossiers Drive:', driveError)
+          console.error('Stack:', driveError instanceof Error ? driveError.stack : 'N/A')
         }
       }
 
       // Re-sélectionner l'opportunité pour avoir toutes les données à jour (y compris googleDriveFolderId)
-      const { data: finalOpportunity } = await supabase
+      const { data: finalOpportunity, error: finalError } = await supabase
         .from('Opportunity')
         .select('*, contact:Contact(*), company:Company(*)')
         .eq('id', newId)
         .single()
+      
+      if (finalError) {
+        console.error('Erreur re-sélection opportunité:', finalError)
+      } else {
+        console.log('Opportunité finale:', { id: finalOpportunity?.id, googleDriveFolderId: finalOpportunity?.googleDriveFolderId, companyGoogleDriveFolderId: finalOpportunity?.company?.googleDriveFolderId })
+      }
 
       return new Response(
         JSON.stringify(finalOpportunity || data),
