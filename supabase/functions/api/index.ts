@@ -364,23 +364,38 @@ serve(async (req) => {
     if (path === 'google/auth-url' && method === 'GET') {
       const clientId = Deno.env.get('GOOGLE_CLIENT_ID') ?? ''
       const webAppUrlRaw = Deno.env.get('WEB_APP_URL')
+      const url = new URL(req.url)
+      const isLogin = url.searchParams.get('login') === 'true'
       
-      // Construire l'URI de redirection vers le frontend (solution professionnelle)
-      // Le frontend recevra le code OAuth et appellera ensuite l'Edge Function avec les bons headers
+      // Construire l'URI de redirection selon le contexte (login ou connexion Drive)
       let redirectUri: string
-      if (webAppUrlRaw && 
-          typeof webAppUrlRaw === 'string' && 
-          webAppUrlRaw !== 'undefined' && 
-          webAppUrlRaw !== 'null' &&
-          webAppUrlRaw.length > 0 &&
-          webAppUrlRaw.startsWith('http')) {
-        redirectUri = `${webAppUrlRaw}/auth/google/callback`
+      if (isLogin) {
+        // Pour le login, utiliser la route de callback login
+        if (webAppUrlRaw && 
+            typeof webAppUrlRaw === 'string' && 
+            webAppUrlRaw !== 'undefined' && 
+            webAppUrlRaw !== 'null' &&
+            webAppUrlRaw.length > 0 &&
+            webAppUrlRaw.startsWith('http')) {
+          redirectUri = `${webAppUrlRaw}/auth/google/login`
+        } else {
+          redirectUri = 'https://crm-codex.vercel.app/auth/google/login'
+        }
       } else {
-        // Fallback vers valeur par défaut
-        redirectUri = 'https://crm-codex.vercel.app/auth/google/callback'
+        // Pour la connexion Drive (avec userId)
+        if (webAppUrlRaw && 
+            typeof webAppUrlRaw === 'string' && 
+            webAppUrlRaw !== 'undefined' && 
+            webAppUrlRaw !== 'null' &&
+            webAppUrlRaw.length > 0 &&
+            webAppUrlRaw.startsWith('http')) {
+          redirectUri = `${webAppUrlRaw}/auth/google/callback`
+        } else {
+          redirectUri = 'https://crm-codex.vercel.app/auth/google/callback'
+        }
       }
       
-      console.log('Using frontend redirect URI:', redirectUri)
+      console.log('Using frontend redirect URI:', redirectUri, 'isLogin:', isLogin)
       
       // Valider que l'URI est valide
       if (!redirectUri || !redirectUri.startsWith('https://')) {
@@ -389,7 +404,12 @@ serve(async (req) => {
           { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
-      const scopes = [ 'https://www.googleapis.com/auth/drive' ]
+      
+      // Scopes différents selon le contexte
+      const scopes = isLogin 
+        ? [ 'openid', 'https://www.googleapis.com/auth/userinfo.email', 'https://www.googleapis.com/auth/userinfo.profile', 'https://www.googleapis.com/auth/drive' ]
+        : [ 'https://www.googleapis.com/auth/drive' ]
+      
       const u = new URL('https://accounts.google.com/o/oauth2/v2/auth')
       u.searchParams.set('client_id', clientId)
       u.searchParams.set('redirect_uri', redirectUri)
@@ -397,7 +417,7 @@ serve(async (req) => {
       u.searchParams.set('access_type', 'offline')
       u.searchParams.set('prompt', 'consent')
       u.searchParams.set('scope', scopes.join(' '))
-      const state = new URL(req.url).searchParams.get('state') ?? ''
+      const state = url.searchParams.get('state') ?? ''
       if (state) u.searchParams.set('state', state)
       return new Response(JSON.stringify({ url: u.toString() }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
@@ -574,33 +594,209 @@ serve(async (req) => {
         }
     }
 
+    // ===== AUTHENTICATION VIA GOOGLE =====
+    if (path === 'auth/google' && method === 'POST') {
+      const { code } = await req.json()
+      
+      if (!code) {
+        return new Response(
+          JSON.stringify({ message: 'Code OAuth manquant' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      const clientId = Deno.env.get('GOOGLE_CLIENT_ID') ?? ''
+      const clientSecret = Deno.env.get('GOOGLE_CLIENT_SECRET') ?? ''
+      
+      if (!clientId || !clientSecret) {
+        return new Response(
+          JSON.stringify({ message: 'Google OAuth non configuré' }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      // Construire l'URI de redirection pour le login
+      const webAppUrlRaw = Deno.env.get('WEB_APP_URL')
+      let redirectUri: string
+      if (webAppUrlRaw && 
+          typeof webAppUrlRaw === 'string' && 
+          webAppUrlRaw !== 'undefined' && 
+          webAppUrlRaw !== 'null' &&
+          webAppUrlRaw.length > 0 &&
+          webAppUrlRaw.startsWith('http')) {
+        redirectUri = `${webAppUrlRaw}/auth/google/login`
+      } else {
+        redirectUri = 'https://crm-codex.vercel.app/auth/google/login'
+      }
+
+      try {
+        // Échanger le code contre un token Google
+        const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            code,
+            client_id: clientId,
+            client_secret: clientSecret,
+            redirect_uri: redirectUri,
+            grant_type: 'authorization_code'
+          })
+        })
+
+        if (!tokenRes.ok) {
+          const errorText = await tokenRes.text()
+          console.error('Token exchange failed:', tokenRes.status, errorText)
+          return new Response(
+            JSON.stringify({ message: 'Échec de l\'échange du code OAuth' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+
+        const tokenJson = await tokenRes.json()
+        
+        if (!tokenJson.access_token) {
+          return new Response(
+            JSON.stringify({ message: 'Token d\'accès manquant' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+
+        // Récupérer les infos utilisateur Google
+        const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+          headers: { Authorization: `Bearer ${tokenJson.access_token}` }
+        })
+
+        if (!userInfoRes.ok) {
+          return new Response(
+            JSON.stringify({ message: 'Impossible de récupérer les informations utilisateur Google' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+
+        const userInfo = await userInfoRes.json()
+        const googleEmail = userInfo.email
+
+        if (!googleEmail) {
+          return new Response(
+            JSON.stringify({ message: 'Email Google manquant' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+
+        // Chercher ou créer l'utilisateur dans la table User
+        let { data: user } = await supabase
+          .from('User')
+          .select('*')
+          .eq('email', googleEmail)
+          .single()
+
+        const now = new Date().toISOString()
+        
+        if (!user) {
+          // Créer un nouvel utilisateur
+          const newId = crypto.randomUUID()
+          const { data: inserted, error: insertError } = await supabase
+            .from('User')
+            .insert({ 
+              id: newId, 
+              email: googleEmail, 
+              passwordHash: '', // Pas de mot de passe pour les utilisateurs Google
+              createdAt: now, 
+              updatedAt: now 
+            })
+            .select('*')
+            .single()
+          
+          if (insertError || !inserted) {
+            console.error('Error creating user:', insertError)
+            return new Response(
+              JSON.stringify({ message: 'Erreur lors de la création de l\'utilisateur' }),
+              { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            )
+          }
+          user = inserted
+        }
+
+        // Stocker le token Google dans GoogleToken
+        const expiryDate = tokenJson.expires_in ? new Date(Date.now() + tokenJson.expires_in * 1000).toISOString() : null
+        const { data: existingToken } = await supabase.from('GoogleToken').select('*').eq('userId', user.id).single()
+        
+        if (existingToken) {
+          // Mettre à jour le token existant
+          await supabase.from('GoogleToken').update({
+            accessToken: tokenJson.access_token,
+            refreshToken: tokenJson.refresh_token ?? existingToken.refreshToken, // Garder l'ancien refresh token si Google n'en renvoie pas
+            scope: tokenJson.scope,
+            tokenType: tokenJson.token_type,
+            expiryDate,
+            updatedAt: now
+          }).eq('userId', user.id)
+        } else {
+          // Créer un nouveau token
+          await supabase.from('GoogleToken').insert({
+            userId: user.id,
+            accessToken: tokenJson.access_token,
+            refreshToken: tokenJson.refresh_token,
+            scope: tokenJson.scope,
+            tokenType: tokenJson.token_type,
+            expiryDate,
+            createdAt: now,
+            updatedAt: now
+          })
+        }
+
+        // Générer les tokens JWT du CRM
+        const accessToken = await createAccessToken(user.id)
+        const refreshToken = await createRefreshToken(user.id)
+        
+        // Stocker le refresh token en base
+        await supabase.from('RefreshToken').insert({ 
+          token: refreshToken, 
+          userId: user.id, 
+          expiresAt: new Date(Date.now() + 7*24*60*60*1000).toISOString() 
+        })
+
+        return new Response(
+          JSON.stringify({ accessToken, refreshToken }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+
+      } catch (error) {
+        console.error('Error in Google auth:', error)
+        return new Response(
+          JSON.stringify({ message: `Erreur: ${error instanceof Error ? error.message : 'Erreur inconnue'}` }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+    }
+
     // ===== AUTHENTICATED ROUTES =====
     // Skip auth check for public routes (already handled above)
-    const publicRoutes = ['google/callback', 'google/auth-url', 'google/status', 'auth/login', 'auth/refresh', 'auth/health', 'auth/bootstrap-admin', 'auth/test-login']
+    const publicRoutes = ['google/callback', 'google/auth-url', 'google/status', 'auth/login', 'auth/google', 'auth/refresh', 'auth/health', 'auth/bootstrap-admin', 'auth/test-login']
     const isPublicRoute = publicRoutes.includes(path)
     
     if (!isPublicRoute) {
-      // Extract and verify JWT token
+    // Extract and verify JWT token
       // IMPORTANT: Supabase Edge Functions require 'apikey' header for platform auth
       // User JWT is sent in 'x-user-authorization' header (NOT in Authorization)
       const userAuthHeader = req.headers.get('x-user-authorization') || ''
       if (!userAuthHeader?.startsWith('Bearer ')) {
-        return new Response(
+      return new Response(
           JSON.stringify({ code: 401, message: 'Missing authorization header' }),
-          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
 
       const token = userAuthHeader.substring(7)
-      const payload = await verifyAccessToken(token)
-      if (!payload) {
-        return new Response(
+    const payload = await verifyAccessToken(token)
+    if (!payload) {
+      return new Response(
           JSON.stringify({ code: 401, message: 'Invalid token' }),
-          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
 
-      const userId = payload.userId
+    const userId = payload.userId
 
       // ==== Helpers Google Drive ====
     async function getGoogleTokenRecord(uid: string) {
@@ -640,7 +836,13 @@ serve(async (req) => {
       const refreshed = await refreshAccessToken(rec.refreshToken as string)
       if (refreshed?.access_token) {
         const expiryDate = refreshed.expires_in ? new Date(Date.now() + refreshed.expires_in * 1000).toISOString() : rec.expiryDate
-        await supabase.from('GoogleToken').update({ accessToken: refreshed.access_token, expiryDate, updatedAt: new Date().toISOString() }).eq('userId', uid)
+        // IMPORTANT: Ne pas mettre à jour le refreshToken car Google ne le renvoie pas toujours dans la réponse de refresh
+        // Le refreshToken reste le même et ne doit jamais être supprimé
+        await supabase.from('GoogleToken').update({ 
+          accessToken: refreshed.access_token, 
+          expiryDate, 
+          updatedAt: new Date().toISOString() 
+        }).eq('userId', uid)
         return refreshed.access_token as string
       }
       return rec.accessToken as string
@@ -675,6 +877,19 @@ serve(async (req) => {
       })
       if (!res.ok) throw new Error('Failed to rename file')
       return await res.json()
+    }
+
+    async function deleteFolder(accessToken: string, folderId: string) {
+      // Supprimer définitivement le dossier (pas seulement le mettre à la corbeille)
+      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${accessToken}` }
+      })
+      if (!res.ok) {
+        const errorText = await res.text()
+        throw new Error(`Failed to delete folder: ${res.status} ${errorText}`)
+      }
+      return true
     }
 
     // ===== DRIVE ROUTES =====
@@ -1453,6 +1668,78 @@ serve(async (req) => {
 
     if (path.startsWith('opportunities/') && method === 'DELETE') {
       const id = path.split('/')[1]
+      
+      // Récupérer l'opportunité avant suppression pour obtenir googleDriveFolderId et companyId
+      const { data: opportunity, error: fetchError } = await supabase
+        .from('Opportunity')
+        .select('googleDriveFolderId, companyId')
+        .eq('id', id)
+        .single()
+      
+      if (fetchError) throw fetchError
+      
+      // Supprimer le dossier Drive de l'opportunité si il existe
+      if (opportunity?.googleDriveFolderId) {
+        try {
+          const at = await getValidAccessToken(userId)
+          if (at) {
+            await deleteFolder(at, opportunity.googleDriveFolderId)
+            console.log('Dossier opportunité supprimé dans Drive:', opportunity.googleDriveFolderId)
+          } else {
+            console.warn('Token Google manquant, impossible de supprimer le dossier Drive')
+          }
+        } catch (driveError) {
+          console.error('Erreur lors de la suppression du dossier Drive opportunité:', driveError)
+          // Ne pas bloquer la suppression de l'opportunité si la suppression Drive échoue
+        }
+      }
+      
+      // Compter les opportunités restantes pour cette entreprise
+      let shouldDeleteCompanyFolder = false
+      if (opportunity?.companyId) {
+        const { count, error: countError } = await supabase
+          .from('Opportunity')
+          .select('id', { count: 'exact', head: true })
+          .eq('companyId', opportunity.companyId)
+          .neq('id', id) // Exclure l'opportunité qu'on est en train de supprimer
+        
+        if (!countError && count === 0) {
+          // C'est la dernière opportunité de cette entreprise
+          shouldDeleteCompanyFolder = true
+        }
+      }
+      
+      // Supprimer le dossier entreprise si c'était la dernière opportunité
+      if (shouldDeleteCompanyFolder && opportunity?.companyId) {
+        try {
+          const { data: company } = await supabase
+            .from('Company')
+            .select('googleDriveFolderId')
+            .eq('id', opportunity.companyId)
+            .single()
+          
+          if (company?.googleDriveFolderId) {
+            const at = await getValidAccessToken(userId)
+            if (at) {
+              await deleteFolder(at, company.googleDriveFolderId)
+              console.log('Dossier entreprise supprimé dans Drive:', company.googleDriveFolderId)
+              
+              // Mettre à jour l'entreprise pour retirer la référence au dossier
+              await supabase
+                .from('Company')
+                .update({ googleDriveFolderId: null, updatedAt: new Date().toISOString() })
+                .eq('id', opportunity.companyId)
+            } else {
+              console.warn('Token Google manquant, impossible de supprimer le dossier Drive entreprise')
+            }
+          }
+        } catch (driveError) {
+          console.error('Erreur lors de la suppression du dossier Drive entreprise:', driveError)
+          // Ne pas bloquer la suppression de l'opportunité si la suppression Drive échoue
+        }
+      }
+      
+      // Supprimer l'opportunité en base
       const { error } = await supabase
         .from('Opportunity')
         .delete()
