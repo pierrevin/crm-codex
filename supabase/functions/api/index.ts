@@ -415,7 +415,12 @@ serve(async (req) => {
       u.searchParams.set('redirect_uri', redirectUri)
       u.searchParams.set('response_type', 'code')
       u.searchParams.set('access_type', 'offline')
-      u.searchParams.set('prompt', 'consent')
+      // Pour le login, ne pas forcer le consentement si l'utilisateur a déjà autorisé
+      // Pour la connexion Drive, utiliser 'consent' seulement si nécessaire
+      // Si isLogin, ne pas mettre 'prompt' pour permettre la réutilisation du consentement
+      if (!isLogin) {
+        u.searchParams.set('prompt', 'consent')
+      }
       u.searchParams.set('scope', scopes.join(' '))
       const state = url.searchParams.get('state') ?? ''
       if (state) u.searchParams.set('state', state)

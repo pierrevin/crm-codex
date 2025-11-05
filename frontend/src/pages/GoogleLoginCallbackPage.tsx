@@ -46,8 +46,9 @@ export function GoogleLoginCallbackPage() {
           localStorage.setItem('accessToken', response.data.accessToken);
           localStorage.setItem('refreshToken', response.data.refreshToken);
           
-          // Succès - rediriger vers le dashboard
-          navigate('/dashboard', { replace: true });
+          // Forcer le rechargement pour que AuthGate détecte les nouveaux tokens
+          window.location.href = '/dashboard';
+          return;
         } else {
           // Erreur retournée par l'Edge Function
           setError(response.data.message || 'Erreur lors de la connexion');

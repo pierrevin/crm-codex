@@ -31,11 +31,11 @@ export function AuthGate() {
     setIsConnectingGoogle(true);
     setError(null);
     try {
-      // Obtenir l'URL OAuth Google pour le login (sans userId car on n'est pas encore connecté)
-      const { data } = await api.get('/api/google/auth-url')
+      // Obtenir l'URL OAuth Google pour le login avec le paramètre login=true
+      const { data } = await api.get('/api/google/auth-url?login=true')
       if (data.url) {
-        // Rediriger vers Google OAuth avec un paramètre spécial pour indiquer que c'est pour le login
-        window.location.href = `${data.url}&login=true`
+        // Rediriger vers Google OAuth
+        window.location.href = data.url
       } else {
         setError('Erreur: Impossible de générer l\'URL OAuth')
         setIsConnectingGoogle(false)
