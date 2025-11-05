@@ -1,6 +1,11 @@
 -- Table pour stocker les tokens OAuth Google
 -- Cette table stocke les tokens d'accès Google pour chaque utilisateur
-CREATE TABLE IF NOT EXISTS "GoogleToken" (
+
+-- Supprimer la table si elle existe déjà (pour réinitialiser)
+DROP TABLE IF EXISTS "GoogleToken" CASCADE;
+
+-- Créer la table avec les colonnes en camelCase (comme dans le code)
+CREATE TABLE "GoogleToken" (
     "userId" TEXT NOT NULL,
     "accessToken" TEXT NOT NULL,
     "refreshToken" TEXT,
@@ -14,5 +19,5 @@ CREATE TABLE IF NOT EXISTS "GoogleToken" (
 );
 
 -- Créer un index pour améliorer les performances
-CREATE INDEX IF NOT EXISTS "GoogleToken_userId_idx" ON "GoogleToken"("userId");
+CREATE INDEX "GoogleToken_userId_idx" ON "GoogleToken"("userId");
 
