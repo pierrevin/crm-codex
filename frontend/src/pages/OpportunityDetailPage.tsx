@@ -75,18 +75,23 @@ export function OpportunityDetailPage() {
 
   const loadOpportunity = async (opportunityId: string) => {
     setLoading(true);
-    const { data } = await api.get<OpportunityResponse>(`/api/opportunities/${opportunityId}`);
-    setOpportunity({
-      title: data.title,
-      stage: data.stage,
-      amount: data.amount,
-      closeDate: data.closeDate,
-      contactId: data.contact?.id,
-      companyId: data.company?.id
-    });
-    setDriveFolderId(data.googleDriveFolderId);
-    setQuoteUrl(data.quoteUrl);
-    setInvoiceUrls(data.invoiceUrls || []);
+    try {
+      const { data } = await api.get<OpportunityResponse>(`/api/opportunities/${opportunityId}`);
+      setOpportunity({
+        title: data.title,
+        stage: data.stage,
+        amount: data.amount,
+        closeDate: data.closeDate,
+        contactId: data.contact?.id,
+        companyId: data.company?.id
+      });
+      setDriveFolderId(data.googleDriveFolderId);
+      setQuoteUrl(data.quoteUrl);
+      setInvoiceUrls(data.invoiceUrls || []);
+      console.log('Opportunity loaded:', { googleDriveFolderId: data.googleDriveFolderId, quoteUrl: data.quoteUrl, invoiceUrls: data.invoiceUrls });
+    } catch (error) {
+      console.error('Erreur chargement opportunité:', error);
+    }
     setLoading(false);
   };
 
@@ -152,27 +157,34 @@ export function OpportunityDetailPage() {
         )}
       </div>
       {!isNew && (
-        <div className="mb-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm flex items-center justify-between">
-          <div className="text-sm text-slate-700">Accès documents opportunité</div>
-          <div className="flex gap-2">
-            {driveFolderId && (
+        <div className="mb-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="mb-2 text-sm font-medium text-slate-700">Accès documents</div>
+          <div className="flex flex-wrap gap-2">
+            {driveFolderId ? (
               <a
                 href={`https://drive.google.com/drive/folders/${driveFolderId}`}
                 target="_blank"
                 rel="noreferrer"
-                className="rounded-md border border-green-200 px-3 py-2 text-xs text-green-700 hover:bg-green-50"
+                className="flex items-center gap-2 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm font-medium text-green-700 hover:bg-green-100"
               >
-                📂 Dossier Drive
+                <span>📂</span>
+                Dossier Drive
               </a>
+            ) : (
+              <span className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
+                <span>📂</span>
+                Dossier Drive (création en cours...)
+              </span>
             )}
             {quoteUrl && (
               <a
                 href={quoteUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="rounded-md border border-indigo-200 px-3 py-2 text-xs text-indigo-700 hover:bg-indigo-50"
+                className="flex items-center gap-2 rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100"
               >
-                📄 Dernier devis
+                <span>📄</span>
+                Dernier devis
               </a>
             )}
             {invoiceUrls && invoiceUrls.length > 0 && (
@@ -180,9 +192,10 @@ export function OpportunityDetailPage() {
                 href={invoiceUrls[invoiceUrls.length - 1]}
                 target="_blank"
                 rel="noreferrer"
-                className="rounded-md border border-amber-200 px-3 py-2 text-xs text-amber-700 hover:bg-amber-50"
+                className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-700 hover:bg-amber-100"
               >
-                🧾 Dernière facture
+                <span>🧾</span>
+                Dernière facture
               </a>
             )}
           </div>

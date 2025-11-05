@@ -127,6 +127,7 @@ export function CompanyDetailPage() {
         contacts: allContacts,
         opportunities: allOpportunities
       });
+      console.log('Company loaded:', { googleDriveFolderId: companyData.googleDriveFolderId, name: companyData.name });
       setEditName(companyData.name);
       setEditDomain(companyData.domain || '');
       setEditIsIndividual(!!companyData.isIndividual);
@@ -969,18 +970,25 @@ export function CompanyDetailPage() {
             )}
           </div>
           <div className="flex gap-2">
+            {/* Lien Drive toujours visible (même en mode édition) */}
+            {company.googleDriveFolderId ? (
+              <a
+                href={`https://drive.google.com/drive/folders/${company.googleDriveFolderId}`}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-2 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm font-medium text-green-700 hover:bg-green-100"
+              >
+                <span>📂</span>
+                Dossier Drive
+              </a>
+            ) : (
+              <span className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
+                <span>📂</span>
+                Dossier Drive (créé lors de la première opportunité)
+              </span>
+            )}
             {!isEditing ? (
               <>
-                {company.googleDriveFolderId && (
-                  <a
-                    href={`https://drive.google.com/drive/folders/${company.googleDriveFolderId}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center gap-2 rounded-md border border-green-200 px-3 py-2 text-sm text-green-700 hover:bg-green-50"
-                  >
-                    📂 Dossier Drive
-                  </a>
-                )}
                 <button
                   onClick={() => setIsEditing(true)}
                   className="flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50"
