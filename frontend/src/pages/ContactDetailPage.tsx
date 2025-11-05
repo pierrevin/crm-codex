@@ -209,10 +209,12 @@ export function ContactDetailPage() {
             companies={companies}
             selectedCompanyId={contact.companyId}
             onSelectCompany={(companyId) => setContact({ ...contact, companyId })}
-            onCreateCompany={async (name) => {
-              const { data: newCompany } = await api.post('/api/companies', { name });
+            onCreateCompany={async (name: string, companyData?: any) => {
+              const payload = companyData || { name };
+              const { data: newCompany } = await api.post('/api/companies', payload);
               setCompanies([...companies, newCompany]);
               setContact({ ...contact, companyId: newCompany.id });
+              return newCompany;
             }}
           />
         </div>

@@ -197,7 +197,7 @@ export function DashboardPage() {
           >
             <PlusIcon className="h-6 w-6 text-indigo-600" />
             <div className="text-left">
-              <p className="font-semibold text-slate-900">Nouveau client</p>
+              <p className="font-semibold text-slate-900">Nouvelle entreprise</p>
               <p className="text-xs text-slate-500">Entreprise</p>
             </div>
           </button>

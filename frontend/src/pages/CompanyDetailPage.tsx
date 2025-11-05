@@ -139,7 +139,7 @@ export function CompanyDetailPage() {
       setEditNotes(companyData.notes || '');
       setEditTags((companyData.tags || []).join(', '));
     } catch (error) {
-      console.error('Erreur chargement client:', error);
+      console.error('Erreur chargement entreprise:', error);
     }
     setLoading(false);
   };
@@ -178,11 +178,11 @@ export function CompanyDetailPage() {
     
     const hasData = (company?.contacts?.length || 0) > 0 || (company?.opportunities?.length || 0) > 0;
     if (hasData) {
-      alert('Impossible de supprimer ce client car il a des contacts ou des opportunités liés. Supprimez-les d\'abord.');
+      alert('Impossible de supprimer cette entreprise car elle a des contacts ou des opportunités liés. Supprimez-les d\'abord.');
       return;
     }
 
-    if (!window.confirm(`Êtes-vous sûr de vouloir supprimer le client "${company?.name}" ?`)) {
+    if (!window.confirm(`Êtes-vous sûr de vouloir supprimer l'entreprise "${company?.name}" ?`)) {
       return;
     }
 
@@ -214,13 +214,13 @@ export function CompanyDetailPage() {
     }
   };
 
-  const handleSearchSirene = async () => {
-    const searchSiret = isEditing ? editSiret : (company?.siret || '');
-    const searchName = isEditing ? editName : (company?.name || '');
+  const handleSearchSirene = async (searchNameOverride?: string) => {
+    // Gérer le cas isNew (formulaire de création) et isEditing
+    const searchSiret = isNew || isEditing ? editSiret : (company?.siret || '');
+    const searchName = searchNameOverride || (isNew || isEditing ? editName : (company?.name || ''));
 
     if (!searchSiret && !searchName) {
-      alert('Veuillez saisir un SIRET ou un nom d\'entreprise');
-      return;
+      return; // Ne pas alerter si c'est une recherche automatique
     }
 
     setIsSearchingSirene(true);
@@ -228,17 +228,29 @@ export function CompanyDetailPage() {
     
     try {
       let searchType: 'siret' | 'siren' | 'name' = 'name';
-      let searchValue = searchName;
+      let searchValue = (searchName || '').trim();
 
-      if (searchSiret && searchSiret.length >= 9) {
-        searchType = searchSiret.length === 14 ? 'siret' : 'siren';
-        searchValue = normalizeSiret(searchSiret);
+      if (searchSiret && searchSiret.length >= 9 && !searchNameOverride) {
+        const normalized = normalizeSiret(searchSiret);
+        if (normalized.length === 14) {
+          searchType = 'siret';
+          searchValue = normalized;
+        } else if (normalized.length === 9) {
+          searchType = 'siren';
+          searchValue = normalized;
+        }
+      }
+
+      if (!searchValue || searchValue.length < 2) {
+        setIsSearchingSirene(false);
+        return;
       }
 
       const response = await searchSirene({ type: searchType, value: searchValue });
       
       if (response.results.length === 0) {
-        alert('Aucune entreprise trouvée dans la base Sirene');
+        setSireneResults([]);
+        setShowSireneResults(false);
         setIsSearchingSirene(false);
         return;
       }
@@ -247,13 +259,67 @@ export function CompanyDetailPage() {
       setShowSireneResults(true);
     } catch (error: any) {
       console.error('Erreur recherche Sirene:', error);
-      alert(error.response?.data?.message || 'Erreur lors de la recherche Sirene');
+      // Ne pas alerter pour les recherches automatiques
+      if (!searchNameOverride) {
+        const errorMessage = error.response?.data?.message || error.message || 'Erreur lors de la recherche Sirene';
+        alert(errorMessage);
+      }
     } finally {
       setIsSearchingSirene(false);
     }
   };
 
+  // Debounce pour la recherche automatique sur le nom dans le formulaire de création
+  useEffect(() => {
+    if (!isNew) return; // Seulement pour le formulaire de création
+    
+    const trimmedName = editName?.trim() || '';
+    
+    if (trimmedName.length >= 3) {
+      const timeoutId = setTimeout(async () => {
+        try {
+          setIsSearchingSirene(true);
+          setShowSireneResults(false);
+          
+          const response = await searchSirene({ type: 'name', value: trimmedName });
+          
+          if (response.results.length === 0) {
+            setSireneResults([]);
+            setShowSireneResults(false);
+          } else {
+            console.log('Sirene results received:', response.results);
+            console.log('First result details:', JSON.stringify(response.results[0], null, 2));
+            setSireneResults(response.results);
+            setShowSireneResults(true);
+          }
+        } catch (error: any) {
+          console.error('Erreur recherche automatique Sirene:', error);
+          setSireneResults([]);
+          setShowSireneResults(false);
+        } finally {
+          setIsSearchingSirene(false);
+        }
+      }, 500); // Debounce de 500ms
+
+      return () => clearTimeout(timeoutId);
+    } else {
+      setShowSireneResults(false);
+      setSireneResults([]);
+    }
+  }, [editName, isNew]);
+
   const handleSelectSireneResult = (result: SireneResult) => {
+    // Confirmation avant application
+    const confirmMessage = `Confirmez-vous la sélection de cette entreprise ?\n\n` +
+      `Nom: ${result.denomination}\n` +
+      (result.siret ? `SIRET: ${formatSiret(result.siret)}\n` : '') +
+      (result.addressCity ? `Adresse: ${result.addressStreet || ''} ${result.addressZip || ''} ${result.addressCity}\n` : '') +
+      (result.codeNAF ? `Code NAF: ${result.codeNAF}${result.libelleNAF ? ` - ${result.libelleNAF}` : ''}` : '');
+    
+    if (!window.confirm(confirmMessage)) {
+      return;
+    }
+
     // Auto-remplir les champs avec les données Sirene
     setEditName(result.denomination);
     setEditSiret(result.siret || '');
@@ -263,12 +329,12 @@ export function CompanyDetailPage() {
     setEditAddressCountry(result.addressCountry || 'France');
     setEditIsIndividual(result.isIndividual || false);
     
-    // Afficher le code NAF dans les notes si pas de champ dédié
-    if (result.codeNAF || result.libelleNAF) {
+    // Afficher le code NAF dans les notes si pas de champ dédié (seulement si notes vides)
+    if ((result.codeNAF || result.libelleNAF) && !editNotes) {
       const nafInfo = result.libelleNAF 
         ? `Code NAF: ${result.codeNAF} - ${result.libelleNAF}`
         : `Code NAF: ${result.codeNAF}`;
-      setEditNotes((prev) => prev ? `${prev}\n${nafInfo}` : nafInfo);
+      setEditNotes(nafInfo);
     }
 
     setShowSireneResults(false);
@@ -286,16 +352,25 @@ export function CompanyDetailPage() {
       const searchSiret = isEditing ? editSiret : (company?.siret || '');
       const searchName = isEditing ? editName : (company?.name || '');
 
-      if (searchSiret && searchSiret.length === 14) {
-        params.siret = normalizeSiret(searchSiret);
-      } else if (searchSiret && searchSiret.length === 9) {
-        params.siren = normalizeSiret(searchSiret);
-      } else if (searchName) {
-        params.name = searchName;
-      } else {
-        alert('Veuillez saisir un SIRET, SIREN ou nom d\'entreprise');
-        setIsFillingFromSirene(false);
-        return;
+      // Validation et normalisation
+      if (searchSiret && searchSiret.length >= 9) {
+        const normalized = normalizeSiret(searchSiret);
+        if (normalized.length === 14) {
+          params.siret = normalized;
+        } else if (normalized.length === 9) {
+          params.siren = normalized;
+        }
+      }
+      
+      if (!params.siret && !params.siren) {
+        const trimmedName = searchName?.trim();
+        if (trimmedName && trimmedName.length >= 2) {
+          params.name = trimmedName;
+        } else {
+          alert('Veuillez saisir un SIRET (14 chiffres), SIREN (9 chiffres) ou nom d\'entreprise valide');
+          setIsFillingFromSirene(false);
+          return;
+        }
       }
 
       await fillCompanyFromSirene(id, params);
@@ -304,7 +379,20 @@ export function CompanyDetailPage() {
       alert('Fiche complétée depuis Sirene avec succès');
     } catch (error: any) {
       console.error('Erreur complétion Sirene:', error);
-      alert(error.response?.data?.message || 'Erreur lors de la complétion depuis Sirene');
+      console.error('Error response:', error.response);
+      console.error('Error data:', error.response?.data);
+      
+      let errorMessage = error.response?.data?.message || error.message || 'Erreur lors de la complétion depuis Sirene';
+      
+      // Ajouter des détails supplémentaires si disponibles
+      if (error.response?.data?.error) {
+        const errorDetails = typeof error.response.data.error === 'string' 
+          ? error.response.data.error 
+          : error.response.data.error.message || JSON.stringify(error.response.data.error);
+        errorMessage += `\n\nDétails: ${errorDetails}`;
+      }
+      
+      alert(errorMessage);
     } finally {
       setIsFillingFromSirene(false);
     }
@@ -342,7 +430,7 @@ export function CompanyDetailPage() {
   if (isNew) {
     return (
       <div className="mx-auto max-w-xl">
-        <h1 className="mb-6 text-2xl font-semibold text-slate-900">Créer un client</h1>
+        <h1 className="mb-6 text-2xl font-semibold text-slate-900">Créer une entreprise</h1>
         <form 
           onSubmit={async (e) => {
             e.preventDefault();
@@ -374,14 +462,124 @@ export function CompanyDetailPage() {
           className="space-y-4 rounded-lg border border-slate-200 bg-white p-6 shadow-sm"
         >
           <div>
-            <label className="block text-sm font-medium text-slate-700">Nom du client *</label>
-            <input
-              value={editName}
-              onChange={(e) => setEditName(e.target.value)}
-              required
-              className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
-            />
+            <label className="block text-sm font-medium text-slate-700">Nom de l'entreprise *</label>
+            <div className="relative">
+              <input
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                required
+                placeholder="Commencez à taper le nom pour rechercher dans Sirene..."
+                className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none pr-10"
+              />
+              {isSearchingSirene && (
+                <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                  <span className="text-xs text-indigo-600">🔍 Recherche...</span>
+                </div>
+              )}
+            </div>
+            {editName && editName.trim().length >= 3 && (
+              <p className="mt-1 text-xs text-slate-500">
+                Recherche automatique dans Sirene...
+              </p>
+            )}
           </div>
+          
+          {/* Résultats recherche Sirene automatique - Sous le champ nom */}
+          {showSireneResults && sireneResults.length > 0 && (
+            <div className="rounded-xl border-2 border-indigo-300 bg-gradient-to-br from-indigo-50 to-blue-50 p-4 shadow-lg">
+              <div className="mb-3 flex items-center gap-2">
+                <span className="rounded-full bg-indigo-600 px-2.5 py-1 text-xs font-bold text-white">
+                  {sireneResults.length}
+                </span>
+                <p className="text-sm font-semibold text-indigo-900">
+                  entreprise{sireneResults.length > 1 ? 's' : ''} trouvée{sireneResults.length > 1 ? 's' : ''} dans Sirene
+                </p>
+              </div>
+              <div className="space-y-3">
+                {sireneResults.map((result, index) => (
+                  <button
+                    key={index}
+                    type="button"
+                    onClick={() => handleSelectSireneResult(result)}
+                    className="w-full text-left rounded-lg border-2 border-indigo-200 bg-white p-4 hover:border-indigo-400 hover:shadow-md transition-all duration-200"
+                  >
+                    <div className="mb-3">
+                      <h4 className="text-lg font-bold text-slate-900 leading-tight mb-2">{result.denomination}</h4>
+                      
+                      {/* SIRET en évidence */}
+                      {result.siret && (
+                        <div className="mb-2 flex items-center gap-2 bg-slate-50 px-2 py-1 rounded">
+                          <span className="text-xs font-semibold text-slate-600">SIRET:</span>
+                          <span className="font-mono text-sm font-bold text-slate-900">{formatSiret(result.siret)}</span>
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div className="space-y-2 text-sm border-t border-slate-200 pt-2">
+                      {/* SIREN si différent du SIRET */}
+                      {result.siren && result.siret && result.siren !== result.siret.substring(0, 9) && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-slate-500">🔢</span>
+                          <div className="text-slate-700">
+                            <span className="text-xs font-semibold text-slate-600">SIREN: </span>
+                            <span className="font-mono text-sm font-semibold text-slate-900">{result.siren}</span>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Adresse complète - Afficher même si seulement code postal ou ville */}
+                      {(result.addressStreet || result.addressZip || result.addressCity) && (
+                        <div className="flex items-start gap-2">
+                          <span className="text-slate-500">📍</span>
+                          <div className="text-slate-700 flex-1">
+                            {result.addressStreet && (
+                              <div className="font-medium">{result.addressStreet}</div>
+                            )}
+                            {(result.addressZip || result.addressCity) && (
+                              <div className="text-slate-600">
+                                {result.addressZip && (
+                                  <span className="font-semibold">{result.addressZip}</span>
+                                )}
+                                {result.addressZip && result.addressCity && ' '}
+                                {result.addressCity && (
+                                  <span>{result.addressCity}</span>
+                                )}
+                              </div>
+                            )}
+                            {result.addressCountry && result.addressCountry !== 'France' && (
+                              <div className="text-xs text-slate-500">{result.addressCountry}</div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Code NAF et libellé - Toujours afficher si disponible */}
+                      {result.codeNAF && (
+                        <div className="flex items-start gap-2">
+                          <span className="text-slate-500">🏷️</span>
+                          <div className="text-slate-700 flex-1">
+                            <div>
+                              <span className="font-mono font-semibold text-slate-900">{result.codeNAF}</span>
+                              {result.libelleNAF && (
+                                <span className="text-slate-600 ml-2">• {result.libelleNAF}</span>
+                              )}
+                            </div>
+                            {result.libelleNAF && (
+                              <div className="text-xs text-slate-600 mt-1 leading-relaxed">{result.libelleNAF}</div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div className="mt-3 pt-2 border-t border-indigo-100">
+                      <span className="text-xs font-medium text-indigo-600">Cliquer pour remplir automatiquement →</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <div>
             <label className="block text-sm font-medium text-slate-700">Domaine</label>
             <input
@@ -453,31 +651,6 @@ export function CompanyDetailPage() {
               className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
             />
           </div>
-          
-          {/* Résultats recherche Sirene */}
-          {showSireneResults && sireneResults.length > 0 && (
-            <div className="mt-2 rounded-lg border border-indigo-200 bg-indigo-50 p-3">
-              <p className="text-xs font-medium text-indigo-900 mb-2">
-                {sireneResults.length} entreprise{sireneResults.length > 1 ? 's' : ''} trouvée{sireneResults.length > 1 ? 's' : ''} :
-              </p>
-              <div className="space-y-2">
-                {sireneResults.map((result, index) => (
-                  <button
-                    key={index}
-                    type="button"
-                    onClick={() => handleSelectSireneResult(result)}
-                    className="w-full text-left rounded-md border border-indigo-200 bg-white p-2 hover:bg-indigo-50 transition-colors"
-                  >
-                    <p className="text-sm font-medium text-slate-900">{result.denomination}</p>
-                    <p className="text-xs text-slate-600">
-                      SIRET: {formatSiret(result.siret)} • {result.addressCity || ''}
-                      {result.codeNAF && ` • NAF: ${result.codeNAF}`}
-                    </p>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
           <div className="grid grid-cols-2 gap-3">
             <input
               value={editLinkedin}
@@ -530,7 +703,7 @@ export function CompanyDetailPage() {
   }
 
   if (!company) {
-    return <div className="p-8 text-center text-slate-500">Client non trouvé</div>;
+    return <div className="p-8 text-center text-slate-500">Entreprise non trouvée</div>;
   }
 
   const totalRevenue = company.opportunities?.reduce((sum, opp) => sum + (Number(opp.amount) || 0), 0) || 0;
@@ -620,17 +793,28 @@ export function CompanyDetailPage() {
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <input
-                    value={formatSiret(editSiret)}
-                    onChange={(e) => {
-                      // Normaliser à la saisie (supprimer les espaces)
-                      const normalized = normalizeSiret(e.target.value);
-                      setEditSiret(normalized);
-                    }}
-                    placeholder="SIRET"
-                    maxLength={17} // 14 chiffres + 3 espaces
-                    className="text-sm border-b border-slate-300 focus:outline-none focus:border-indigo-500"
-                  />
+                  <div className="relative">
+                    <input
+                      value={formatSiret(editSiret)}
+                      onChange={(e) => {
+                        // Normaliser à la saisie (supprimer les espaces)
+                        const normalized = normalizeSiret(e.target.value);
+                        setEditSiret(normalized);
+                      }}
+                      placeholder="SIRET"
+                      maxLength={17} // 14 chiffres + 3 espaces
+                      className="w-full text-sm border-b border-slate-300 focus:outline-none focus:border-indigo-500 pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSearchSirene}
+                      disabled={isSearchingSirene || (!editSiret && !editName)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-xs bg-indigo-50 text-indigo-600 px-2 py-1 rounded hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Rechercher dans Sirene"
+                    >
+                      {isSearchingSirene ? '...' : '🔍'}
+                    </button>
+                  </div>
                   <input
                     value={editVat}
                     onChange={(e) => setEditVat(e.target.value)}
@@ -638,6 +822,89 @@ export function CompanyDetailPage() {
                     className="text-sm border-b border-slate-300 focus:outline-none focus:border-indigo-500"
                   />
                 </div>
+                
+                {/* Résultats recherche Sirene - Formulaire d'édition */}
+                {showSireneResults && sireneResults.length > 0 && (
+                  <div className="mt-3 rounded-xl border-2 border-indigo-300 bg-gradient-to-br from-indigo-50 to-blue-50 p-4 shadow-lg">
+                    <div className="mb-3 flex items-center gap-2">
+                      <span className="rounded-full bg-indigo-600 px-2.5 py-1 text-xs font-bold text-white">
+                        {sireneResults.length}
+                      </span>
+                      <p className="text-sm font-semibold text-indigo-900">
+                        entreprise{sireneResults.length > 1 ? 's' : ''} trouvée{sireneResults.length > 1 ? 's' : ''}
+                      </p>
+                    </div>
+                    <div className="space-y-3">
+                      {sireneResults.map((result, index) => (
+                        <button
+                          key={index}
+                          type="button"
+                          onClick={() => handleSelectSireneResult(result)}
+                          className="w-full text-left rounded-lg border-2 border-indigo-200 bg-white p-4 hover:border-indigo-400 hover:shadow-md transition-all duration-200"
+                        >
+                          <div className="mb-3">
+                            <h4 className="text-lg font-bold text-slate-900 leading-tight mb-2">{result.denomination}</h4>
+                            
+                            {/* SIRET en évidence */}
+                            {result.siret && (
+                              <div className="mb-2 flex items-center gap-2 bg-slate-50 px-2 py-1 rounded">
+                                <span className="text-xs font-semibold text-slate-600">SIRET:</span>
+                                <span className="font-mono text-sm font-bold text-slate-900">{formatSiret(result.siret)}</span>
+                              </div>
+                            )}
+                          </div>
+                          
+                          <div className="space-y-2 text-sm border-t border-slate-200 pt-2">
+                            {/* Adresse complète */}
+                            {(result.addressStreet || result.addressZip || result.addressCity) && (
+                              <div className="flex items-start gap-2">
+                                <span className="text-slate-500">📍</span>
+                                <div className="text-slate-700 flex-1">
+                                  {result.addressStreet && (
+                                    <div className="font-medium">{result.addressStreet}</div>
+                                  )}
+                                  {(result.addressZip || result.addressCity) && (
+                                    <div className="text-slate-600">
+                                      <span className="font-semibold">{result.addressZip}</span> {result.addressCity}
+                                    </div>
+                                  )}
+                                  {result.addressCountry && result.addressCountry !== 'France' && (
+                                    <div className="text-xs text-slate-500">{result.addressCountry}</div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                            
+                            {/* Code NAF et libellé */}
+                            {result.codeNAF && (
+                              <div className="flex items-start gap-2">
+                                <span className="text-slate-500">🏷️</span>
+                                <div className="text-slate-700 flex-1">
+                                  <span className="font-mono font-semibold text-slate-900">{result.codeNAF}</span>
+                                  {result.libelleNAF && (
+                                    <div className="text-xs text-slate-600 mt-0.5 leading-relaxed">{result.libelleNAF}</div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                            
+                            {/* SIREN si différent */}
+                            {result.siren && result.siret && result.siren !== result.siret.substring(0, 9) && (
+                              <div className="flex items-center gap-2 text-xs text-slate-500">
+                                <span>SIREN:</span>
+                                <span className="font-mono">{result.siren}</span>
+                              </div>
+                            )}
+                          </div>
+                          
+                          <div className="mt-3 pt-2 border-t border-indigo-100">
+                            <span className="text-xs font-medium text-indigo-600">Cliquer pour remplir automatiquement →</span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-3">
                   <input
                     value={editLinkedin}
@@ -677,17 +944,6 @@ export function CompanyDetailPage() {
                 >
                   <PencilIcon className="h-4 w-4" />
                   Modifier
-                </button>
-                <button
-                  onClick={handleFillFromSirene}
-                  disabled={isFillingFromSirene || (!company.siret && !company.name)}
-                  className="flex items-center gap-2 rounded-md border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  {isFillingFromSirene ? (
-                    <>⏳ Complétion...</>
-                  ) : (
-                    <>📥 Compléter depuis Sirene</>
-                  )}
                 </button>
                 <button
                   onClick={() => setShowMergeModal(true)}
@@ -753,7 +1009,7 @@ export function CompanyDetailPage() {
         </div>
       </div>
 
-      {/* Contacts du client */}
+      {/* Contacts de l'entreprise */}
       <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-200 bg-slate-50 px-6 py-3 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-slate-900">Contacts ({company.contacts?.length || 0})</h2>
@@ -782,12 +1038,12 @@ export function CompanyDetailPage() {
               </Link>
             ))
           ) : (
-            <p className="px-6 py-4 text-sm text-slate-500">Aucun contact pour ce client</p>
+            <p className="px-6 py-4 text-sm text-slate-500">Aucun contact pour cette entreprise</p>
           )}
         </div>
       </div>
 
-      {/* Opportunités du client */}
+      {/* Opportunités de l'entreprise */}
       <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-200 bg-slate-50 px-6 py-3 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-slate-900">Opportunités ({company.opportunities?.length || 0})</h2>
@@ -835,7 +1091,7 @@ export function CompanyDetailPage() {
               </Link>
             ))
           ) : (
-            <p className="px-6 py-4 text-sm text-slate-500">Aucune opportunité pour ce client</p>
+            <p className="px-6 py-4 text-sm text-slate-500">Aucune opportunité pour cette entreprise</p>
           )}
         </div>
       </div>
@@ -883,15 +1139,15 @@ export function CompanyDetailPage() {
       {showMergeModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
           <div className="w-full max-w-2xl rounded-lg bg-white p-6 shadow-xl">
-            <h2 className="mb-4 text-xl font-semibold text-slate-900">Fusionner des clients</h2>
+            <h2 className="mb-4 text-xl font-semibold text-slate-900">Fusionner des entreprises</h2>
             <p className="mb-4 text-sm text-slate-600">
-              Sélectionnez le client à fusionner dans <strong>{company?.name}</strong>. 
+              Sélectionnez l'entreprise à fusionner dans <strong>{company?.name}</strong>. 
               Tous les contacts et opportunités seront déplacés, et les données seront fusionnées.
             </p>
 
             <div className="mb-4">
               <label className="block text-sm font-medium text-slate-700 mb-2">
-                Client à fusionner
+                Entreprise à fusionner
               </label>
               <CompanySearchSelect
                 companies={allCompanies}
@@ -906,7 +1162,7 @@ export function CompanyDetailPage() {
                 <h3 className="mb-2 text-sm font-semibold text-amber-900">Aperçu de la fusion</h3>
                 <div className="space-y-2 text-sm">
                   <div className="flex items-center justify-between">
-                    <span className="text-amber-700">Client source:</span>
+                    <span className="text-amber-700">Entreprise source:</span>
                     <span className="font-medium text-amber-900">{mergePreview.name}</span>
                   </div>
                   <div className="flex items-center justify-between">

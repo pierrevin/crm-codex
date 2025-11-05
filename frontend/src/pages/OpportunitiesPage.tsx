@@ -301,7 +301,7 @@ function CreateOpportunityModal({ onClose, onCreated }: { onClose: () => void; o
     e.preventDefault();
     
     if (!selectedCompany) {
-      alert('Veuillez sélectionner un client');
+      alert('Veuillez sélectionner une entreprise');
       return;
     }
 

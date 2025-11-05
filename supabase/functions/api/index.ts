@@ -823,21 +823,50 @@ serve(async (req) => {
       }
 
       try {
+        // Validation des paramètres
+        if (!value || typeof value !== 'string' || value.trim().length === 0) {
+          return new Response(
+            JSON.stringify({ message: 'La valeur de recherche ne peut pas être vide' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+
         // Construire l'URL de l'API data.gouv.fr
         let apiUrl = 'https://recherche-entreprises.api.gouv.fr/search'
         
         if (type === 'siret') {
           // Normaliser le SIRET (supprimer les espaces)
           const normalizedSiret = value.replace(/\s+/g, '')
+          // Valider le format SIRET (14 chiffres)
+          if (normalizedSiret.length !== 14 || !/^\d+$/.test(normalizedSiret)) {
+            return new Response(
+              JSON.stringify({ message: 'Format SIRET invalide. Le SIRET doit contenir exactement 14 chiffres.' }),
+              { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            )
+          }
           apiUrl += `?siret=${encodeURIComponent(normalizedSiret)}`
         } else if (type === 'siren') {
           const normalizedSiren = value.replace(/\s+/g, '')
+          // Valider le format SIREN (9 chiffres)
+          if (normalizedSiren.length !== 9 || !/^\d+$/.test(normalizedSiren)) {
+            return new Response(
+              JSON.stringify({ message: 'Format SIREN invalide. Le SIREN doit contenir exactement 9 chiffres.' }),
+              { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            )
+          }
           apiUrl += `?siren=${encodeURIComponent(normalizedSiren)}`
         } else if (type === 'name') {
-          apiUrl += `?q=${encodeURIComponent(value)}`
+          const searchName = value.trim()
+          if (searchName.length < 2) {
+            return new Response(
+              JSON.stringify({ message: 'Le nom de l\'entreprise doit contenir au moins 2 caractères' }),
+              { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            )
+          }
+          apiUrl += `?q=${encodeURIComponent(searchName)}`
         } else {
           return new Response(
-            JSON.stringify({ message: 'Invalid type. Use siret, siren, or name' }),
+            JSON.stringify({ message: 'Type de recherche invalide. Utilisez siret, siren ou name' }),
             { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           )
         }
@@ -854,28 +883,314 @@ serve(async (req) => {
         }
 
         const data = await response.json()
+        
+        // Log complet du premier résultat pour debug
+        if (data.results && data.results.length > 0) {
+          console.log('=== Sirene API - Premier résultat brut (structure complète) ===')
+          console.log(JSON.stringify(data.results[0], null, 2))
+          console.log('=== Structure siege ===')
+          console.log(JSON.stringify(data.results[0].siege, null, 2))
+          console.log('=== Structure adresse ===')
+          console.log(JSON.stringify(data.results[0].siege?.adresse || data.results[0].adresse || {}, null, 2))
+        }
 
         // Formater les résultats pour notre modèle
-        const formattedResults = (data.results || []).map((result: any) => {
-          // Extraire l'adresse si disponible
-          const adresse = result.siege?.adresse || result.adresse || {}
-          
-          return {
-            siret: result.siret,
-            siren: result.siren,
-            denomination: result.nom_complet || result.denomination,
-            codeNAF: result.activite_principale || result.naf,
-            libelleNAF: result.libelle_activite_principale || null,
-            addressStreet: adresse.numero_voie ? `${adresse.numero_voie} ${adresse.type_voie || ''} ${adresse.libelle_voie || ''}`.trim() : (adresse.ligne_1 || null),
-            addressZip: adresse.code_postal || null,
-            addressCity: adresse.ville || adresse.localite || null,
-            addressCountry: 'France',
-            isIndividual: result.nature_juridique === 'Entrepreneur individuel' || result.entreprise_individuelle === true
+        const formattedResults = (data.results || []).map((result: any, index: number) => {
+          // Log complet du résultat brut pour debug
+          if (index === 0) {
+            console.log('=== RAW RESULT COMPLETE ===')
+            console.log(JSON.stringify(result, null, 2))
           }
+          
+          // Log pour debug du premier résultat
+          if (index === 0) {
+            console.log('=== Extraction adresse ===')
+            console.log('result.siege existe?', !!result.siege)
+            console.log('result.siege type:', typeof result.siege)
+            console.log('result.siege:', JSON.stringify(result.siege, null, 2))
+            console.log('result keys:', Object.keys(result))
+          }
+          
+          // Vérifier que siege existe
+          if (!result.siege) {
+            if (index === 0) {
+              console.log('⚠️ ATTENTION: result.siege est null/undefined pour ce résultat!')
+            }
+          }
+          
+          // L'API retourne l'adresse dans siege.* avec différentes structures possibles
+          // siege.adresse est une STRING complète, siege.geo_adresse est formatée
+          // siege.code_postal, siege.libelle_commune sont directement disponibles
+          
+          // Construire la rue de différentes manières
+          let addressStreet: string | null = null
+          
+          // Log pour debug
+          if (index === 0) {
+            console.log('=== Extraction détails ===')
+            console.log('result.siege?.geo_adresse:', result.siege?.geo_adresse)
+            console.log('result.siege?.adresse:', result.siege?.adresse)
+            console.log('result.siege?.code_postal:', result.siege?.code_postal)
+            console.log('result.siege?.libelle_commune:', result.siege?.libelle_commune)
+          }
+          
+          // Priorité 1: geo_adresse (adresse formatée) - extraire la partie rue
+          if (result.siege?.geo_adresse) {
+            // geo_adresse contient "14 Avenue Pierre Grenier 92100 Boulogne-Billancourt"
+            // On extrait juste la partie rue (sans code postal et ville)
+            const geoParts = result.siege.geo_adresse.split(/\s+\d{5}\s+/)
+            addressStreet = geoParts[0] || result.siege.geo_adresse
+            if (index === 0) console.log('Adresse extraite depuis geo_adresse:', addressStreet)
+          }
+          // Priorité 2: adresse (string complète) - extraire la partie rue
+          else if (result.siege?.adresse && typeof result.siege.adresse === 'string') {
+            // adresse contient "CENTRE COMMERCIAL LA GARAU AVENUE ALPHONSE DAUDET 30200 BAGNOLS-SUR-CEZE"
+            // On extrait juste la partie avant le code postal
+            const addrParts = result.siege.adresse.split(/\s+\d{5}\s+/)
+            addressStreet = addrParts[0] || result.siege.adresse
+            if (index === 0) console.log('Adresse extraite depuis adresse:', addressStreet)
+          }
+          // Priorité 3: numero_voie + libelle_voie depuis siege
+          else if (result.siege?.numero_voie && result.siege?.libelle_voie) {
+            addressStreet = `${result.siege.numero_voie} ${result.siege.type_voie || ''} ${result.siege.libelle_voie}`.trim()
+            if (index === 0) console.log('Adresse construite depuis numero_voie + libelle_voie:', addressStreet)
+          }
+          // Priorité 4: libelle_voie seul
+          else if (result.siege?.libelle_voie) {
+            addressStreet = `${result.siege.type_voie || ''} ${result.siege.libelle_voie}`.trim()
+            if (index === 0) console.log('Adresse construite depuis libelle_voie:', addressStreet)
+          }
+          // Priorité 5: complement_adresse
+          else if (result.siege?.complement_adresse) {
+            addressStreet = result.siege.complement_adresse
+            if (index === 0) console.log('Adresse depuis complement_adresse:', addressStreet)
+          }
+          
+          if (index === 0 && !addressStreet) {
+            console.log('⚠️ Aucune adresse trouvée dans result.siege')
+          }
+          
+          // Extraire le code postal - directement depuis siege
+          const addressZip = result.siege?.code_postal || null
+          if (index === 0) console.log('Code postal extrait:', addressZip)
+          
+          // Extraire la ville - directement depuis siege.libelle_commune
+          const addressCity = result.siege?.libelle_commune || null
+          if (index === 0) console.log('Ville extraite:', addressCity)
+          
+          // Extraire le code NAF de différentes sources
+          // Le code NAF peut être dans result.activite_principale ou result.siege.activite_principale
+          const codeNAF = result.siege?.activite_principale ||
+                         result.activite_principale || 
+                         result.naf || 
+                         result.activite_principale_unite_legale ||
+                         result.activitePrincipaleUniteLegale ||
+                         null
+          
+          // Extraire le libellé NAF
+          // Note: Le libellé NAF n'est généralement pas dans la réponse de recherche par nom
+          // Il faudra le récupérer via l'enrichissement ou un appel complémentaire
+          const libelleNAF = result.libelle_activite_principale || 
+                            result.activite_principale_unite_legale_libelle ||
+                            result.activitePrincipaleUniteLegaleLibelle ||
+                            null
+          
+          // Extraire le nom de différentes sources
+          const denomination = result.nom_complet || 
+                              result.denomination || 
+                              result.nom ||
+                              result.raison_sociale ||
+                              result.raisonSociale ||
+                              ''
+          
+          // Extraire SIRET depuis toutes les sources possibles
+          const siret = result.siret || 
+                       result.siege?.siret || 
+                       (result.etablissements && result.etablissements[0]?.siret) ||
+                       null
+          
+          if (index === 0) {
+            console.log('SIRET extrait:', siret, 'depuis result.siret:', result.siret, 'result.siege?.siret:', result.siege?.siret)
+          }
+          
+          // Extraire SIREN depuis toutes les sources possibles
+          const siren = result.siren || 
+                        result.siege?.siren ||
+                        (siret ? siret.substring(0, 9) : null) ||
+                        null
+          
+          if (index === 0) {
+            console.log('SIREN extrait:', siren, 'depuis result.siren:', result.siren)
+          }
+          
+          const formatted = {
+            siret: siret,
+            siren: siren,
+            denomination: denomination,
+            codeNAF: codeNAF,
+            libelleNAF: libelleNAF,
+            addressStreet: addressStreet,
+            addressZip: addressZip,
+            addressCity: addressCity,
+            addressCountry: result.siege?.pays || 'France',
+            isIndividual: result.nature_juridique === 'Entrepreneur individuel' || 
+                         result.entreprise_individuelle === true ||
+                         result.entrepriseIndividuelle === true ||
+                         result.natureJuridique === 'Entrepreneur individuel'
+          }
+          
+          // Log pour debug du premier résultat formaté
+          if (index === 0) {
+            console.log('=== Résultat formaté FINAL ===')
+            console.log('siret:', formatted.siret)
+            console.log('siren:', formatted.siren)
+            console.log('addressStreet:', formatted.addressStreet)
+            console.log('addressZip:', formatted.addressZip)
+            console.log('addressCity:', formatted.addressCity)
+            console.log('Résultat complet:', JSON.stringify(formatted, null, 2))
+          }
+          
+          return formatted
         })
 
+        // Pour les recherches par nom, si on a un SIREN mais pas de SIRET/adresse complète,
+        // on peut enrichir les résultats avec un appel supplémentaire par SIREN
+        // pour obtenir les détails complets (adresse, SIRET du siège, etc.)
+        // Note: On ne fait l'enrichissement que pour les recherches par nom (pas pour SIRET/SIREN)
+        const isNameSearch = type === 'name'
+        console.log('=== ENRICHISSEMENT ===')
+        console.log('Type de recherche:', type, 'isNameSearch:', isNameSearch)
+        console.log('Premier résultat avant enrichissement:', JSON.stringify(formattedResults[0], null, 2))
+        
+        const enrichedResults = await Promise.all(
+          formattedResults.map(async (formatted: any, index: number) => {
+            // Si on a déjà SIRET ET adresse complète (rue ET ville), on garde tel quel
+            const hasCompleteData = formatted.siret && formatted.addressStreet && formatted.addressCity
+            if (hasCompleteData) {
+              if (index === 0) {
+                console.log('Résultat', index, 'a déjà toutes les données, pas d\'enrichissement nécessaire')
+              }
+              return formatted
+            }
+            
+            // Si on a un SIREN mais pas de détails complets, on fait un appel complémentaire
+            if (formatted.siren && isNameSearch) {
+              if (index === 0) {
+                console.log('Résultat', index, 'a un SIREN mais pas de données complètes, lancement enrichissement pour SIREN:', formatted.siren)
+              }
+              try {
+                const detailUrl = `https://recherche-entreprises.api.gouv.fr/search?siren=${encodeURIComponent(formatted.siren)}`
+                if (index === 0) {
+                  console.log('Appel enrichissement:', detailUrl)
+                }
+                const detailResponse = await fetch(detailUrl, {
+                  headers: { 'Accept': 'application/json' }
+                })
+                
+                if (detailResponse.ok) {
+                  const detailData = await detailResponse.json()
+                  if (index === 0) {
+                    console.log('Réponse enrichissement - nombre de résultats:', detailData.results?.length || 0)
+                  }
+                  if (detailData.results && detailData.results.length > 0) {
+                    const detailResult = detailData.results[0]
+                    if (index === 0) {
+                      console.log('Premier résultat enrichissement:', JSON.stringify(detailResult, null, 2).substring(0, 1000))
+                    }
+                    
+                    // Extraire les détails complémentaires
+                    // L'API retourne l'adresse dans siege.adresse comme STRING, et les détails dans siege.*
+                    const detailSiege = detailResult.siege || {}
+                    if (index === 0) {
+                      console.log('Siege complet de l\'enrichissement:', JSON.stringify(detailSiege, null, 2))
+                    }
+                    
+                    // Enrichir avec les données manquantes
+                    // SIRET est dans siege.siret
+                    if (!formatted.siret && detailSiege.siret) {
+                      formatted.siret = detailSiege.siret
+                      if (index === 0) console.log('SIRET ajouté:', formatted.siret)
+                    }
+                    
+                    // Adresse : l'API retourne siege.adresse comme STRING complète
+                    // On peut aussi utiliser siege.geo_adresse (formatée) ou construire depuis les composants
+                    if (!formatted.addressStreet) {
+                      // Priorité 1: geo_adresse (adresse formatée)
+                      if (detailSiege.geo_adresse) {
+                        // geo_adresse contient "14 Avenue Pierre Grenier 92100 Boulogne-Billancourt"
+                        // On extrait juste la partie rue (sans code postal et ville)
+                        const geoParts = detailSiege.geo_adresse.split(/\s+\d{5}\s+/)
+                        formatted.addressStreet = geoParts[0] || detailSiege.geo_adresse
+                      }
+                      // Priorité 2: adresse (string complète)
+                      else if (detailSiege.adresse) {
+                        // adresse contient "CENTRE COMMERCIAL LA GARAU AVENUE ALPHONSE DAUDET 30200 BAGNOLS-SUR-CEZE"
+                        // On extrait juste la partie avant le code postal
+                        const addrParts = detailSiege.adresse.split(/\s+\d{5}\s+/)
+                        formatted.addressStreet = addrParts[0] || detailSiege.adresse
+                      }
+                      // Priorité 3: construire depuis numero_voie + libelle_voie
+                      else if (detailSiege.numero_voie && detailSiege.libelle_voie) {
+                        formatted.addressStreet = `${detailSiege.numero_voie} ${detailSiege.libelle_voie}`.trim()
+                      }
+                      // Priorité 4: complement_adresse
+                      else if (detailSiege.complement_adresse) {
+                        formatted.addressStreet = detailSiege.complement_adresse
+                      }
+                      if (index === 0 && formatted.addressStreet) {
+                        console.log('Adresse rue ajoutée:', formatted.addressStreet)
+                      }
+                    }
+                    
+                    // Code postal
+                    if (!formatted.addressZip && detailSiege.code_postal) {
+                      formatted.addressZip = detailSiege.code_postal
+                      if (index === 0) console.log('Code postal ajouté:', formatted.addressZip)
+                    }
+                    
+                    // Ville
+                    if (!formatted.addressCity && detailSiege.libelle_commune) {
+                      formatted.addressCity = detailSiege.libelle_commune
+                      if (index === 0) console.log('Ville ajoutée:', formatted.addressCity)
+                    }
+                    
+                    // Enrichir aussi le libellé NAF si disponible
+                    if (!formatted.libelleNAF && detailResult.libelle_activite_principale) {
+                      formatted.libelleNAF = detailResult.libelle_activite_principale
+                      if (index === 0) console.log('Libellé NAF ajouté:', formatted.libelleNAF)
+                    }
+                    
+                    if (index === 0) {
+                      console.log('Résultat après enrichissement:', JSON.stringify(formatted, null, 2))
+                    }
+                  } else {
+                    if (index === 0) {
+                      console.log('Aucun résultat dans l\'appel d\'enrichissement')
+                    }
+                  }
+                } else {
+                  if (index === 0) {
+                    console.log('Erreur HTTP enrichissement:', detailResponse.status, detailResponse.statusText)
+                  }
+                }
+              } catch (error) {
+                // En cas d'erreur sur l'appel complémentaire, on continue avec les données de base
+                console.log('Erreur enrichissement pour SIREN', formatted.siren, error)
+              }
+            } else {
+              if (index === 0) {
+                console.log('Résultat', index, 'ne nécessite pas d\'enrichissement - SIREN:', formatted.siren, 'isNameSearch:', isNameSearch)
+              }
+            }
+            
+            return formatted
+          })
+        )
+        
+        console.log('Enriched results (first):', JSON.stringify(enrichedResults[0] || {}).substring(0, 500))
+        
         return new Response(
-          JSON.stringify({ results: formattedResults }),
+          JSON.stringify({ results: enrichedResults }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       } catch (error: any) {
@@ -890,38 +1205,66 @@ serve(async (req) => {
     // Endpoint pour compléter une fiche existante
     if (path.startsWith('companies/') && path.includes('/sirene/fill') && method === 'POST') {
       const pathParts = path.split('/')
+      // pathParts = ['companies', 'id', 'sirene', 'fill']
       const companyId = pathParts[1]
+      
+      if (!companyId) {
+        return new Response(
+          JSON.stringify({ message: 'Company ID manquant dans l\'URL' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
       const body = await req.json()
       const { siret, siren, name } = body
 
       try {
-        // Déterminer le type de recherche
+        console.log('Fill Sirene - Company ID:', companyId, 'Body:', { siret, siren, name })
+        // Validation et normalisation
         let searchType = 'name'
-        let searchValue = name
+        let searchValue = name ? name.trim() : ''
 
         if (siret) {
+          const normalizedSiret = siret.replace(/\s+/g, '')
+          // Valider le format SIRET (14 chiffres)
+          if (normalizedSiret.length !== 14 || !/^\d+$/.test(normalizedSiret)) {
+            return new Response(
+              JSON.stringify({ message: 'Format SIRET invalide. Le SIRET doit contenir exactement 14 chiffres.' }),
+              { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            )
+          }
           searchType = 'siret'
-          searchValue = siret.replace(/\s+/g, '')
+          searchValue = normalizedSiret
         } else if (siren) {
+          const normalizedSiren = siren.replace(/\s+/g, '')
+          // Valider le format SIREN (9 chiffres)
+          if (normalizedSiren.length !== 9 || !/^\d+$/.test(normalizedSiren)) {
+            return new Response(
+              JSON.stringify({ message: 'Format SIREN invalide. Le SIREN doit contenir exactement 9 chiffres.' }),
+              { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            )
+          }
           searchType = 'siren'
-          searchValue = siren.replace(/\s+/g, '')
+          searchValue = normalizedSiren
         }
 
-        if (!searchValue) {
+        if (!searchValue || searchValue.length === 0) {
           return new Response(
-            JSON.stringify({ message: 'Missing siret, siren, or name' }),
+            JSON.stringify({ message: 'Veuillez fournir un SIRET, SIREN ou nom d\'entreprise valide' }),
             { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           )
         }
 
         // Appeler l'API Sirene
+        // Pour les recherches par nom, on peut ajouter des paramètres pour obtenir plus de détails
         let apiUrl = 'https://recherche-entreprises.api.gouv.fr/search'
         if (searchType === 'siret') {
           apiUrl += `?siret=${encodeURIComponent(searchValue)}`
         } else if (searchType === 'siren') {
           apiUrl += `?siren=${encodeURIComponent(searchValue)}`
         } else {
-          apiUrl += `?q=${encodeURIComponent(searchValue)}`
+          // Pour la recherche par nom, on peut limiter le nombre de résultats mais obtenir plus de détails
+          apiUrl += `?q=${encodeURIComponent(searchValue)}&per_page=20`
         }
 
         const response = await fetch(apiUrl, {
@@ -929,11 +1272,22 @@ serve(async (req) => {
         })
 
         if (!response.ok) {
-          throw new Error(`API returned ${response.status}`)
+          const errorText = await response.text()
+          let errorMessage = `Erreur API Sirene (${response.status})`
+          try {
+            const errorData = JSON.parse(errorText)
+            errorMessage = errorData.message || errorData.detail || errorMessage
+          } catch {
+            errorMessage = errorText || errorMessage
+          }
+          throw new Error(errorMessage)
         }
 
         const data = await response.json()
         const results = data.results || []
+
+        console.log('Sirene API response:', JSON.stringify(data).substring(0, 500))
+        console.log('Results count:', results.length)
 
         if (results.length === 0) {
           return new Response(
@@ -949,11 +1303,38 @@ serve(async (req) => {
           .eq('id', companyId)
           .single()
 
-        if (fetchError) throw fetchError
+        if (fetchError) {
+          console.error('Erreur récupération company:', fetchError)
+          return new Response(
+            JSON.stringify({ message: `Company non trouvée: ${fetchError.message}`, error: fetchError }),
+            { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+
+        if (!currentCompany) {
+          return new Response(
+            JSON.stringify({ message: 'Company non trouvée' }),
+            { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+
+        console.log('Current company:', JSON.stringify(currentCompany).substring(0, 300))
 
         // Prendre le premier résultat
         const result = results[0]
-        const adresse = result.siege?.adresse || result.adresse || {}
+        console.log('Sirene result:', JSON.stringify(result).substring(0, 500))
+        
+        // Extraire l'adresse - gérer différentes structures possibles
+        let adresse: any = {}
+        if (result.siege?.adresse) {
+          adresse = result.siege.adresse
+        } else if (result.adresse) {
+          adresse = result.adresse
+        } else if (result.siege) {
+          // Parfois l'adresse est directement dans siege
+          adresse = result.siege
+        }
+        console.log('Adresse extracted:', JSON.stringify(adresse).substring(0, 200))
 
         // Préparer les données à mettre à jour (seulement les champs vides)
         const updateData: any = {
@@ -961,20 +1342,39 @@ serve(async (req) => {
         }
 
         // Mettre à jour seulement les champs vides
-        if (!currentCompany.name && (result.nom_complet || result.denomination)) {
-          updateData.name = result.nom_complet || result.denomination
+        const companyName = result.nom_complet || result.denomination || result.nom || result.raison_sociale
+        if (!currentCompany.name && companyName) {
+          updateData.name = companyName
         }
-        if (!currentCompany.siret && result.siret) {
-          updateData.siret = result.siret
+        
+        // SIRET peut être dans différents champs
+        const companySiret = result.siret || result.siege?.siret
+        if (!currentCompany.siret && companySiret) {
+          updateData.siret = companySiret
         }
-        if (!currentCompany.siren && result.siren) {
-          updateData.siren = result.siren
+        
+        // Les champs siren, codeNAF, libelleNAF peuvent ne pas exister dans la BDD si la migration n'a pas été appliquée
+        // On vérifie si la propriété existe dans l'objet retourné par Supabase
+        const hasSirenColumn = 'siren' in currentCompany
+        const hasCodeNAFColumn = 'codeNAF' in currentCompany
+        const hasLibelleNAFColumn = 'libelleNAF' in currentCompany
+        
+        // SIREN peut être dans siren ou extrait du SIRET
+        const companySiren = result.siren || (companySiret ? companySiret.substring(0, 9) : null)
+        if (hasSirenColumn && companySiren && (!currentCompany.siren || currentCompany.siren === null)) {
+          updateData.siren = companySiren
         }
-        if (!currentCompany.codeNAF && (result.activite_principale || result.naf)) {
-          updateData.codeNAF = result.activite_principale || result.naf
+        
+        // Code NAF peut être dans différents champs
+        const companyNAF = result.activite_principale || result.naf || result.activite_principale_unite_legale
+        if (hasCodeNAFColumn && companyNAF && (!currentCompany.codeNAF || currentCompany.codeNAF === null)) {
+          updateData.codeNAF = companyNAF
         }
-        if (!currentCompany.libelleNAF && result.libelle_activite_principale) {
-          updateData.libelleNAF = result.libelle_activite_principale
+        
+        // Libellé NAF
+        const companyLibelleNAF = result.libelle_activite_principale || result.activite_principale_unite_legale_libelle
+        if (hasLibelleNAFColumn && companyLibelleNAF && (!currentCompany.libelleNAF || currentCompany.libelleNAF === null)) {
+          updateData.libelleNAF = companyLibelleNAF
         }
 
         // Adresse - seulement si vide
@@ -994,15 +1394,63 @@ serve(async (req) => {
           updateData.addressCountry = 'France'
         }
 
+        // Vérifier qu'il y a des données à mettre à jour
+        if (Object.keys(updateData).length === 1) {
+          // Seulement updatedAt, rien à mettre à jour
+          return new Response(
+            JSON.stringify({ message: 'Aucune donnée à mettre à jour (tous les champs sont déjà remplis)', data: currentCompany }),
+            { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+
+        console.log('Update data prepared:', JSON.stringify(updateData))
+
         // Mettre à jour la company
-        const { data: updatedCompany, error } = await supabase
+        let { data: updatedCompany, error: updateError } = await supabase
           .from('Company')
           .update(updateData)
           .eq('id', companyId)
           .select()
           .single()
 
-        if (error) throw error
+        console.log('Update result - error:', updateError ? JSON.stringify(updateError) : 'none')
+        console.log('Update result - data:', updatedCompany ? JSON.stringify(updatedCompany).substring(0, 200) : 'none')
+
+        // Si erreur et que c'est lié aux colonnes Sirene, réessayer sans elles
+        if (updateError && (updateError.message?.includes('siren') || updateError.message?.includes('codeNAF') || updateError.message?.includes('libelleNAF') || updateError.message?.includes('column') || updateError.code === 'PGRST116')) {
+          console.warn('Colonnes Sirene non disponibles, mise à jour sans ces champs. Error:', updateError.message)
+          const updateDataWithoutSirene = { ...updateData }
+          delete updateDataWithoutSirene.siren
+          delete updateDataWithoutSirene.codeNAF
+          delete updateDataWithoutSirene.libelleNAF
+          
+          console.log('Retrying update without Sirene columns:', JSON.stringify(updateDataWithoutSirene))
+          
+          const retryResult = await supabase
+            .from('Company')
+            .update(updateDataWithoutSirene)
+            .eq('id', companyId)
+            .select()
+            .single()
+          
+          console.log('Retry result - error:', retryResult.error ? JSON.stringify(retryResult.error) : 'none')
+          console.log('Retry result - data:', retryResult.data ? JSON.stringify(retryResult.data).substring(0, 200) : 'none')
+          
+          updatedCompany = retryResult.data
+          updateError = retryResult.error
+        }
+
+        if (updateError) {
+          console.error('Erreur mise à jour company finale:', updateError)
+          return new Response(
+            JSON.stringify({ 
+              message: `Erreur lors de la mise à jour: ${updateError.message}`,
+              error: updateError,
+              updateData: updateData
+            }),
+            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
 
         return new Response(
           JSON.stringify(updatedCompany),
@@ -1010,8 +1458,16 @@ serve(async (req) => {
         )
       } catch (error: any) {
         console.error('Erreur complétion fiche:', error)
+        console.error('Error stack:', error.stack)
+        console.error('Error details:', JSON.stringify(error, Object.getOwnPropertyNames(error)))
+        const errorMessage = error.message || 'Erreur lors de la complétion'
         return new Response(
-          JSON.stringify({ message: error.message || 'Erreur lors de la complétion' }),
+          JSON.stringify({ 
+            message: errorMessage, 
+            error: error.toString(),
+            stack: error.stack,
+            details: error
+          }),
           { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }

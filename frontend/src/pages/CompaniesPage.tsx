@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { PlusIcon, MagnifyingGlassIcon, BuildingOfficeIcon, UserGroupIcon, BriefcaseIcon, ClockIcon } from '@heroicons/react/24/outline';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 import api from '../services/apiClient';
 import { recentStorage } from '../services/localStorage';
@@ -18,8 +18,8 @@ type Company = {
 type SortOption = 'recent' | 'name-asc' | 'name-desc';
 
 export function CompaniesPage() {
+  const navigate = useNavigate();
   const [companies, setCompanies] = useState<Company[]>([]);
-  const [showModal, setShowModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<SortOption>('recent');
   const [recentCompanies, setRecentCompanies] = useState<Array<{ id: string; name: string }>>([]);
@@ -36,12 +36,12 @@ export function CompaniesPage() {
       const { data } = await api.get('/api/companies');
       setCompanies(Array.isArray(data) ? data : (data.items || data.data || []));
     } catch (error) {
-      console.error('Erreur chargement clients:', error);
+      console.error('Erreur chargement entreprises:', error);
       setCompanies([]);
     }
   };
 
-  // Filtrer et trier les clients
+  // Filtrer et trier les entreprises
   const filteredAndSortedCompanies = useMemo(() => {
     let filtered = companies;
     
@@ -84,18 +84,18 @@ export function CompaniesPage() {
       {/* En-tête */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900">Clients</h1>
-          <p className="text-sm text-slate-500 mt-1">
-            {companies.length > 0 && `${companies.length} client${companies.length > 1 ? 's' : ''} au total`}
-          </p>
+                <h1 className="text-2xl sm:text-3xl font-bold text-slate-900">Entreprises</h1>
+                <p className="text-sm text-slate-500 mt-1">
+                  {companies.length > 0 && `${companies.length} entreprise${companies.length > 1 ? 's' : ''} au total`}
+                </p>
         </div>
         <button
-          onClick={() => setShowModal(true)}
+          onClick={() => navigate('/clients/new')}
           className="flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 transition-colors"
         >
           <PlusIcon className="h-4 w-4" />
-          <span className="hidden sm:inline">Nouveau client</span>
-          <span className="sm:hidden">Nouveau</span>
+          <span className="hidden sm:inline">Nouvelle entreprise</span>
+          <span className="sm:hidden">Nouvelle</span>
         </button>
       </div>
 
@@ -106,7 +106,7 @@ export function CompaniesPage() {
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Rechercher un client par nom ou domaine..."
+          placeholder="Rechercher une entreprise par nom ou domaine..."
           className="w-full rounded-xl border border-slate-200 bg-white pl-11 pr-4 py-3 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all"
         />
         {searchQuery && (
@@ -175,11 +175,11 @@ export function CompaniesPage() {
 
       {/* Sélecteur de tri et résultats */}
       <div className="flex items-center justify-between gap-4">
-        {searchQuery && (
-          <div className="text-sm text-slate-600 font-medium">
-            {filteredAndSortedCompanies.length} client{filteredAndSortedCompanies.length > 1 ? 's' : ''} trouvé{filteredAndSortedCompanies.length > 1 ? 's' : ''}
-          </div>
-        )}
+                 {searchQuery && (
+                 <div className="text-sm text-slate-600 font-medium">
+                   {filteredAndSortedCompanies.length} entreprise{filteredAndSortedCompanies.length > 1 ? 's' : ''} trouvée{filteredAndSortedCompanies.length > 1 ? 's' : ''}
+                 </div>
+               )}
         <div className="flex items-center gap-2 ml-auto">
           <label className="text-sm text-slate-600">Trier par:</label>
           <select
@@ -194,7 +194,7 @@ export function CompaniesPage() {
         </div>
       </div>
 
-      {/* Grille de clients - Design Cards */}
+      {/* Grille d'entreprises - Design Cards */}
       {filteredAndSortedCompanies.length > 0 ? (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {filteredAndSortedCompanies.map((company) => (
@@ -241,93 +241,22 @@ export function CompaniesPage() {
           ))}
         </div>
       ) : filteredAndSortedCompanies.length === 0 && companies.length > 0 ? (
-        <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
-          <p className="text-slate-500 mb-2">Aucun client ne correspond à votre recherche.</p>
-          <button
-            onClick={() => setSearchQuery('')}
-            className="text-sm text-indigo-600 hover:text-indigo-700 font-medium"
-          >
-            Effacer la recherche
-          </button>
-        </div>
-      ) : (
-        <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
-          <p className="text-slate-500 mb-2">Aucun client pour le moment.</p>
-          <p className="text-sm text-slate-400">Cliquez sur "Nouveau client" pour en ajouter un.</p>
-        </div>
+               <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
+                 <p className="text-slate-500 mb-2">Aucune entreprise ne correspond à votre recherche.</p>
+                 <button
+                   onClick={() => setSearchQuery('')}
+                   className="text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+                 >
+                   Effacer la recherche
+                 </button>
+               </div>
+             ) : (
+               <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
+                 <p className="text-slate-500 mb-2">Aucune entreprise pour le moment.</p>
+                 <p className="text-sm text-slate-400">Cliquez sur "Nouvelle entreprise" pour en ajouter une.</p>
+               </div>
       )}
 
-      {showModal && (
-        <CreateCompanyModal
-          onClose={() => setShowModal(false)}
-          onCreated={loadCompanies}
-        />
-      )}
-    </div>
-  );
-}
-
-function CreateCompanyModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
-  const [name, setName] = useState('');
-  const [domain, setDomain] = useState('');
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      await api.post('/api/companies', {
-        name,
-        domain: domain || undefined
-      });
-      onCreated();
-      onClose();
-    } catch (error) {
-      console.error('Erreur création client:', error);
-      alert('Erreur lors de la création');
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-xl font-semibold text-slate-900 mb-6">Nouveau client</h2>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">Nom *</label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all"
-              required
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">Domaine</label>
-            <input
-              type="text"
-              value={domain}
-              onChange={(e) => setDomain(e.target.value)}
-              placeholder="exemple.com"
-              className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all"
-            />
-          </div>
-          <div className="flex gap-3 pt-4">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
-            >
-              Annuler
-            </button>
-            <button
-              type="submit"
-              className="flex-1 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
-            >
-              Créer
-            </button>
-          </div>
-        </form>
-      </div>
     </div>
   );
 }
