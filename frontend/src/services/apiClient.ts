@@ -6,7 +6,12 @@ const api = axios.create({
 
 api.interceptors.request.use((config) => {
   const accessToken = localStorage.getItem('accessToken');
-  const anonKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY as string | undefined;
+  // Accès correct aux variables d'environnement Vite
+  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+  
+  // Fallback hardcodé temporaire si la variable d'env n'est pas définie
+  const ANON_KEY_FALLBACK = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9lY2JydHllcWF0aWVleWJqdmhqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk5MTUyMDIsImV4cCI6MjA3NTQ5MTIwMn0.Z4u7oicInUcPjT19p71NRyu6ck63HSXHByH8uL5-IvY';
+  const effectiveAnonKey = anonKey || ANON_KEY_FALLBACK;
 
   config.headers = config.headers ?? {};
 
@@ -15,20 +20,16 @@ api.interceptors.request.use((config) => {
   if (isSupabaseEdge) {
     // Sanitize valeurs (éviter caractères non ASCII dans headers)
     const sanitize = (s?: string) => (s ?? '').replace(/[^\x20-\x7E]/g, '').trim();
-    
-    // ANON key est REQUIS pour toutes les requêtes Supabase Edge Functions
-    if (!anonKey) {
-      console.error('VITE_SUPABASE_ANON_KEY manquant ! Vérifiez la configuration Vercel.');
-    }
-    const anon = sanitize(anonKey || '');
+    const anon = sanitize(effectiveAnonKey);
     const at = sanitize(accessToken ?? '');
     
     // Supabase requiert TOUJOURS Authorization + apikey (même pour routes publiques)
-    if (anon) {
-      (config.headers as any).Authorization = `Bearer ${anon}`;
-      (config.headers as any).apikey = anon;
-    } else {
-      console.warn('ANON key manquante, requête vers Supabase Edge Function peut échouer');
+    (config.headers as any).Authorization = `Bearer ${anon}`;
+    (config.headers as any).apikey = anon;
+    
+    // Log pour debug si la variable d'env manque
+    if (!anonKey) {
+      console.warn('VITE_SUPABASE_ANON_KEY non définie, utilisation du fallback. Vérifiez la configuration Vercel.');
     }
     
     // JWT utilisateur dans un header custom (seulement si présent)
