@@ -364,13 +364,29 @@ serve(async (req) => {
     if (path === 'google/auth-url' && method === 'GET') {
       const clientId = Deno.env.get('GOOGLE_CLIENT_ID') ?? ''
       const redirectEnv = Deno.env.get('GOOGLE_REDIRECT_URI')
-      // Construire l'URL de callback depuis l'URL de la requête si SUPABASE_URL n'est pas défini
-      const supabaseUrl = Deno.env.get('SUPABASE_URL') || (() => {
+      
+      // Construire l'URI de redirection de manière robuste
+      let redirectUri = redirectEnv
+      
+      if (!redirectUri || redirectUri.length === 0 || redirectUri === 'undefined') {
+        // Construire depuis l'URL de la requête
         const reqUrl = new URL(req.url)
-        return `${reqUrl.protocol}//${reqUrl.host}`
-      })()
-      const defaultCallback = `${supabaseUrl}/functions/v1/api/google/callback`
-      const redirectUri = (redirectEnv && redirectEnv.length > 0) ? redirectEnv : defaultCallback
+        const host = reqUrl.host
+        // Normaliser le host pour toujours utiliser HTTPS
+        const normalizedHost = host.replace(/^http:\/\//, '').replace(/^https:\/\//, '')
+        redirectUri = `https://${normalizedHost}/functions/v1/api/google/callback`
+        console.log('Constructed redirect URI from request:', redirectUri)
+      } else {
+        console.log('Using configured GOOGLE_REDIRECT_URI:', redirectUri)
+      }
+      
+      // Valider que l'URI est valide
+      if (!redirectUri || !redirectUri.startsWith('https://')) {
+        return new Response(
+          JSON.stringify({ error: 'Invalid redirect URI configuration', redirectUri }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
       const scopes = [ 'https://www.googleapis.com/auth/drive' ]
       const u = new URL('https://accounts.google.com/o/oauth2/v2/auth')
       u.searchParams.set('client_id', clientId)
@@ -393,9 +409,17 @@ serve(async (req) => {
         // Utilise une redirection HTTP 302 standard (OAuth best practice)
         const redirectToApp = (success: boolean, message?: string) => {
         const webAppUrlRaw = Deno.env.get('WEB_APP_URL')
-        const appUrl = (webAppUrlRaw && webAppUrlRaw !== 'undefined' && webAppUrlRaw.length > 0) 
-          ? webAppUrlRaw 
-          : 'https://crm-codex.vercel.app'
+        // Validation robuste : rejeter les valeurs invalides (undefined, null, chaîne vide, chaîne "undefined")
+        let appUrl = 'https://crm-codex.vercel.app' // valeur par défaut
+        if (webAppUrlRaw && 
+            typeof webAppUrlRaw === 'string' && 
+            webAppUrlRaw !== 'undefined' && 
+            webAppUrlRaw !== 'null' &&
+            webAppUrlRaw.length > 0 &&
+            webAppUrlRaw.startsWith('http')) {
+          appUrl = webAppUrlRaw
+        }
+        console.log('Redirecting to appUrl:', appUrl)
         const params = new URLSearchParams()
         if (success) {
           params.set('google', 'connected')
@@ -435,9 +459,16 @@ serve(async (req) => {
       // Helper pour retourner une page HTML d'erreur
       const errorHtml = (title: string, message: string, details?: string) => {
         const webAppUrlRaw = Deno.env.get('WEB_APP_URL')
-        const appUrl = (webAppUrlRaw && webAppUrlRaw !== 'undefined' && webAppUrlRaw.length > 0) 
-          ? webAppUrlRaw 
-          : 'https://crm-codex.vercel.app'
+        // Validation robuste
+        let appUrl = 'https://crm-codex.vercel.app'
+        if (webAppUrlRaw && 
+            typeof webAppUrlRaw === 'string' && 
+            webAppUrlRaw !== 'undefined' && 
+            webAppUrlRaw !== 'null' &&
+            webAppUrlRaw.length > 0 &&
+            webAppUrlRaw.startsWith('http')) {
+          appUrl = webAppUrlRaw
+        }
         return new Response(
           `<html><head><meta charset="utf-8"><title>${title}</title></head><body style="font-family: sans-serif; padding: 2rem; max-width: 600px; margin: 0 auto;"><h1>${title}</h1><p>${message}</p>${details ? `<p style="color: #666; font-size: 0.9em;">${details}</p>` : ''}<p><a href="${appUrl}/dashboard">Retour au dashboard</a></p></body></html>`,
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'text/html; charset=utf-8' } }
@@ -604,29 +635,34 @@ serve(async (req) => {
     }
 
     // ===== AUTHENTICATED ROUTES =====
-    // Extract and verify JWT token
-    // IMPORTANT: Supabase Edge Functions require 'apikey' header for platform auth
-    // User JWT is sent in 'x-user-authorization' header (NOT in Authorization)
-    const userAuthHeader = req.headers.get('x-user-authorization') || ''
-    if (!userAuthHeader?.startsWith('Bearer ')) {
-      return new Response(
-        JSON.stringify({ code: 401, message: 'Unauthorized - Missing user token in x-user-authorization header' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
+    // Skip auth check for public routes (already handled above)
+    const publicRoutes = ['google/callback', 'google/auth-url', 'google/status', 'auth/login', 'auth/refresh', 'auth/health', 'auth/bootstrap-admin', 'auth/test-login']
+    const isPublicRoute = publicRoutes.includes(path)
+    
+    if (!isPublicRoute) {
+      // Extract and verify JWT token
+      // IMPORTANT: Supabase Edge Functions require 'apikey' header for platform auth
+      // User JWT is sent in 'x-user-authorization' header (NOT in Authorization)
+      const userAuthHeader = req.headers.get('x-user-authorization') || ''
+      if (!userAuthHeader?.startsWith('Bearer ')) {
+        return new Response(
+          JSON.stringify({ code: 401, message: 'Missing authorization header' }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
 
-    const token = userAuthHeader.substring(7)
-    const payload = await verifyAccessToken(token)
-    if (!payload) {
-      return new Response(
-        JSON.stringify({ code: 401, message: 'Invalid token' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
+      const token = userAuthHeader.substring(7)
+      const payload = await verifyAccessToken(token)
+      if (!payload) {
+        return new Response(
+          JSON.stringify({ code: 401, message: 'Invalid token' }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
 
-    const userId = payload.userId
+      const userId = payload.userId
 
-    // ==== Helpers Google Drive ====
+      // ==== Helpers Google Drive ====
     async function getGoogleTokenRecord(uid: string) {
       const { data } = await supabase.from('GoogleToken').select('*').eq('userId', uid).single()
       return data as any | null
