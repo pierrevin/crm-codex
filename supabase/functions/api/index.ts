@@ -324,24 +324,18 @@ serve(async (req) => {
       const webAppUrlRaw = Deno.env.get('WEB_APP_URL')
       const webAppUrl = webAppUrlRaw || 'https://crm-codex.vercel.app'
       
-      // Calculer les URIs de redirection utilisées
-      const loginRedirectUri = webAppUrlRaw && 
+      // Calculer les URIs de redirection utilisées (en nettoyant les slashes)
+      const cleanWebAppUrl = webAppUrlRaw && 
         typeof webAppUrlRaw === 'string' && 
         webAppUrlRaw !== 'undefined' && 
         webAppUrlRaw !== 'null' &&
         webAppUrlRaw.length > 0 &&
         webAppUrlRaw.startsWith('http')
-        ? `${webAppUrlRaw}/auth/google/login`
-        : 'https://crm-codex.vercel.app/auth/google/login'
+        ? webAppUrlRaw.replace(/\/+$/, '') // Retirer les slashes finaux
+        : 'https://crm-codex.vercel.app'
       
-      const callbackRedirectUri = webAppUrlRaw && 
-        typeof webAppUrlRaw === 'string' && 
-        webAppUrlRaw !== 'undefined' && 
-        webAppUrlRaw !== 'null' &&
-        webAppUrlRaw.length > 0 &&
-        webAppUrlRaw.startsWith('http')
-        ? `${webAppUrlRaw}/auth/google/callback`
-        : 'https://crm-codex.vercel.app/auth/google/callback'
+      const loginRedirectUri = `${cleanWebAppUrl}/auth/google/login`
+      const callbackRedirectUri = `${cleanWebAppUrl}/auth/google/callback`
       
       const status = {
         configured: {
@@ -396,31 +390,23 @@ serve(async (req) => {
       const isLogin = url.searchParams.get('login') === 'true'
       
       // Construire l'URI de redirection selon le contexte (login ou connexion Drive)
+      // Nettoyer le webAppUrlRaw pour éviter les doubles slashes
+      const cleanWebAppUrl = webAppUrlRaw && 
+        typeof webAppUrlRaw === 'string' && 
+        webAppUrlRaw !== 'undefined' && 
+        webAppUrlRaw !== 'null' &&
+        webAppUrlRaw.length > 0 &&
+        webAppUrlRaw.startsWith('http')
+        ? webAppUrlRaw.replace(/\/+$/, '') // Retirer les slashes finaux
+        : 'https://crm-codex.vercel.app'
+      
       let redirectUri: string
       if (isLogin) {
         // Pour le login, utiliser la route de callback login
-        if (webAppUrlRaw && 
-            typeof webAppUrlRaw === 'string' && 
-            webAppUrlRaw !== 'undefined' && 
-            webAppUrlRaw !== 'null' &&
-            webAppUrlRaw.length > 0 &&
-            webAppUrlRaw.startsWith('http')) {
-          redirectUri = `${webAppUrlRaw}/auth/google/login`
-        } else {
-          redirectUri = 'https://crm-codex.vercel.app/auth/google/login'
-        }
+        redirectUri = `${cleanWebAppUrl}/auth/google/login`
       } else {
         // Pour la connexion Drive (avec userId)
-        if (webAppUrlRaw && 
-            typeof webAppUrlRaw === 'string' && 
-            webAppUrlRaw !== 'undefined' && 
-            webAppUrlRaw !== 'null' &&
-            webAppUrlRaw.length > 0 &&
-            webAppUrlRaw.startsWith('http')) {
-          redirectUri = `${webAppUrlRaw}/auth/google/callback`
-        } else {
-          redirectUri = 'https://crm-codex.vercel.app/auth/google/callback'
-        }
+        redirectUri = `${cleanWebAppUrl}/auth/google/callback`
       }
       
       console.log('Using frontend redirect URI:', redirectUri, 'isLogin:', isLogin)
@@ -657,17 +643,17 @@ serve(async (req) => {
 
       // Construire l'URI de redirection pour le login
       const webAppUrlRaw = Deno.env.get('WEB_APP_URL')
-      let redirectUri: string
-      if (webAppUrlRaw && 
-          typeof webAppUrlRaw === 'string' && 
-          webAppUrlRaw !== 'undefined' && 
-          webAppUrlRaw !== 'null' &&
-          webAppUrlRaw.length > 0 &&
-          webAppUrlRaw.startsWith('http')) {
-        redirectUri = `${webAppUrlRaw}/auth/google/login`
-      } else {
-        redirectUri = 'https://crm-codex.vercel.app/auth/google/login'
-      }
+      // Nettoyer le webAppUrlRaw pour éviter les doubles slashes
+      const cleanWebAppUrl = webAppUrlRaw && 
+        typeof webAppUrlRaw === 'string' && 
+        webAppUrlRaw !== 'undefined' && 
+        webAppUrlRaw !== 'null' &&
+        webAppUrlRaw.length > 0 &&
+        webAppUrlRaw.startsWith('http')
+        ? webAppUrlRaw.replace(/\/+$/, '') // Retirer les slashes finaux
+        : 'https://crm-codex.vercel.app'
+      
+      const redirectUri = `${cleanWebAppUrl}/auth/google/login`
 
       try {
         // Échanger le code contre un token Google
