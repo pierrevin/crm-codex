@@ -51,6 +51,8 @@ export function CompanyDetailPage() {
   const [editAddressCity, setEditAddressCity] = useState('');
   const [editAddressCountry, setEditAddressCountry] = useState('');
   const [editSiret, setEditSiret] = useState('');
+  const [editCodeNAF, setEditCodeNAF] = useState('');
+  const [editLibelleNAF, setEditLibelleNAF] = useState('');
   const [editVat, setEditVat] = useState('');
   const [editLinkedin, setEditLinkedin] = useState('');
   const [editSalesNav, setEditSalesNav] = useState('');
@@ -132,8 +134,9 @@ export function CompanyDetailPage() {
       setEditAddressCity(companyData.addressCity || '');
       setEditAddressCountry(companyData.addressCountry || '');
       setEditSiret(companyData.siret || '');
+      setEditCodeNAF(companyData.codeNAF || '');
+      setEditLibelleNAF(companyData.libelleNAF || '');
       setEditVat(companyData.vatNumber || '');
-      // Note: codeNAF et libelleNAF seront chargés depuis la BDD mais ne sont pas dans les champs d'édition pour l'instant
       setEditLinkedin(companyData.linkedinUrl || '');
       setEditSalesNav(companyData.salesNavigatorUrl || '');
       setEditNotes(companyData.notes || '');
@@ -156,6 +159,8 @@ export function CompanyDetailPage() {
         addressCity: editAddressCity || undefined,
         addressCountry: editAddressCountry || undefined,
         siret: editSiret || undefined,
+        codeNAF: editCodeNAF || undefined,
+        libelleNAF: editLibelleNAF || undefined,
         vatNumber: editVat || undefined,
         linkedinUrl: editLinkedin || undefined,
         salesNavigatorUrl: editSalesNav || undefined,
@@ -329,13 +334,9 @@ export function CompanyDetailPage() {
     setEditAddressCountry(result.addressCountry || 'France');
     setEditIsIndividual(result.isIndividual || false);
     
-    // Afficher le code NAF dans les notes si pas de champ dédié (seulement si notes vides)
-    if ((result.codeNAF || result.libelleNAF) && !editNotes) {
-      const nafInfo = result.libelleNAF 
-        ? `Code NAF: ${result.codeNAF} - ${result.libelleNAF}`
-        : `Code NAF: ${result.codeNAF}`;
-      setEditNotes(nafInfo);
-    }
+    // Renseigner les champs dédiés NAF
+    if (result.codeNAF) setEditCodeNAF(result.codeNAF);
+    if (result.libelleNAF) setEditLibelleNAF(result.libelleNAF);
 
     setShowSireneResults(false);
     setSireneResults([]);
@@ -444,6 +445,8 @@ export function CompanyDetailPage() {
                 addressCity: editAddressCity || undefined,
                 addressCountry: editAddressCountry || undefined,
                 siret: editSiret || undefined,
+                codeNAF: editCodeNAF || undefined,
+                libelleNAF: editLibelleNAF || undefined,
                 vatNumber: editVat || undefined,
                 linkedinUrl: editLinkedin || undefined,
                 salesNavigatorUrl: editSalesNav || undefined,
@@ -673,6 +676,26 @@ export function CompanyDetailPage() {
               className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
               rows={3}
             />
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700">Code NAF</label>
+              <input
+                value={editCodeNAF}
+                onChange={(e) => setEditCodeNAF(e.target.value)}
+                placeholder="ex: 63.91Z"
+                className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700">Libellé NAF</label>
+              <input
+                value={editLibelleNAF}
+                onChange={(e) => setEditLibelleNAF(e.target.value)}
+                placeholder="Libellé de l'activité (si connu)"
+                className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+              />
+            </div>
           </div>
           <div>
             <input
