@@ -68,6 +68,7 @@ export function QuoteForm({ quote, opportunityId, companyId, onSubmit, onCancel 
 
   // Mettre à jour le formData quand la prop quote change (pour le pré-remplissage)
   useEffect(() => {
+    console.log('[QuoteForm] quote prop changed:', quote);
     if (quote) {
       const itemsWithTotals = quote.items && quote.items.length > 0 
         ? quote.items.map(item => ({
@@ -83,7 +84,7 @@ export function QuoteForm({ quote, opportunityId, companyId, onSubmit, onCancel 
             order: 0
           }];
       
-      setFormData({
+      const newFormData = {
         label: quote.label || '',
         quoteNumber: quote.quoteNumber || '',
         issueDate: quote.issueDate || new Date().toISOString().split('T')[0],
@@ -93,10 +94,14 @@ export function QuoteForm({ quote, opportunityId, companyId, onSubmit, onCancel 
         opportunityId: quote.opportunityId || opportunityId,
         companyId: quote.companyId || companyId,
         items: itemsWithTotals
-      });
+      };
+      
+      console.log('[QuoteForm] Mise à jour formData avec:', newFormData);
+      setFormData(newFormData);
     } else if (!quote && opportunityId) {
       // Si pas de quote mais qu'on a une opportunityId, on attend que quote soit chargé
       // Ne rien faire ici, le QuoteDetailPage va charger et passer quote
+      console.log('[QuoteForm] Pas de quote mais opportunityId présent, en attente...');
     }
   }, [quote, opportunityId, companyId]);
 
