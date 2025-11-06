@@ -126,8 +126,9 @@ export function OpportunityDetailPage() {
       }
     } else if (id) {
       await api.patch(`/api/opportunities/${id}`, payload);
-      // Recharger les données pour avoir les mises à jour (dossiers Drive, etc.)
+      // Recharger les données pour avoir les mises à jour (dossiers Drive, devis, etc.)
       await loadOpportunity(id);
+      await loadQuotes(id);
     } else {
       navigate('/opportunites');
     }

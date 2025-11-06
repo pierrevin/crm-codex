@@ -67,8 +67,11 @@ export function QuoteDetailPage() {
   }, [id, isNew, opportunityId, companyId]);
 
   const loadOpportunityForPrefill = async (oppId: string) => {
+    setLoading(true);
     try {
+      console.log('[QuoteDetailPage] Chargement opportunité pour pré-remplissage:', oppId);
       const { data: opportunity } = await api.get(`/api/opportunities/${oppId}`);
+      console.log('[QuoteDetailPage] Opportunité chargée:', opportunity);
       
       // Calculer la date de validité (30 jours par défaut)
       const validityDate = new Date();
@@ -93,11 +96,12 @@ export function QuoteDetailPage() {
         }]
       };
       
+      console.log('[QuoteDetailPage] Devis pré-rempli créé:', prefillQuote);
       setQuote(prefillQuote);
     } catch (err: any) {
-      console.error('Erreur chargement opportunité pour pré-remplissage:', err);
+      console.error('[QuoteDetailPage] Erreur chargement opportunité pour pré-remplissage:', err);
       // Ne pas bloquer, créer un devis vide
-      setQuote({
+      const emptyQuote: Quote = {
         label: '',
         issueDate: new Date().toISOString().split('T')[0],
         status: 'DRAFT',
@@ -111,7 +115,10 @@ export function QuoteDetailPage() {
           taxRate: 0,
           order: 0
         }]
-      });
+      };
+      setQuote(emptyQuote);
+    } finally {
+      setLoading(false);
     }
   };
 

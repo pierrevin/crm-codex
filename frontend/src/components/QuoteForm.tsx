@@ -61,10 +61,44 @@ export function QuoteForm({ quote, opportunityId, companyId, onSubmit, onCancel 
       quantity: 1,
       unit: 'heures',
       unitPriceHT: 0,
-      taxRate: 0.2,
+      taxRate: 0,
       order: 0
     }]
   });
+
+  // Mettre à jour le formData quand la prop quote change (pour le pré-remplissage)
+  useEffect(() => {
+    if (quote) {
+      const itemsWithTotals = quote.items && quote.items.length > 0 
+        ? quote.items.map(item => ({
+            ...item,
+            totalHT: item.totalHT || (item.quantity * item.unitPriceHT - (item.discountAmount || 0))
+          }))
+        : [{
+            label: '',
+            quantity: 1,
+            unit: 'heures',
+            unitPriceHT: 0,
+            taxRate: 0,
+            order: 0
+          }];
+      
+      setFormData({
+        label: quote.label || '',
+        quoteNumber: quote.quoteNumber || '',
+        issueDate: quote.issueDate || new Date().toISOString().split('T')[0],
+        validityEndDate: quote.validityEndDate || '',
+        freeField: quote.freeField || '',
+        status: quote.status || 'DRAFT',
+        opportunityId: quote.opportunityId || opportunityId,
+        companyId: quote.companyId || companyId,
+        items: itemsWithTotals
+      });
+    } else if (!quote && opportunityId) {
+      // Si pas de quote mais qu'on a une opportunityId, on attend que quote soit chargé
+      // Ne rien faire ici, le QuoteDetailPage va charger et passer quote
+    }
+  }, [quote, opportunityId, companyId]);
 
   const calculateItemTotal = (item: QuoteItem): number => {
     const subtotal = item.quantity * item.unitPriceHT;
