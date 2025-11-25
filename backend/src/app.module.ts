@@ -15,6 +15,7 @@ import { PrismaModule } from './common/prisma/prisma.module';
 import { UsersModule } from './users/users.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { IntegrationsModule } from './integrations/integrations.module';
+import { ExpensesModule } from './expenses/expenses.module';
 
 @Module({
   imports: [
@@ -38,7 +39,8 @@ import { IntegrationsModule } from './integrations/integrations.module';
     ImportsModule,
     WebhooksModule,
     GoogleModule,
-    IntegrationsModule
+    IntegrationsModule,
+    ExpensesModule
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard }

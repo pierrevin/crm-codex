@@ -9,3 +9,10 @@ coverage/
 postgres_data/
 supabase/.temp/
 .vercel
+
+# Google Cloud Service Account Keys
+backend/config/service-account-key.json
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json

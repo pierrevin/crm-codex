@@ -13,7 +13,7 @@ api.interceptors.request.use((config) => {
   const ANON_KEY_FALLBACK = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9lY2JydHllcWF0aWVleWJqdmhqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk5MTUyMDIsImV4cCI6MjA3NTQ5MTIwMn0.Z4u7oicInUcPjT19p71NRyu6ck63HSXHByH8uL5-IvY';
   const effectiveAnonKey = anonKey || ANON_KEY_FALLBACK;
 
-  config.headers = config.headers ?? {};
+    config.headers = config.headers ?? {};
 
   // Si l'API cible est une Edge Function Supabase
   const isSupabaseEdge = typeof api.defaults.baseURL === 'string' && api.defaults.baseURL.includes('.supabase.co/functions/v1');
@@ -35,7 +35,7 @@ api.interceptors.request.use((config) => {
     // JWT utilisateur dans un header custom (seulement si présent)
     if (at) {
       (config.headers as any)['x-user-authorization'] = `Bearer ${at}`;
-    }
+  }
   } else if (accessToken) {
     // Cas backend custom classique
     (config.headers as any).Authorization = `Bearer ${accessToken}`;

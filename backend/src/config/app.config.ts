@@ -17,6 +17,14 @@ type AppConfigKeys = {
   googleDriveRootFolderId: string;
   webAppUrl: string;
   makeWebhookSecret: string;
+  googleDocumentAi: {
+    processorId: string;
+  };
+  supabase: {
+    url: string;
+    serviceRoleKey: string;
+    storageBucket: string;
+  };
   admin: {
     email: string;
     password: string;
@@ -46,6 +54,14 @@ export const appConfig = registerAs<AppConfig>('app', () => ({
   googleDriveRootFolderId: process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID ?? '',
   webAppUrl: process.env.WEB_APP_URL ?? 'http://localhost:5173',
   makeWebhookSecret: process.env.MAKE_WEBHOOK_SECRET ?? '',
+  googleDocumentAi: {
+    processorId: process.env.GOOGLE_DOCUMENT_AI_PROCESSOR_ID ?? ''
+  },
+  supabase: {
+    url: process.env.SUPABASE_URL ?? '',
+    serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? '',
+    storageBucket: process.env.SUPABASE_STORAGE_BUCKET ?? 'expenses'
+  },
   admin: {
     email: process.env.ADMIN_EMAIL ?? 'admin@example.com',
     password: process.env.ADMIN_PASSWORD ?? 'ChangeMe123!'

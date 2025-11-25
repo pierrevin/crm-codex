@@ -5,6 +5,7 @@ import {
 } from '@nestjs/platform-fastify';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
+import multipart from '@fastify/multipart';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -23,6 +24,13 @@ async function bootstrap() {
   await app.register(rateLimit as any, {
     max: 100,
     timeWindow: '1 minute'
+  });
+  
+  // Multipart pour l'upload de fichiers
+  await app.register(multipart as any, {
+    limits: {
+      fileSize: 10 * 1024 * 1024 // 10MB
+    }
   });
 
   app.enableCors();

@@ -70,7 +70,7 @@ export class OpportunitiesService {
         await this.google.renameOpportunityFolder(opportunity as any, newName);
         await this.webhooks.trigger('opportunity.stage_changed', { ...opportunity, previousStage: before.stage });
       } else {
-        await this.webhooks.trigger('opportunity.updated', opportunity);
+    await this.webhooks.trigger('opportunity.updated', opportunity);
       }
     } catch (e) {
       // silencieux

@@ -15,6 +15,8 @@ import { OpportunitiesPage } from './pages/OpportunitiesPage';
 import { OpportunityDetailPage } from './pages/OpportunityDetailPage';
 import { QuoteDetailPage } from './pages/QuoteDetailPage';
 import { WebhooksPage } from './pages/WebhooksPage';
+import { ExpensesPage } from './pages/ExpensesPage';
+import { ExpenseDetailPage } from './pages/ExpenseDetailPage';
 
 function App() {
   return (
@@ -37,6 +39,8 @@ function App() {
           <Route path="/entreprises" element={<CompaniesPage />} />
           <Route path="/entreprises/:id" element={<CompanyDetailPage />} />
           <Route path="/webhooks" element={<WebhooksPage />} />
+          <Route path="/depenses" element={<ExpensesPage />} />
+          <Route path="/depenses/:id" element={<ExpenseDetailPage />} />
           
           {/* Redirections pour les anciennes URLs */}
           <Route path="/companies" element={<Navigate to="/entreprises" replace />} />
