@@ -12,6 +12,7 @@ export function ExpenseUploadModal({ onClose }: ExpenseUploadModalProps) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<'uploading' | 'processing' | 'extracting' | 'complete'>('uploading');
   const [error, setError] = useState<string | null>(null);
@@ -23,14 +24,26 @@ export function ExpenseUploadModal({ onClose }: ExpenseUploadModalProps) {
   const streamRef = useRef<MediaStream | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
+  // Nettoyer le stream quand on quitte ou change d'onglet
   useEffect(() => {
-    // Nettoyer le stream quand on quitte
     return () => {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
       }
     };
   }, []);
+
+  // Ouvrir automatiquement la caméra quand l'onglet Scanner est sélectionné
+  useEffect(() => {
+    if (activeTab === 'scan' && !scanning && !preview) {
+      void startCamera();
+    } else if (activeTab !== 'scan' && scanning) {
+      // Arrêter la caméra si on change d'onglet
+      stopCamera();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -79,100 +92,121 @@ export function ExpenseUploadModal({ onClose }: ExpenseUploadModalProps) {
   };
 
   const startCamera = async () => {
+    // Vérifier que l'API est disponible
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setError('Votre navigateur ne supporte pas l\'accès à la caméra. Utilisez un navigateur moderne.');
+      return;
+    }
+
     try {
+      setScanning(true);
+      setCameraReady(false);
+      setError(null);
+
       // Détecter si on est sur mobile
       const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
       
-      // Contraintes simples d'abord, on laisse le navigateur choisir le meilleur format
-      const baseConstraints: MediaTrackConstraints = isMobile
-        ? { facingMode: 'environment' } // Caméra arrière sur mobile
-        : { facingMode: 'user' }; // Webcam sur desktop
-
-      let stream: MediaStream;
-      
-      try {
-        // Essayer avec contraintes de base d'abord
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: baseConstraints,
+      // Contraintes progressives : essayer d'abord avec contraintes, puis sans
+      let stream: MediaStream | null = null;
+      const constraints = [
+        // Tentative 1 : Contraintes avec facingMode
+        {
+          video: isMobile ? { facingMode: 'environment' } : { facingMode: 'user' },
           audio: false
-        });
-      } catch (err: any) {
-        // Si échec, essayer sans contraintes
-        console.warn('Tentative avec contraintes simples échouée, essai sans contraintes:', err);
-        stream = await navigator.mediaDevices.getUserMedia({
+        },
+        // Tentative 2 : Sans contraintes
+        {
           video: true,
           audio: false
-        });
+        }
+      ];
+
+      for (const constraint of constraints) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia(constraint);
+          console.log('Caméra ouverte avec succès');
+          break;
+        } catch (err: any) {
+          console.warn('Tentative échouée:', err.name);
+          if (constraint === constraints[constraints.length - 1]) {
+            throw err; // Si c'est la dernière tentative, propager l'erreur
+          }
+        }
       }
-      
+
+      if (!stream) {
+        throw new Error('Impossible d\'obtenir le flux vidéo');
+      }
+
       streamRef.current = stream;
       
+      // Attendre que la référence vidéo soit disponible
+      if (!videoRef.current) {
+        // Attendre un peu que le DOM soit prêt
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
       if (videoRef.current) {
         const video = videoRef.current;
-        video.srcObject = stream;
         
-        // Forcer l'affichage
+        // Configurer la vidéo
+        video.srcObject = stream;
         video.setAttribute('playsinline', 'true');
         video.setAttribute('webkit-playsinline', 'true');
-        
-        // Attendre que la vidéo soit chargée et la jouer
-        return new Promise<void>((resolve, reject) => {
-          const onCanPlay = () => {
-            video.removeEventListener('canplay', onCanPlay);
-            video.removeEventListener('loadedmetadata', onLoadedMetadata);
-            
-            video.play()
-              .then(() => {
-                console.log('Vidéo démarrée. Dimensions:', video.videoWidth, 'x', video.videoHeight);
-                setScanning(true);
-                setError(null);
-                resolve();
-              })
-              .catch((playErr) => {
-                console.error('Erreur play:', playErr);
-                // Essayer quand même de continuer
-                setScanning(true);
-                setError(null);
-                resolve();
-              });
-          };
-          
-          const onLoadedMetadata = () => {
-            console.log('Métadonnées chargées. Dimensions:', video.videoWidth, 'x', video.videoHeight);
-            // Essayer de jouer dès que les métadonnées sont chargées
-            if (video.readyState >= 2) {
-              video.play().catch(() => {
-                // Attendre canplay si play échoue
-                video.addEventListener('canplay', onCanPlay, { once: true });
-              });
+        video.muted = true;
+
+        // Fonction pour démarrer la lecture
+        const playVideo = async (): Promise<void> => {
+          try {
+            await video.play();
+            console.log('Vidéo en lecture. Dimensions:', video.videoWidth, 'x', video.videoHeight);
+            setCameraReady(true);
+          } catch (playErr: any) {
+            console.error('Erreur play:', playErr);
+            // Essayer plusieurs fois avec délais progressifs
+            for (let i = 0; i < 3; i++) {
+              await new Promise(resolve => setTimeout(resolve, 500 * (i + 1)));
+              try {
+                await video.play();
+                console.log('Vidéo démarrée après tentative', i + 1);
+                setCameraReady(true);
+                return;
+              } catch (retryErr) {
+                console.warn('Tentative', i + 1, 'échouée');
+              }
             }
-          };
-          
+            // Si toutes les tentatives échouent, continuer quand même
+            setCameraReady(true);
+          }
+        };
+
+        // Attendre que les métadonnées soient chargées
+        const onLoadedMetadata = () => {
+          console.log('Métadonnées chargées. Dimensions:', video.videoWidth, 'x', video.videoHeight);
+          void playVideo();
+        };
+
+        // Si les métadonnées sont déjà chargées
+        if (video.readyState >= 2) {
+          void playVideo();
+        } else {
           video.addEventListener('loadedmetadata', onLoadedMetadata, { once: true });
-          video.addEventListener('canplay', onCanPlay, { once: true });
-          
-          // Timeout de sécurité
-          setTimeout(() => {
-            if (video.readyState >= 2) {
-              video.play()
-                .then(() => {
-                  setScanning(true);
-                  setError(null);
-                  resolve();
-                })
-                .catch(() => {
-                  setScanning(true);
-                  setError(null);
-                  resolve(); // Continuer même si play échoue
-                });
-            } else {
-              reject(new Error('Timeout chargement vidéo'));
-            }
-          }, 3000);
-        });
+        }
+
+        // Fallback avec timeout
+        setTimeout(() => {
+          if (!cameraReady && video.readyState >= 2) {
+            void playVideo();
+          }
+        }, 2000);
+      } else {
+        throw new Error('Référence vidéo non disponible');
       }
     } catch (err: any) {
       console.error('Erreur accès caméra:', err);
+      setScanning(false);
+      setCameraReady(false);
+      
       let errorMessage = 'Impossible d\'accéder à la caméra.';
       
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
@@ -181,6 +215,8 @@ export function ExpenseUploadModal({ onClose }: ExpenseUploadModalProps) {
         errorMessage = 'Aucune caméra trouvée. Vérifiez que votre appareil dispose d\'une caméra.';
       } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
         errorMessage = 'La caméra est déjà utilisée par une autre application.';
+      } else if (err.name === 'OverconstrainedError' || err.name === 'ConstraintNotSatisfiedError') {
+        errorMessage = 'Les contraintes vidéo ne peuvent pas être satisfaites.';
       }
       
       setError(errorMessage);
@@ -194,8 +230,10 @@ export function ExpenseUploadModal({ onClose }: ExpenseUploadModalProps) {
     }
     if (videoRef.current) {
       videoRef.current.srcObject = null;
+      videoRef.current.pause();
     }
     setScanning(false);
+    setCameraReady(false);
   };
 
   const capturePhoto = () => {
@@ -348,7 +386,7 @@ export function ExpenseUploadModal({ onClose }: ExpenseUploadModalProps) {
             <button
               onClick={() => {
                 setActiveTab('scan');
-                void startCamera();
+                // La caméra s'ouvrira automatiquement via useEffect
               }}
               className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
                 activeTab === 'scan'
@@ -412,21 +450,6 @@ export function ExpenseUploadModal({ onClose }: ExpenseUploadModalProps) {
           {/* Contenu Scanner */}
           {activeTab === 'scan' && (
             <div>
-              {!scanning && !preview && (
-                <div className="text-center py-8">
-                  <CameraIcon className="w-16 h-16 mx-auto mb-4 text-slate-400" />
-                  <p className="text-slate-600 mb-4">
-                    Cliquez sur "Démarrer la caméra" pour scanner une facture
-                  </p>
-                  <button
-                    onClick={() => void startCamera()}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                  >
-                    Démarrer la caméra
-                  </button>
-                </div>
-              )}
-
               {scanning && (
                 <div className="space-y-4">
                   {/* Conteneur vidéo en format portrait */}
@@ -434,7 +457,8 @@ export function ExpenseUploadModal({ onClose }: ExpenseUploadModalProps) {
                     width: '100%',
                     aspectRatio: '2/3', // Format portrait strict
                     maxWidth: '400px',
-                    margin: '0 auto'
+                    margin: '0 auto',
+                    minHeight: '300px'
                   }}>
                     <video
                       ref={videoRef}
@@ -444,7 +468,7 @@ export function ExpenseUploadModal({ onClose }: ExpenseUploadModalProps) {
                       className="w-full h-full"
                       style={{
                         transform: 'scaleX(-1)', // Miroir horizontal pour UX
-                        objectFit: 'cover' // Remplir le conteneur
+                        objectFit: 'contain' // Voir toute la vidéo
                       }}
                     />
                     <canvas ref={canvasRef} className="hidden" />
@@ -459,7 +483,7 @@ export function ExpenseUploadModal({ onClose }: ExpenseUploadModalProps) {
                     </div>
                     
                     {/* Indicateur de chargement si vidéo pas prête */}
-                    {(!videoRef.current || videoRef.current.readyState < 2) && (
+                    {!cameraReady && (
                       <div className="absolute inset-0 flex items-center justify-center bg-black/70 z-10">
                         <div className="text-center">
                           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mx-auto mb-2"></div>
@@ -472,7 +496,7 @@ export function ExpenseUploadModal({ onClose }: ExpenseUploadModalProps) {
                   <div className="flex gap-2">
                     <button
                       onClick={capturePhoto}
-                      disabled={!videoRef.current || videoRef.current.readyState < 2}
+                      disabled={!cameraReady}
                       className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                     >
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -485,7 +509,7 @@ export function ExpenseUploadModal({ onClose }: ExpenseUploadModalProps) {
                       onClick={stopCamera}
                       className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300"
                     >
-                      Annuler
+                      Arrêter
                     </button>
                   </div>
                   <p className="text-xs text-slate-500 text-center">
@@ -505,7 +529,8 @@ export function ExpenseUploadModal({ onClose }: ExpenseUploadModalProps) {
                     onClick={() => {
                       setPreview(null);
                       setFile(null);
-                      void startCamera();
+                      setActiveTab('scan');
+                      // La caméra se relancera automatiquement via useEffect
                     }}
                     className="mt-2 w-full px-4 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300"
                   >
