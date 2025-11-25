@@ -268,11 +268,21 @@ export function ExpenseUploadModal({ onClose }: ExpenseUploadModalProps) {
     canvas.width = videoWidth;
     canvas.height = videoHeight;
 
-    // Dessiner l'image sur le canvas (inverser le miroir horizontal)
-    context.save();
-    context.scale(-1, 1); // Inverser horizontalement
-    context.drawImage(video, -videoWidth, 0, videoWidth, videoHeight);
-    context.restore();
+    // Détecter si on est sur mobile (caméra arrière)
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    
+    // Sur mobile avec caméra arrière, pas besoin d'inverser (pas de miroir)
+    // Sur desktop avec webcam, on inverse pour corriger le miroir de l'affichage
+    if (isMobile) {
+      // Mobile : pas d'inversion, la caméra arrière est déjà correcte
+      context.drawImage(video, 0, 0, videoWidth, videoHeight);
+    } else {
+      // Desktop : inverser pour corriger le miroir de l'affichage
+      context.save();
+      context.scale(-1, 1); // Inverser horizontalement
+      context.drawImage(video, -videoWidth, 0, videoWidth, videoHeight);
+      context.restore();
+    }
 
     // Convertir en blob
     canvas.toBlob((blob) => {
@@ -331,6 +341,8 @@ export function ExpenseUploadModal({ onClose }: ExpenseUploadModalProps) {
         setError('Erreur de permissions Google Cloud. La dépense a été créée mais l\'OCR n\'a pas fonctionné. Vous pouvez remplir les informations manuellement.');
         // Fermer le modal même en cas d'erreur OCR car la dépense est créée
         setTimeout(() => onClose(), 2000);
+      } else if (err.code === 'ERR_NETWORK' || err.message?.includes('Network Error')) {
+        setError('Erreur réseau. Vérifiez que le backend est démarré et accessible. Sur mobile, configurez VITE_EXPENSES_API_URL avec l\'IP de votre machine.');
       } else {
         setError(message || 'Erreur lors du scan de la facture. Vérifiez la console pour plus de détails.');
       }
@@ -467,7 +479,8 @@ export function ExpenseUploadModal({ onClose }: ExpenseUploadModalProps) {
                       muted
                       className="w-full h-full"
                       style={{
-                        transform: 'scaleX(-1)', // Miroir horizontal pour UX
+                        // Miroir uniquement sur desktop (webcam), pas sur mobile (caméra arrière)
+                        transform: /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ? 'none' : 'scaleX(-1)',
                         objectFit: 'contain' // Voir toute la vidéo
                       }}
                     />

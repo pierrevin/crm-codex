@@ -1,9 +1,34 @@
 import api from './apiClient';
 import axios from 'axios';
 
-// Instance API séparée pour les expenses qui pointe vers le backend local
+// Instance API séparée pour les expenses qui pointe vers le backend
+// Sur mobile, utiliser l'IP du réseau local au lieu de localhost
+const getBackendUrl = () => {
+  // En production, utiliser l'URL de l'API
+  if (import.meta.env.VITE_EXPENSES_API_URL) {
+    return import.meta.env.VITE_EXPENSES_API_URL;
+  }
+  
+  // En développement, détecter si on est sur mobile
+  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  if (isMobile) {
+    // Sur mobile, localhost ne fonctionne pas, il faut l'IP du réseau local
+    // L'utilisateur devra configurer VITE_EXPENSES_API_URL avec son IP locale
+    // Exemple: http://192.168.1.100:3000
+    console.warn('Sur mobile, configurez VITE_EXPENSES_API_URL avec l\'IP de votre machine (ex: http://192.168.1.100:3000)');
+    // Essayer de détecter automatiquement depuis window.location si possible
+    const hostname = window.location.hostname;
+    if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
+      return `http://${hostname}:3000`;
+    }
+  }
+  
+  // Par défaut, localhost pour desktop
+  return 'http://localhost:3000';
+};
+
 const expensesApi = axios.create({
-  baseURL: 'http://localhost:3000'
+  baseURL: getBackendUrl()
 });
 
 // Intercepteur pour ajouter le token JWT
