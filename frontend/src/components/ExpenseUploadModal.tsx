@@ -80,18 +80,57 @@ export function ExpenseUploadModal({ onClose }: ExpenseUploadModalProps) {
 
   const startCamera = async () => {
     try {
+      // Détecter si on est sur mobile
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+      
+      // Contraintes vidéo selon l'appareil
+      const videoConstraints: MediaTrackConstraints = isMobile
+        ? {
+            facingMode: 'environment', // Caméra arrière sur mobile
+            width: { ideal: 1280 },
+            height: { ideal: 1920 }, // Format portrait
+            aspectRatio: { ideal: 2 / 3 } // Ratio portrait
+          }
+        : {
+            facingMode: 'user', // Caméra avant sur desktop
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          };
+
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' } // Caméra arrière sur mobile
+        video: videoConstraints,
+        audio: false
       });
+      
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        // Attendre que la vidéo soit prête avant de jouer
+        videoRef.current.onloadedmetadata = () => {
+          if (videoRef.current) {
+            videoRef.current.play().catch(err => {
+              console.error('Erreur lecture vidéo:', err);
+            });
+          }
+        };
       }
       setScanning(true);
       setError(null);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Erreur accès caméra:', err);
-      setError('Impossible d\'accéder à la caméra. Vérifiez les permissions.');
+      let errorMessage = 'Impossible d\'accéder à la caméra.';
+      
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        errorMessage = 'Permission caméra refusée. Veuillez autoriser l\'accès à la caméra dans les paramètres de votre navigateur.';
+      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        errorMessage = 'Aucune caméra trouvée. Vérifiez que votre appareil dispose d\'une caméra.';
+      } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+        errorMessage = 'La caméra est déjà utilisée par une autre application.';
+      } else if (err.name === 'OverconstrainedError' || err.name === 'ConstraintNotSatisfiedError') {
+        errorMessage = 'Les contraintes vidéo ne peuvent pas être satisfaites.';
+      }
+      
+      setError(errorMessage);
     }
   };
 
@@ -115,18 +154,43 @@ export function ExpenseUploadModal({ onClose }: ExpenseUploadModalProps) {
 
     if (!context) return;
 
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    context.drawImage(video, 0, 0);
+    // S'assurer que la vidéo est prête
+    if (video.readyState !== video.HAVE_ENOUGH_DATA) {
+      setError('La vidéo n\'est pas encore prête. Veuillez réessayer.');
+      return;
+    }
 
+    // Utiliser les dimensions réelles de la vidéo
+    const videoWidth = video.videoWidth;
+    const videoHeight = video.videoHeight;
+
+    // Pour mobile en portrait, on peut vouloir garder l'orientation
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    
+    if (isMobile && videoHeight > videoWidth) {
+      // Format portrait : garder les dimensions telles quelles
+      canvas.width = videoWidth;
+      canvas.height = videoHeight;
+    } else {
+      // Format paysage ou desktop : utiliser les dimensions réelles
+      canvas.width = videoWidth;
+      canvas.height = videoHeight;
+    }
+
+    // Dessiner l'image sur le canvas
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    // Convertir en blob
     canvas.toBlob((blob) => {
       if (blob) {
-        const capturedFile = new File([blob], 'capture.jpg', { type: 'image/jpeg' });
+        const capturedFile = new File([blob], `capture-${Date.now()}.jpg`, { type: 'image/jpeg' });
         setFile(capturedFile);
         setPreview(canvas.toDataURL('image/jpeg'));
         stopCamera();
+      } else {
+        setError('Erreur lors de la capture de la photo.');
       }
-    }, 'image/jpeg', 0.9);
+    }, 'image/jpeg', 0.92);
   };
 
   const handleSubmit = async () => {
@@ -309,21 +373,35 @@ export function ExpenseUploadModal({ onClose }: ExpenseUploadModalProps) {
 
               {scanning && (
                 <div className="space-y-4">
-                  <div className="relative bg-black rounded-lg overflow-hidden">
+                  <div className="relative bg-black rounded-lg overflow-hidden flex items-center justify-center">
                     <video
                       ref={videoRef}
                       autoPlay
                       playsInline
-                      className="w-full h-auto"
+                      muted
+                      className="max-w-full max-h-96 object-contain"
+                      style={{
+                        transform: 'scaleX(-1)', // Miroir horizontal pour UX
+                        width: '100%',
+                        height: 'auto'
+                      }}
                     />
                     <canvas ref={canvasRef} className="hidden" />
+                    {/* Overlay pour guider l'utilisateur */}
+                    <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                      <div className="border-2 border-white/50 rounded-lg" style={{
+                        width: '80%',
+                        aspectRatio: '2/3', // Format portrait pour factures
+                        maxHeight: '70%'
+                      }} />
+                    </div>
                   </div>
                   <div className="flex gap-2">
                     <button
                       onClick={capturePhoto}
-                      className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                      className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
                     >
-                      Capturer
+                      📷 Capturer
                     </button>
                     <button
                       onClick={stopCamera}
@@ -332,6 +410,9 @@ export function ExpenseUploadModal({ onClose }: ExpenseUploadModalProps) {
                       Annuler
                     </button>
                   </div>
+                  <p className="text-xs text-slate-500 text-center">
+                    Positionnez la facture dans le cadre et appuyez sur Capturer
+                  </p>
                 </div>
               )}
 
