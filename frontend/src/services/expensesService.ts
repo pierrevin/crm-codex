@@ -2,28 +2,39 @@ import api from './apiClient';
 import axios from 'axios';
 
 // Instance API séparée pour les expenses qui pointe vers le backend
-// Sur mobile, utiliser l'IP du réseau local au lieu de localhost
 const getBackendUrl = () => {
-  // En production, utiliser l'URL de l'API
+  // 1. Variable d'environnement explicite (priorité)
   if (import.meta.env.VITE_EXPENSES_API_URL) {
     return import.meta.env.VITE_EXPENSES_API_URL;
   }
   
-  // En développement, détecter si on est sur mobile
+  // 2. En production, construire l'URL depuis le hostname actuel
+  const isProduction = import.meta.env.PROD || 
+    (typeof window !== 'undefined' && 
+     !window.location.hostname.includes('localhost') && 
+     !window.location.hostname.includes('127.0.0.1'));
+  
+  if (isProduction && typeof window !== 'undefined') {
+    const hostname = window.location.hostname;
+    const protocol = window.location.protocol;
+    // Si le backend est sur le même domaine mais port 3000
+    // Ou si c'est un sous-domaine/service séparé
+    // Par défaut, essayer le même hostname avec port 3000
+    return `${protocol}//${hostname}:3000`;
+  }
+  
+  // 3. En développement, détecter si on est sur mobile
   const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
   if (isMobile) {
     // Sur mobile, localhost ne fonctionne pas, il faut l'IP du réseau local
-    // L'utilisateur devra configurer VITE_EXPENSES_API_URL avec son IP locale
-    // Exemple: http://192.168.1.100:3000
-    console.warn('Sur mobile, configurez VITE_EXPENSES_API_URL avec l\'IP de votre machine (ex: http://192.168.1.100:3000)');
-    // Essayer de détecter automatiquement depuis window.location si possible
     const hostname = window.location.hostname;
     if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
       return `http://${hostname}:3000`;
     }
+    console.warn('Sur mobile en développement, configurez VITE_EXPENSES_API_URL avec l\'IP de votre machine (ex: http://192.168.1.100:3000)');
   }
   
-  // Par défaut, localhost pour desktop
+  // 4. Par défaut, localhost pour desktop en développement
   return 'http://localhost:3000';
 };
 
@@ -40,6 +51,21 @@ expensesApi.interceptors.request.use((config) => {
   }
   return config;
 });
+
+// Intercepteur pour gérer les erreurs réseau
+expensesApi.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.code === 'ERR_NETWORK' || error.message?.includes('Network Error')) {
+      console.error('Erreur réseau expenses API:', {
+        url: error.config?.url,
+        baseURL: error.config?.baseURL,
+        message: error.message
+      });
+    }
+    return Promise.reject(error);
+  }
+);
 
 export type ExpenseStatus = 'PENDING' | 'PROCESSED' | 'VERIFIED' | 'REJECTED';
 
