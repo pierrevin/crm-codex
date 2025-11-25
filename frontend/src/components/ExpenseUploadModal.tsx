@@ -83,68 +83,94 @@ export function ExpenseUploadModal({ onClose }: ExpenseUploadModalProps) {
       // Détecter si on est sur mobile
       const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
       
-      // Contraintes vidéo selon l'appareil - format portrait
-      const videoConstraints: MediaTrackConstraints = isMobile
-        ? {
-            facingMode: 'environment', // Caméra arrière sur mobile
-            // Format portrait : largeur < hauteur
-            width: { ideal: 720, min: 480, max: 1920 },
-            height: { ideal: 1280, min: 640, max: 2560 }
-          }
-        : {
-            facingMode: 'user', // Caméra avant sur desktop
-            // Format portrait aussi pour desktop
-            width: { ideal: 720, min: 480 },
-            height: { ideal: 1280, min: 640 }
-          };
+      // Contraintes simples d'abord, on laisse le navigateur choisir le meilleur format
+      const baseConstraints: MediaTrackConstraints = isMobile
+        ? { facingMode: 'environment' } // Caméra arrière sur mobile
+        : { facingMode: 'user' }; // Webcam sur desktop
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: videoConstraints,
-        audio: false
-      });
+      let stream: MediaStream;
+      
+      try {
+        // Essayer avec contraintes de base d'abord
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: baseConstraints,
+          audio: false
+        });
+      } catch (err: any) {
+        // Si échec, essayer sans contraintes
+        console.warn('Tentative avec contraintes simples échouée, essai sans contraintes:', err);
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: false
+        });
+      }
       
       streamRef.current = stream;
       
       if (videoRef.current) {
-        videoRef.current.srcObject = stream;
+        const video = videoRef.current;
+        video.srcObject = stream;
         
-        // Attendre que les métadonnées soient chargées
-        const playPromise = new Promise<void>((resolve, reject) => {
-          if (!videoRef.current) {
-            reject(new Error('Video ref not available'));
-            return;
-          }
-          
-          const video = videoRef.current;
-          
-          const onLoadedMetadata = () => {
+        // Forcer l'affichage
+        video.setAttribute('playsinline', 'true');
+        video.setAttribute('webkit-playsinline', 'true');
+        
+        // Attendre que la vidéo soit chargée et la jouer
+        return new Promise<void>((resolve, reject) => {
+          const onCanPlay = () => {
+            video.removeEventListener('canplay', onCanPlay);
             video.removeEventListener('loadedmetadata', onLoadedMetadata);
+            
             video.play()
               .then(() => {
-                console.log('Vidéo démarrée avec succès');
-                console.log('Dimensions vidéo:', video.videoWidth, 'x', video.videoHeight);
+                console.log('Vidéo démarrée. Dimensions:', video.videoWidth, 'x', video.videoHeight);
+                setScanning(true);
+                setError(null);
                 resolve();
               })
-              .catch(reject);
+              .catch((playErr) => {
+                console.error('Erreur play:', playErr);
+                // Essayer quand même de continuer
+                setScanning(true);
+                setError(null);
+                resolve();
+              });
           };
           
-          video.addEventListener('loadedmetadata', onLoadedMetadata);
+          const onLoadedMetadata = () => {
+            console.log('Métadonnées chargées. Dimensions:', video.videoWidth, 'x', video.videoHeight);
+            // Essayer de jouer dès que les métadonnées sont chargées
+            if (video.readyState >= 2) {
+              video.play().catch(() => {
+                // Attendre canplay si play échoue
+                video.addEventListener('canplay', onCanPlay, { once: true });
+              });
+            }
+          };
+          
+          video.addEventListener('loadedmetadata', onLoadedMetadata, { once: true });
+          video.addEventListener('canplay', onCanPlay, { once: true });
           
           // Timeout de sécurité
           setTimeout(() => {
             if (video.readyState >= 2) {
               video.play()
-                .then(resolve)
-                .catch(reject);
+                .then(() => {
+                  setScanning(true);
+                  setError(null);
+                  resolve();
+                })
+                .catch(() => {
+                  setScanning(true);
+                  setError(null);
+                  resolve(); // Continuer même si play échoue
+                });
+            } else {
+              reject(new Error('Timeout chargement vidéo'));
             }
-          }, 2000);
+          }, 3000);
         });
-        
-        await playPromise;
       }
-      
-      setScanning(true);
-      setError(null);
     } catch (err: any) {
       console.error('Erreur accès caméra:', err);
       let errorMessage = 'Impossible d\'accéder à la caméra.';
@@ -155,24 +181,6 @@ export function ExpenseUploadModal({ onClose }: ExpenseUploadModalProps) {
         errorMessage = 'Aucune caméra trouvée. Vérifiez que votre appareil dispose d\'une caméra.';
       } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
         errorMessage = 'La caméra est déjà utilisée par une autre application.';
-      } else if (err.name === 'OverconstrainedError' || err.name === 'ConstraintNotSatisfiedError') {
-        // Essayer avec des contraintes plus simples
-        try {
-          const fallbackStream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ? 'environment' : 'user' },
-            audio: false
-          });
-          streamRef.current = fallbackStream;
-          if (videoRef.current) {
-            videoRef.current.srcObject = fallbackStream;
-            await videoRef.current.play();
-          }
-          setScanning(true);
-          setError(null);
-          return;
-        } catch (fallbackErr) {
-          errorMessage = 'Les contraintes vidéo ne peuvent pas être satisfaites.';
-        }
       }
       
       setError(errorMessage);
@@ -421,44 +429,57 @@ export function ExpenseUploadModal({ onClose }: ExpenseUploadModalProps) {
 
               {scanning && (
                 <div className="space-y-4">
-                  <div className="relative bg-black rounded-lg overflow-hidden flex items-center justify-center" style={{ minHeight: '400px' }}>
+                  {/* Conteneur vidéo en format portrait */}
+                  <div className="relative bg-black rounded-lg overflow-hidden flex items-center justify-center" style={{ 
+                    width: '100%',
+                    aspectRatio: '2/3', // Format portrait strict
+                    maxWidth: '400px',
+                    margin: '0 auto'
+                  }}>
                     <video
                       ref={videoRef}
                       autoPlay
                       playsInline
                       muted
-                      className="w-full h-auto"
+                      className="w-full h-full"
                       style={{
                         transform: 'scaleX(-1)', // Miroir horizontal pour UX
-                        maxHeight: '600px',
-                        objectFit: 'contain',
-                        display: 'block'
+                        objectFit: 'cover' // Remplir le conteneur
                       }}
                     />
                     <canvas ref={canvasRef} className="hidden" />
+                    
                     {/* Overlay pour guider l'utilisateur - format portrait */}
                     <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                      <div className="border-2 border-white/70 rounded-lg shadow-lg" style={{
-                        width: '75%',
+                      <div className="border-2 border-white/80 rounded-lg shadow-lg" style={{
+                        width: '85%',
                         aspectRatio: '2/3', // Format portrait pour factures
-                        maxWidth: '300px',
-                        maxHeight: '450px'
+                        boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.5)' // Masque autour
                       }} />
                     </div>
+                    
                     {/* Indicateur de chargement si vidéo pas prête */}
-                    {videoRef.current && videoRef.current.readyState < 2 && (
-                      <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-                        <div className="text-white text-sm">Chargement de la caméra...</div>
+                    {(!videoRef.current || videoRef.current.readyState < 2) && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/70 z-10">
+                        <div className="text-center">
+                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mx-auto mb-2"></div>
+                          <div className="text-white text-sm">Chargement de la caméra...</div>
+                        </div>
                       </div>
                     )}
                   </div>
+                  
                   <div className="flex gap-2">
                     <button
                       onClick={capturePhoto}
-                      disabled={videoRef.current?.readyState !== 4}
-                      className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                      disabled={!videoRef.current || videoRef.current.readyState < 2}
+                      className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                     >
-                      📷 Capturer
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                      Capturer
                     </button>
                     <button
                       onClick={stopCamera}
