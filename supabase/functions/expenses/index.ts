@@ -166,6 +166,8 @@ async function scanExpense(req: Request, userId: string) {
   const { data, error } = await supabaseClient
     .from('Expense')
     .insert({
+      // Générer un id côté Edge Function car la colonne n'a pas de défaut en base
+      id: crypto.randomUUID(),
       ...serializeExpensePayload(insertPayload),
       fileUrl,
       fileName: file.name ?? null,
