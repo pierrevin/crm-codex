@@ -156,7 +156,8 @@ export const expensesService = {
       formData.append('accountCode', accountCode);
     }
 
-    const { data } = await expensesApi.post<Expense>('/api/expenses/scan', formData, {
+    // Sur l'Edge Function Supabase, l'endpoint de scan est directement /scan
+    const { data } = await expensesApi.post<Expense>('/scan', formData, {
       headers: {
         'Content-Type': 'multipart/form-data'
       }
@@ -173,22 +174,25 @@ export const expensesService = {
     if (filters?.startDate) params.append('startDate', filters.startDate);
     if (filters?.endDate) params.append('endDate', filters.endDate);
 
-    const { data } = await expensesApi.get<Expense[]>(`/api/expenses?${params.toString()}`);
+    // La liste des dépenses est exposée sur la racine /
+    const { data } = await expensesApi.get<Expense[]>('/', {
+      params,
+    });
     return data;
   },
 
   async getById(id: string): Promise<Expense> {
-    const { data } = await expensesApi.get<Expense>(`/api/expenses/${id}`);
+    const { data } = await expensesApi.get<Expense>(`/${id}`);
     return data;
   },
 
   async update(id: string, dto: UpdateExpenseDto): Promise<Expense> {
-    const { data } = await expensesApi.put<Expense>(`/api/expenses/${id}`, dto);
+    const { data } = await expensesApi.put<Expense>(`/${id}`, dto);
     return data;
   },
 
   async delete(id: string): Promise<void> {
-    await expensesApi.delete(`/api/expenses/${id}`);
+    await expensesApi.delete(`/${id}`);
   }
 };
 
