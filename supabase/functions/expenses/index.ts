@@ -3,6 +3,7 @@ import { encode as encodeBase64 } from 'https://deno.land/std@0.207.0/encoding/b
 
 import { corsHeaders, handleCors } from '../_shared/cors.ts'
 import { supabaseClient } from '../_shared/database.ts'
+import { verifyAccessToken } from '../_shared/jwt.ts'
 
 type ExpenseStatus = 'PENDING' | 'PROCESSED' | 'VERIFIED' | 'REJECTED'
 
@@ -34,8 +35,9 @@ serve(async (req) => {
 
   try {
     const url = new URL(req.url)
-    const path = normalizePath(url.pathname)
     const method = req.method.toUpperCase()
+    const rawPath = url.pathname
+    const path = normalizePath(rawPath)
 
     if (method === 'GET' && (path === '/' || path === '')) {
       const user = await authenticateUser(req)
@@ -47,7 +49,8 @@ serve(async (req) => {
       return json(await getExpense(id), 200)
     }
 
-    if (method === 'POST' && path === '/scan') {
+    // Accepter à la fois /functions/v1/expenses/scan et /scan
+    if (method === 'POST' && (path === '/scan' || rawPath.endsWith('/expenses/scan'))) {
       const user = await authenticateUser(req)
       if (!user) {
         return json({ message: 'Unauthorized' }, 401)
@@ -105,12 +108,14 @@ async function authenticateUser(req: Request) {
   const token = userHeader.slice(7)
   if (!token) return null
 
-  const { data, error } = await supabaseClient.auth.getUser(token)
-  if (error || !data?.user) {
-    console.warn('User auth failed', error?.message)
+  // Vérifier le JWT généré par nos Edge Functions (auth/login)
+  const payload = await verifyAccessToken(token)
+  if (!payload?.userId) {
+    console.warn('User auth failed: invalid access token')
     return null
   }
-  return data.user
+
+  return { id: payload.userId }
 }
 
 async function scanExpense(req: Request, userId: string) {
@@ -218,12 +223,15 @@ async function getExpense(id: string) {
     .from('Expense')
     .select('*, company:Company(*), user:User(id,email)')
     .eq('id', id)
-    .single()
+    .maybeSingle()
 
   if (error) {
     throw new Error(error.message)
   }
-  return data
+
+  // Si aucune dépense ne correspond, on renvoie simplement null
+  // pour éviter une erreur 500 côté frontend.
+  return data ?? null
 }
 
 async function updateExpense(id: string, payload: ExpensePayload, userId: string) {
@@ -324,7 +332,7 @@ async function processDocumentAi(fileBytes: Uint8Array, mimeType: string) {
     throw new Error('GOOGLE_DOCUMENT_AI_PROCESSOR_ID manquant')
   }
 
-  const regionMatch = GOOGLE_PROCESSOR_ID.match(/locations\\/([^/]+)/)
+  const regionMatch = GOOGLE_PROCESSOR_ID.match(/locations\/([^/]+)/)
   const region = regionMatch ? regionMatch[1] : 'us'
   const endpoint = region === 'eu' ? 'https://eu-documentai.googleapis.com' : 'https://documentai.googleapis.com'
   const token = await getGoogleAccessToken()
