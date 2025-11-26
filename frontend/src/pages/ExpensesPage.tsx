@@ -67,7 +67,10 @@ export function ExpensesPage() {
     return new Date(date).toLocaleDateString('fr-FR');
   };
 
-  const filteredExpenses = expenses.filter(expense => {
+  // Sécuriser contre un éventuel tableau nul renvoyé par l'API
+  const safeExpenses = Array.isArray(expenses) ? expenses : [];
+
+  const filteredExpenses = safeExpenses.filter(expense => {
     if (filters.status && expense.status !== filters.status) return false;
     return true;
   });
