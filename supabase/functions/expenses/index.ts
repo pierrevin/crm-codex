@@ -173,7 +173,9 @@ async function scanExpense(req: Request, userId: string) {
       fileName: file.name ?? null,
       fileType: mimeType,
       rawOcrData: ocrDocument,
-      userId
+      userId,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     })
     .select('*, company:Company(*), user:User(id,email)')
     .single()
