@@ -8,7 +8,8 @@ const getBackendUrl = () => {
   }
 
   if (import.meta.env.VITE_API_URL) {
-    return import.meta.env.VITE_API_URL;
+    const base = import.meta.env.VITE_API_URL.replace(/\/$/, '');
+    return `${base}/expenses`;
   }
   
   // 2. En production, construire l'URL depuis le hostname actuel

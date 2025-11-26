@@ -47,14 +47,35 @@ echo "✅ Projet lié"
 echo ""
 
 # Configurer les secrets
-echo "🔐 Configuration des secrets JWT..."
-supabase secrets set JWT_ACCESS_SECRET=local-dev-secret
-supabase secrets set JWT_REFRESH_SECRET=local-refresh-secret
+echo "🔐 Configuration des secrets requis..."
+REQUIRED_SECRETS=(
+  JWT_ACCESS_SECRET
+  JWT_REFRESH_SECRET
+  SUPABASE_URL
+  SUPABASE_SERVICE_ROLE_KEY
+  SUPABASE_STORAGE_BUCKET
+  GOOGLE_DOCUMENT_AI_PROCESSOR_ID
+  GOOGLE_CLIENT_EMAIL
+  GOOGLE_PRIVATE_KEY
+)
+
+for SECRET in "${REQUIRED_SECRETS[@]}"; do
+  VALUE=$(printenv "$SECRET")
+  if [ -z "$VALUE" ]; then
+    echo "⚠️  Variable $SECRET non définie. Ajoutez-la avant de relancer le script."
+    exit 1
+  fi
+done
+
+for SECRET in "${REQUIRED_SECRETS[@]}"; do
+  echo "   • $SECRET"
+  supabase secrets set "$SECRET=${!SECRET}"
+done
 
 echo "✅ Secrets configurés"
 echo ""
 
-# Déployer la fonction
+# Déployer la fonction API (CRM historique)
 echo "📦 Déploiement de l'Edge Function 'api'..."
 supabase functions deploy api --no-verify-jwt
 
@@ -63,19 +84,29 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
+# Déployer la fonction dépenses
+echo "📦 Déploiement de l'Edge Function 'expenses'..."
+supabase functions deploy expenses
+
+if [ $? -ne 0 ]; then
+    echo "❌ Erreur lors du déploiement de la fonction expenses"
+    exit 1
+fi
+
 echo ""
 echo "╔══════════════════════════════════════════════════════════╗"
 echo "║              ✅ DÉPLOIEMENT RÉUSSI !                    ║"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo ""
-echo "🌐 Votre API est maintenant disponible sur :"
-echo "   https://oecbrtyeqatieeybjvhj.supabase.co/functions/v1/api"
+echo "🌐 API CRM : https://oecbrtyeqatieeybjvhj.supabase.co/functions/v1/api"
+echo "🌐 Scan dépenses : https://oecbrtyeqatieeybjvhj.supabase.co/functions/v1/expenses"
 echo ""
-echo "🧪 Testez avec :"
+echo "🧪 Tests rapides :"
 echo "   curl https://oecbrtyeqatieeybjvhj.supabase.co/functions/v1/api/auth/health"
+echo "   curl -X POST https://oecbrtyeqatieeybjvhj.supabase.co/functions/v1/expenses/scan -H \"Authorization: Bearer <anon-key>\""
 echo ""
-echo "📝 Prochaine étape : Mettre à jour Vercel"
-echo "   vercel env add VITE_API_URL production"
-echo "   Valeur : https://oecbrtyeqatieeybjvhj.supabase.co/functions/v1"
+echo "📝 Prochaine étape :"
+echo "   vercel env add VITE_API_URL production            # https://.../functions/v1"
+echo "   vercel env add VITE_EXPENSES_API_URL production   # https://.../functions/v1/expenses"
 echo ""
 

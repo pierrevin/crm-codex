@@ -49,6 +49,8 @@ Ajoutez les variables suivantes dans votre fichier `.env` :
 ```bash
 GOOGLE_APPLICATION_CREDENTIALS=/chemin/vers/votre/service-account-key.json
 GOOGLE_DOCUMENT_AI_PROCESSOR_ID=projects/VOTRE_PROJECT_ID/locations/VOTRE_LOCATION/processors/VOTRE_PROCESSOR_ID
+GOOGLE_CLIENT_EMAIL=document-ai-service-account@votre-projet.iam.gserviceaccount.com
+GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
 ```
 
 **Note** : Pour la production, stockez ces valeurs de manière sécurisée (variables d'environnement du serveur, secrets manager, etc.)
@@ -187,4 +189,29 @@ Le système détermine automatiquement le compte comptable selon le type de dép
 - **606** : Achats non stockés (par défaut)
 
 Ces règles peuvent être modifiées dans `backend/src/expenses/ocr/expense-parser.service.ts`.
+
+## 8. Déploiement de la fonction Edge `expenses`
+
+1. **Créer la fonction** (déjà ajoutée dans `supabase/functions/expenses`)
+2. **Déclarer les secrets nécessaires** :
+   ```bash
+   supabase secrets set \
+     SUPABASE_URL=https://votre-projet.supabase.co \
+     SUPABASE_SERVICE_ROLE_KEY=... \
+     SUPABASE_STORAGE_BUCKET=expenses \
+     GOOGLE_DOCUMENT_AI_PROCESSOR_ID=projects/.../processors/... \
+     GOOGLE_CLIENT_EMAIL=document-ai-service-account@... \
+     GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+   ```
+3. **Tester en local** :
+   ```bash
+   supabase functions serve expenses --env-file supabase/.env
+   ```
+4. **Déployer** :
+   ```bash
+   supabase functions deploy expenses --project-ref oecbrtyeqatieeybjvhj
+   ```
+5. **Configurer le frontend** :
+   - `VITE_EXPENSES_API_URL=https://oecbrtyeqatieeybjvhj.supabase.co/functions/v1/expenses`
+   - ou laisser vide pour utiliser automatiquement `VITE_API_URL + '/expenses'`
 
