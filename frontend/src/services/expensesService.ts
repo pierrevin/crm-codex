@@ -7,6 +7,10 @@ const getBackendUrl = () => {
   if (import.meta.env.VITE_EXPENSES_API_URL) {
     return import.meta.env.VITE_EXPENSES_API_URL;
   }
+
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL;
+  }
   
   // 2. En production, construire l'URL depuis le hostname actuel
   const isProduction = import.meta.env.PROD || 
