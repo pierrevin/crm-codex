@@ -1,4 +1,3 @@
-import api from './apiClient';
 import axios from 'axios';
 
 // Instance API séparée pour les expenses qui pointe vers le backend
@@ -46,11 +45,33 @@ const expensesApi = axios.create({
   baseURL: getBackendUrl()
 });
 
-// Intercepteur pour ajouter le token JWT
+// Intercepteur pour ajouter les bons headers d'authentification
 expensesApi.interceptors.request.use((config) => {
+  const SUPABASE_EDGE_BASE = '.supabase.co/functions/v1';
+  const isSupabaseEdge = (url?: string) =>
+    typeof url === 'string' && url.includes(SUPABASE_EDGE_BASE);
+
   const accessToken = localStorage.getItem('accessToken');
-  if (accessToken) {
-    config.headers = config.headers || {};
+  const anonKeyFromEnv = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+  const ANON_KEY_FALLBACK =
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9lY2JydHllcWF0aWVleWJqdmhqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk5MTUyMDIsImV4cCI6MjA3NTQ5MTIwMn0.Z4u7oicInUcPjT19p71NRyu6ck63HSXHByH8uL5-IvY';
+  const anonKey = anonKeyFromEnv || ANON_KEY_FALLBACK;
+
+  config.headers = config.headers || {};
+  const targetBaseUrl = config.baseURL || expensesApi.defaults.baseURL;
+
+  if (isSupabaseEdge(targetBaseUrl)) {
+    config.headers.Authorization = `Bearer ${anonKey}`;
+    (config.headers as any).apikey = anonKey;
+
+    if (!anonKeyFromEnv) {
+      console.warn('VITE_SUPABASE_ANON_KEY non définie, utilisation du fallback. Configurez-la en production.');
+    }
+
+    if (accessToken) {
+      (config.headers as any)['x-user-authorization'] = `Bearer ${accessToken}`;
+    }
+  } else if (accessToken) {
     config.headers.Authorization = `Bearer ${accessToken}`;
   }
   return config;
