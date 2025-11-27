@@ -51,9 +51,11 @@ GOOGLE_APPLICATION_CREDENTIALS=/chemin/vers/votre/service-account-key.json
 GOOGLE_DOCUMENT_AI_PROCESSOR_ID=projects/VOTRE_PROJECT_ID/locations/VOTRE_LOCATION/processors/VOTRE_PROCESSOR_ID
 GOOGLE_CLIENT_EMAIL=document-ai-service-account@votre-projet.iam.gserviceaccount.com
 GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+# Optionnel (production) : remplacez GOOGLE_PRIVATE_KEY par une version encodée en base64
+GOOGLE_PRIVATE_KEY_BASE64=LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCg...
 ```
 
-**Note** : Pour la production, stockez ces valeurs de manière sécurisée (variables d'environnement du serveur, secrets manager, etc.)
+**Note** : Pour la production, stockez ces valeurs de manière sécurisée (variables d'environnement du serveur, secrets manager, `supabase secrets set`, etc.). Utilisez `GOOGLE_PRIVATE_KEY_BASE64` lorsque l'interface ne supporte pas les retours à la ligne.
 
 ## 2. Configuration Supabase Storage
 
@@ -202,6 +204,10 @@ Ces règles peuvent être modifiées dans `backend/src/expenses/ocr/expense-pars
      GOOGLE_DOCUMENT_AI_PROCESSOR_ID=projects/.../processors/... \
      GOOGLE_CLIENT_EMAIL=document-ai-service-account@... \
      GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+   # ou bien, si vous préférez encoder la clé :
+   # pour générer la valeur encodée à partir du JSON du compte de service :
+   GOOGLE_KEY=$(jq -r '.private_key' backend/config/service-account-key.json)
+   supabase secrets set GOOGLE_PRIVATE_KEY_BASE64=$(printf "%s" "$GOOGLE_KEY" | base64 | tr -d '\n')
    ```
 3. **Tester en local** :
    ```bash

@@ -4,12 +4,14 @@ import { encode as encodeBase64 } from 'https://deno.land/std@0.207.0/encoding/b
 import { corsHeaders, handleCors } from '../_shared/cors.ts'
 import { supabaseClient } from '../_shared/database.ts'
 import { verifyAccessToken } from '../_shared/jwt.ts'
+import { pemToArrayBuffer } from '../_shared/google-crypto.ts'
 
 type ExpenseStatus = 'PENDING' | 'PROCESSED' | 'VERIFIED' | 'REJECTED'
 
 const GOOGLE_PROCESSOR_ID = Deno.env.get('GOOGLE_DOCUMENT_AI_PROCESSOR_ID') ?? ''
 const GOOGLE_CLIENT_EMAIL = Deno.env.get('GOOGLE_CLIENT_EMAIL') ?? ''
 const GOOGLE_PRIVATE_KEY = (Deno.env.get('GOOGLE_PRIVATE_KEY') ?? '').replace(/\\n/g, '\n')
+const GOOGLE_PRIVATE_KEY_BASE64 = Deno.env.get('GOOGLE_PRIVATE_KEY_BASE64') ?? ''
 const STORAGE_BUCKET = Deno.env.get('SUPABASE_STORAGE_BUCKET') ?? 'expenses'
 
 interface ExpensePayload {
@@ -358,7 +360,12 @@ async function processDocumentAi(fileBytes: Uint8Array, mimeType: string) {
 
   const result = await response.json()
   if (!response.ok) {
-    console.error('Document AI error', result)
+    console.error('Document AI error', {
+      status: response.status,
+      statusText: response.statusText,
+      processorId: GOOGLE_PROCESSOR_ID,
+      body: result
+    })
     throw new Error(result.error?.message ?? 'Document AI error')
   }
 
@@ -370,9 +377,11 @@ async function processDocumentAi(fileBytes: Uint8Array, mimeType: string) {
 }
 
 async function getGoogleAccessToken() {
-  if (!GOOGLE_CLIENT_EMAIL || !GOOGLE_PRIVATE_KEY) {
-    throw new Error('Identifiants Google manquants')
+  if (!GOOGLE_CLIENT_EMAIL) {
+    throw new Error('Identifiants Google manquants (client email)')
   }
+
+  const privateKeyPem = resolveGooglePrivateKey()
 
   const tokenUrl = 'https://oauth2.googleapis.com/token'
   const now = Math.floor(Date.now() / 1000)
@@ -387,7 +396,7 @@ async function getGoogleAccessToken() {
 
   const privateKey = await crypto.subtle.importKey(
     'pkcs8',
-    pemToArrayBuffer(GOOGLE_PRIVATE_KEY),
+    pemToArrayBuffer(privateKeyPem),
     {
       name: 'RSASSA-PKCS1-v1_5',
       hash: 'SHA-256'
@@ -420,14 +429,23 @@ async function getGoogleAccessToken() {
   return result.access_token
 }
 
-function pemToArrayBuffer(pem: string) {
-  const cleaned = pem.replace(/-----BEGIN PRIVATE KEY-----/, '').replace(/-----END PRIVATE KEY-----/, '').replace(/\\s+/g, '')
-  const binary = atob(cleaned)
-  const buffer = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) {
-    buffer[i] = binary.charCodeAt(i)
+function resolveGooglePrivateKey() {
+  const trimmedKey = GOOGLE_PRIVATE_KEY.trim()
+  if (trimmedKey) {
+    return trimmedKey
   }
-  return buffer.buffer
+
+  const base64Key = GOOGLE_PRIVATE_KEY_BASE64.trim()
+  if (!base64Key) {
+    throw new Error('Identifiants Google manquants (clé privée)')
+  }
+
+  try {
+    const decoded = atob(base64Key)
+    return decoded.replace(/\\n/g, '\n').trim()
+  } catch (error) {
+    throw new Error('GOOGLE_PRIVATE_KEY_BASE64 invalide (base64)')
+  }
 }
 
 function base64UrlEncode(input: string | ArrayBuffer) {

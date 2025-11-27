@@ -28,14 +28,14 @@ Vous devez créer et télécharger une clé JSON pour le compte de service :
 5. Attribuez le rôle **Document AI API User**
 6. Créez une clé JSON et téléchargez-la
 7. Placez le fichier dans un endroit sécurisé (ex: `backend/config/service-account-key.json`)
-8. Mettez à jour `GOOGLE_APPLICATION_CREDENTIALS` dans `.env` avec le chemin complet
+8. Mettez à jour `GOOGLE_APPLICATION_CREDENTIALS` dans `.env` avec le chemin complet ou encodez la valeur de `private_key` (voir étape Supabase ci-dessous) pour la déployer comme secret.
 
 **Exemple :**
 ```bash
 GOOGLE_APPLICATION_CREDENTIALS=/Users/pierre/CRM codex/crm-codex/backend/config/service-account-key.json
 ```
 s
-### 2. Supabase - Service Role Key
+### 2. Supabase - Service Role Key & secrets Document AI
 
 1. Allez sur votre projet Supabase : https://supabase.com/dashboard/project/oecbrtyeqatieeybjvhj
 2. Allez dans **Settings** > **API**
@@ -43,6 +43,18 @@ s
 4. Ajoutez-la dans `backend/.env` :
 ```bash
 SUPABASE_SERVICE_ROLE_KEY=votre-service-role-key-ici
+```
+5. Déclarez également les secrets nécessaires pour la fonction Edge :
+```bash
+supabase secrets set \
+  GOOGLE_DOCUMENT_AI_PROCESSOR_ID=projects/.../processors/... \
+  GOOGLE_CLIENT_EMAIL=document-ai-service-account@... \
+  GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+```
+6. Si vous ne pouvez pas stocker la clé avec des retours chariot, encodez-la :
+```bash
+GOOGLE_KEY=$(jq -r '.private_key' backend/config/service-account-key.json)
+supabase secrets set GOOGLE_PRIVATE_KEY_BASE64=$(printf "%s" "$GOOGLE_KEY" | base64 | tr -d '\n')
 ```
 
 ### 3. Supabase - Créer le bucket Storage
