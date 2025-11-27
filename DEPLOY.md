@@ -11,13 +11,13 @@ export SUPABASE_ACCESS_TOKEN="votre-token"
 # 2. Lier le projet (si pas déjà fait)
 supabase link --project-ref oecbrtyeqatieeybjvhj
 
-# 3. Déployer la fonction
-supabase functions deploy api --no-verify-jwt
+# 3. Déployer les fonctions
+supabase functions deploy api expenses --no-verify-jwt
 ```
 
 ## Déploiement automatique via GitHub Actions
 
-Le workflow `.github/workflows/deploy-supabase.yml` déploie automatiquement les Edge Functions à chaque push sur `main`.
+Le workflow `.github/workflows/deploy-supabase.yml` déploie automatiquement les Edge Functions (`api` et `expenses`) à chaque push sur `main`.
 
 ### Configuration requise
 
