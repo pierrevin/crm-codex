@@ -4,7 +4,7 @@ import { encode as encodeBase64 } from 'https://deno.land/std@0.207.0/encoding/b
 import { corsHeaders, handleCors } from '../_shared/cors.ts'
 import { supabaseClient } from '../_shared/database.ts'
 import { verifyAccessToken } from '../_shared/jwt.ts'
-import { pemToArrayBuffer } from '../_shared/google-crypto.ts'
+import { base64UrlEncode, pemToArrayBuffer } from '../_shared/google-crypto.ts'
 
 type ExpenseStatus = 'PENDING' | 'PROCESSED' | 'VERIFIED' | 'REJECTED'
 
@@ -446,21 +446,6 @@ function resolveGooglePrivateKey() {
   } catch (error) {
     throw new Error('GOOGLE_PRIVATE_KEY_BASE64 invalide (base64)')
   }
-}
-
-function base64UrlEncode(input: string | ArrayBuffer) {
-  let str: string
-  if (typeof input === 'string') {
-    str = btoa(unescape(encodeURIComponent(input)))
-  } else {
-    const bytes = new Uint8Array(input)
-    let binary = ''
-    for (let i = 0; i < bytes.length; i++) {
-      binary += String.fromCharCode(bytes[i])
-    }
-    str = btoa(binary)
-  }
-  return str.replace(/=/g, '').replace(/\\+/g, '-').replace(/\\//g, '_')
 }
 
 async function parseExpenseData(document: any, fileName: string, supabase: typeof supabaseClient) {

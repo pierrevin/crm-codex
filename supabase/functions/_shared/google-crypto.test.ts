@@ -1,4 +1,4 @@
-import { pemToArrayBuffer } from './google-crypto.ts'
+import { base64UrlEncode, pemToArrayBuffer } from './google-crypto.ts'
 
 const TEST_PEM = `-----BEGIN PRIVATE KEY-----
 dGVzdC1rZXk=
@@ -24,6 +24,13 @@ Deno.test('pemToArrayBuffer rejette un format vide', () => {
   }
   if (!errorCaught) {
     throw new Error('Une erreur était attendue pour un PEM vide')
+  }
+})
+
+Deno.test('base64UrlEncode encode sans padding', () => {
+  const encoded = base64UrlEncode('test-key')
+  if (encoded !== 'dGVzdC1rZXk') {
+    throw new Error(`Encodage inattendu: ${encoded}`)
   }
 })
 

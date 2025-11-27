@@ -1,3 +1,7 @@
+import { encode as encodeBase64Url } from 'https://deno.land/std@0.207.0/encoding/base64url.ts'
+
+const textEncoder = new TextEncoder()
+
 export function pemToArrayBuffer(pem: string) {
   const cleaned = pem
     .replace(/-----BEGIN PRIVATE KEY-----/, '')
@@ -21,5 +25,17 @@ export function pemToArrayBuffer(pem: string) {
   }
 
   return buffer.buffer
+}
+
+export function base64UrlEncode(input: string | ArrayBuffer | Uint8Array) {
+  const bytes =
+    typeof input === 'string'
+      ? textEncoder.encode(input)
+      : input instanceof Uint8Array
+        ? input
+        : new Uint8Array(input)
+
+  // std encode renvoie parfois '=', on les supprime pour un JWT conforme
+  return encodeBase64Url(bytes).replace(/=/g, '')
 }
 
