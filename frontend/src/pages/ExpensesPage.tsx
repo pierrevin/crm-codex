@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { PlusIcon, MagnifyingGlassIcon, CheckIcon, PencilIcon, TrashIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, MagnifyingGlassIcon, CheckIcon, PencilIcon, TrashIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import { expensesService, Expense, ExpenseStatus, ExpenseFilters } from '../services/expensesService';
-import { recurringExpensesService, RecurringExpense } from '../services/recurringExpensesService';
+import { recurringExpensesService, RecurringExpense, RecurrenceType, UpdateRecurringExpenseDto } from '../services/recurringExpensesService';
 import { ExpenseUploadModal } from '../components/ExpenseUploadModal';
 
 const STATUS_COLORS: Record<ExpenseStatus, string> = {
@@ -25,6 +25,7 @@ export function ExpensesPage() {
   const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [editingRecurring, setEditingRecurring] = useState<RecurringExpense | null>(null);
   const [filters, setFilters] = useState<ExpenseFilters>({});
 
   useEffect(() => {
@@ -54,7 +55,7 @@ export function ExpensesPage() {
   };
 
   const handleDeleteRecurring = async (id: string) => {
-    if (!confirm('Êtes-vous sûr de vouloir supprimer cette dépense récurrente ?')) {
+    if (!confirm('Êtes-vous sûr de vouloir supprimer cette dépense récurrente ? Les dépenses prévisionnelles existantes ne seront pas supprimées.')) {
       return;
     }
     try {
@@ -64,6 +65,17 @@ export function ExpensesPage() {
     } catch (error) {
       console.error('Erreur suppression:', error);
       alert('Erreur lors de la suppression');
+    }
+  };
+
+  const handleSaveRecurring = async (recurring: RecurringExpense, updates: UpdateRecurringExpenseDto) => {
+    try {
+      await recurringExpensesService.update(recurring.id, updates);
+      setEditingRecurring(null);
+      await loadRecurringExpenses();
+    } catch (error) {
+      console.error('Erreur modification:', error);
+      alert('Erreur lors de la modification');
     }
   };
 
@@ -191,7 +203,7 @@ export function ExpensesPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => navigate(`/depenses-recurrentes/${recurring.id}`)}
+                    onClick={() => setEditingRecurring(recurring)}
                     className="inline-flex items-center gap-2 px-3 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 transition-colors text-sm"
                     title="Modifier cette dépense récurrente"
                   >
