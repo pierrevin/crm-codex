@@ -176,6 +176,38 @@ export function ExpensesPage() {
         </div>
       </div>
 
+      {/* Section Dépenses récurrentes */}
+      {recurringExpenses.length > 0 && (
+        <div className="bg-white rounded-lg border border-slate-200 p-4">
+          <h2 className="text-lg font-semibold text-slate-900 mb-4">Dépenses récurrentes</h2>
+          <div className="space-y-2">
+            {recurringExpenses.map((recurring) => (
+              <div key={recurring.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                <div className="flex-1">
+                  <div className="font-medium text-slate-900">{recurring.supplierName || 'Sans nom'}</div>
+                  <div className="text-sm text-slate-500">
+                    {recurring.amountTTC ? new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(recurring.amountTTC) : '-'} 
+                    {' • '}
+                    {recurring.recurrenceType === 'MONTHLY' ? 'Mensuel' : 
+                     recurring.recurrenceType === 'WEEKLY' ? 'Hebdomadaire' :
+                     recurring.recurrenceType === 'QUARTERLY' ? 'Trimestriel' : 'Annuel'}
+                    {' • Jour '}{recurring.paymentDay}
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleGenerateForecast(recurring.id)}
+                  className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
+                  title="Générer les dépenses prévisionnelles pour les 12 prochains mois"
+                >
+                  <ArrowPathIcon className="w-4 h-4" />
+                  Générer prévisions
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Tableau */}
       <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
         {loading ? (
