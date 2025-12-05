@@ -4,6 +4,7 @@ import { PlusIcon, MagnifyingGlassIcon, CheckIcon, PencilIcon, TrashIcon, XMarkI
 import { expensesService, Expense, ExpenseStatus, ExpenseFilters } from '../services/expensesService';
 import { recurringExpensesService, RecurringExpense, RecurrenceType, UpdateRecurringExpenseDto } from '../services/recurringExpensesService';
 import { ExpenseUploadModal } from '../components/ExpenseUploadModal';
+import { RecurringExpenseEditForm } from '../components/RecurringExpenseEditForm';
 
 const STATUS_COLORS: Record<ExpenseStatus, string> = {
   PENDING: 'bg-yellow-100 text-yellow-700',
@@ -327,6 +328,31 @@ export function ExpensesPage() {
             void loadExpenses();
           }}
         />
+      )}
+
+      {/* Modal de modification de dépense récurrente */}
+      {editingRecurring && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold">Modifier la dépense récurrente</h2>
+                <button
+                  onClick={() => setEditingRecurring(null)}
+                  className="text-slate-400 hover:text-slate-600"
+                >
+                  <XMarkIcon className="w-6 h-6" />
+                </button>
+              </div>
+              
+              <RecurringExpenseEditForm
+                recurring={editingRecurring}
+                onSave={(updates) => handleSaveRecurring(editingRecurring, updates)}
+                onCancel={() => setEditingRecurring(null)}
+              />
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
