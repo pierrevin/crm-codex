@@ -206,6 +206,22 @@ export function QuoteDetailPage() {
   return (
     <div className="min-h-screen bg-slate-50 p-6">
       <div className="max-w-6xl mx-auto">
+        {/* Fil d'Ariane si on vient d'une opportunité */}
+        {opportunityId && (
+          <nav className="mb-4 flex items-center gap-2 text-sm text-slate-600">
+            <button
+              onClick={() => navigate(`/opportunites/${opportunityId}`)}
+              className="hover:text-indigo-600 transition-colors"
+            >
+              Opportunité
+            </button>
+            <span>/</span>
+            <span className="text-slate-900 font-medium">
+              {isNew ? 'Créer un devis' : 'Modifier le devis'}
+            </span>
+          </nav>
+        )}
+        
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-slate-900">
             {isNew ? 'Créer un devis' : 'Modifier le devis'}

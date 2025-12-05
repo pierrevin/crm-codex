@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
-import { PlusIcon, CurrencyEuroIcon } from '@heroicons/react/24/outline';
+import { useEffect, useState, useMemo, useRef } from 'react';
+import { PlusIcon, CurrencyEuroIcon, MagnifyingGlassIcon, BuildingOfficeIcon } from '@heroicons/react/24/outline';
 
 import api from '../services/apiClient';
 import { CompanySearchSelect } from '../components/CompanySearchSelect';
 import { ContactSearchSelect } from '../components/ContactSearchSelect';
-import { PaymentModal } from '../components/PaymentModal';
+import { MultiplePaymentsModal } from '../components/MultiplePaymentsModal';
 import { paymentService, Payment } from '../services/paymentService';
 
 type Opportunity = {
@@ -35,22 +35,118 @@ const STAGES = {
 };
 
 export function OpportunitiesPage() {
-  const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
+  const [allOpportunities, setAllOpportunities] = useState<Opportunity[]>([]);
+  const [allCompaniesWithActiveOpps, setAllCompaniesWithActiveOpps] = useState<any[]>([]);
+  const [companyQuery, setCompanyQuery] = useState('');
+  const [companyResults, setCompanyResults] = useState<any[]>([]);
+  const [isLoadingCompanies, setIsLoadingCompanies] = useState(false);
+  const [showCompanyResults, setShowCompanyResults] = useState(false);
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
+  const [selectedCompanyName, setSelectedCompanyName] = useState<string>('');
   const [view, setView] = useState<'kanban' | 'list'>('kanban');
   const [showModal, setShowModal] = useState(false);
   const [draggedOpp, setDraggedOpp] = useState<Opportunity | null>(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedOpportunity, setSelectedOpportunity] = useState<Opportunity | null>(null);
   const [payments, setPayments] = useState<Payment[]>([]);
+  const companySearchRef = useRef<HTMLDivElement>(null);
+  const companyInputRef = useRef<HTMLInputElement>(null);
+
+  // Stages actifs (qualification, proposition, gagné)
+  const activeStages: (keyof typeof STAGES)[] = ['QUALIFICATION', 'PROPOSAL', 'CLOSED_WON'];
 
   useEffect(() => {
     void loadOpportunities();
     void loadPayments();
   }, []);
 
+  // Fermer le dropdown quand on clique en dehors
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (companySearchRef.current && !companySearchRef.current.contains(event.target as Node)) {
+        setShowCompanyResults(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   const loadOpportunities = async () => {
-    const { data } = await api.get<PaginatedResponse<Opportunity>>('/api/opportunities');
-      setOpportunities(data.items || data.data || []);
+    try {
+      const { data } = await api.get<PaginatedResponse<Opportunity>>('/api/opportunities?limit=1000');
+      const opps = data.items || data.data || [];
+      setAllOpportunities(opps);
+      
+      // Extraire les entreprises qui ont des opportunités actives
+      const companiesWithActiveOpps = new Set<string>();
+      opps.forEach((opp: Opportunity) => {
+        if (activeStages.includes(opp.stage) && opp.company?.id) {
+          companiesWithActiveOpps.add(opp.company.id);
+        }
+      });
+      
+      // Charger les entreprises correspondantes
+      const { data: companiesData } = await api.get('/api/companies');
+      const allCompanies = Array.isArray(companiesData) ? companiesData : (companiesData.items || companiesData.data || []);
+      const filteredCompanies = allCompanies.filter((c: any) => companiesWithActiveOpps.has(c.id));
+      setAllCompaniesWithActiveOpps(filteredCompanies);
+    } catch (error) {
+      console.error('Erreur chargement opportunités:', error);
+      setAllOpportunities([]);
+      setAllCompaniesWithActiveOpps([]);
+    }
+  };
+
+  // Recherche d'entreprises avec debounce (comme GlobalSearch)
+  useEffect(() => {
+    if (!companyQuery.trim()) {
+      setCompanyResults([]);
+      setShowCompanyResults(false);
+      return;
+    }
+
+    setIsLoadingCompanies(true);
+    setShowCompanyResults(true);
+
+    const timeoutId = setTimeout(() => {
+      try {
+        const term = companyQuery.toLowerCase();
+        const filtered = allCompaniesWithActiveOpps.filter((company: any) =>
+          company.name.toLowerCase().includes(term)
+        );
+        setCompanyResults(filtered.slice(0, 10)); // Limiter à 10 résultats
+      } catch (error) {
+        console.error('Erreur recherche entreprises:', error);
+        setCompanyResults([]);
+      } finally {
+        setIsLoadingCompanies(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [companyQuery, allCompaniesWithActiveOpps]);
+
+  // Filtrer les opportunités selon l'entreprise sélectionnée
+  const opportunities = useMemo(() => {
+    if (!selectedCompanyId) {
+      return allOpportunities;
+    }
+    return allOpportunities.filter(opp => opp.company?.id === selectedCompanyId);
+  }, [allOpportunities, selectedCompanyId]);
+
+  const handleCompanySelect = (company: any) => {
+    setSelectedCompanyId(company.id);
+    setSelectedCompanyName(company.name);
+    setCompanyQuery('');
+    setShowCompanyResults(false);
+    companyInputRef.current?.blur();
+  };
+
+  const handleCompanyClear = () => {
+    setSelectedCompanyId(null);
+    setSelectedCompanyName('');
+    setCompanyQuery('');
+    setShowCompanyResults(false);
   };
 
   const loadPayments = async () => {
@@ -90,8 +186,8 @@ export function OpportunitiesPage() {
 
     try {
       // Mise à jour optimiste
-      setOpportunities(opps => 
-        opps.map(o => o.id === draggedOpp.id ? { ...o, stage: newStage } : o)
+      setAllOpportunities((opps: Opportunity[]) => 
+        opps.map((o: Opportunity) => o.id === draggedOpp.id ? { ...o, stage: newStage } : o)
       );
 
       // Mise à jour API
@@ -147,6 +243,73 @@ export function OpportunitiesPage() {
             <span className="sm:hidden">Nouvelle</span>
           </button>
         </div>
+      </div>
+
+      {/* Filtre par entreprise - Recherche (style GlobalSearch) */}
+      <div ref={companySearchRef} className="relative w-full max-w-2xl">
+        <div className="relative">
+          <MagnifyingGlassIcon className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
+          <input
+            ref={companyInputRef}
+            type="text"
+            value={selectedCompanyName || companyQuery}
+            onChange={(e) => {
+              const value = e.target.value;
+              setCompanyQuery(value);
+              if (selectedCompanyId) {
+                handleCompanyClear();
+              }
+            }}
+            onFocus={() => companyQuery.trim() && setShowCompanyResults(true)}
+            placeholder="Rechercher une entreprise..."
+            className="w-full rounded-xl border border-slate-200 bg-white pl-11 pr-4 py-3 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all shadow-sm"
+          />
+          {(companyQuery || selectedCompanyId) && (
+            <button
+              type="button"
+              onClick={handleCompanyClear}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
+        {/* Dropdown résultats */}
+        {showCompanyResults && companyQuery.trim() && !selectedCompanyId && (
+          <div className="absolute z-50 mt-2 w-full rounded-xl border border-slate-200 bg-white shadow-xl max-h-96 overflow-auto">
+            {isLoadingCompanies ? (
+              <div className="p-4 text-center text-sm text-slate-500">Recherche en cours...</div>
+            ) : companyResults.length > 0 ? (
+              <div className="py-2">
+                {companyResults.map((company: any) => (
+                  <button
+                    key={company.id}
+                    type="button"
+                    onClick={() => handleCompanySelect(company)}
+                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 transition-colors text-left border-b border-slate-100 last:border-b-0"
+                  >
+                    <div className="flex-shrink-0">
+                      <BuildingOfficeIcon className="h-5 w-5 text-indigo-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <p className="text-sm font-medium text-slate-900 truncate">{company.name}</p>
+                        <span className="flex-shrink-0 text-xs font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+                          Client
+                        </span>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="p-4 text-center text-sm text-slate-500">
+                Aucune entreprise trouvée pour "{companyQuery}"
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {view === 'kanban' && (
@@ -392,7 +555,7 @@ export function OpportunitiesPage() {
       {showModal && <CreateOpportunityModal onClose={() => setShowModal(false)} onCreated={loadOpportunities} />}
       
       {selectedOpportunity && (
-        <PaymentModal
+        <MultiplePaymentsModal
           isOpen={showPaymentModal}
           onClose={() => {
             setShowPaymentModal(false);

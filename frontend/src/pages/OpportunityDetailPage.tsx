@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { TrashIcon, PlusIcon, DocumentTextIcon, BanknotesIcon, ReceiptRefundIcon, DocumentDuplicateIcon } from '@heroicons/react/24/outline';
+import { TrashIcon, PlusIcon, DocumentTextIcon, BanknotesIcon, ReceiptRefundIcon, DocumentDuplicateIcon, ChevronDownIcon, ChevronUpIcon, FolderIcon, PencilIcon, CalendarIcon } from '@heroicons/react/24/outline';
 
 import api from '../services/apiClient';
 import { CompanySearchSelect } from '../components/CompanySearchSelect';
@@ -11,6 +11,9 @@ import { deboursNoteService, DeboursNote } from '../services/deboursNoteService'
 import { DeboursNoteModal } from '../components/DeboursNoteModal';
 import { expensesService, Expense } from '../services/expensesService';
 import { ExpenseUploadModal } from '../components/ExpenseUploadModal';
+import { OpportunityMetrics } from '../components/OpportunityMetrics';
+import { DocumentSection } from '../components/DocumentSection';
+import { RevenueTable } from '../components/RevenueTable';
 
 const STAGES = {
   QUALIFICATION: { label: 'Qualification', color: 'bg-blue-100 text-blue-700' },
@@ -64,7 +67,7 @@ export function OpportunityDetailPage() {
   const [showDeboursNoteModal, setShowDeboursNoteModal] = useState(false);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [showExpenseModal, setShowExpenseModal] = useState(false);
-  const [activeTab, setActiveTab] = useState<'overview' | 'quotes' | 'debours' | 'payments' | 'expenses' | 'documents'>('overview');
+  const [isGeneralInfoCollapsed, setIsGeneralInfoCollapsed] = useState(true);
 
   useEffect(() => {
     void loadContacts();
@@ -211,6 +214,8 @@ export function OpportunityDetailPage() {
         await loadPayments(id);
         await loadDeboursNotes(id);
         await loadExpenses(id);
+        // Replier la section informations générales après enregistrement
+        setIsGeneralInfoCollapsed(true);
       } catch (err: any) {
         console.error('Erreur mise à jour opportunité:', err);
         const errorMessage = err.response?.data?.message || err.response?.data?.error || err.message || 'Erreur lors de la mise à jour';
@@ -235,6 +240,17 @@ export function OpportunityDetailPage() {
       console.error('Erreur suppression:', error);
       alert('Erreur lors de la suppression');
     }
+  };
+
+  const refreshAllData = async () => {
+    if (!id) return;
+    await Promise.all([
+      loadOpportunity(id),
+      loadQuotes(id),
+      loadPayments(id),
+      loadDeboursNotes(id),
+      loadExpenses(id)
+    ]);
   };
 
   if (loading) {
@@ -369,112 +385,116 @@ export function OpportunityDetailPage() {
     );
   }
 
-  // Page de détail avec onglets pour opportunité existante
+  // Page de détail refondue - Version 2025
   return (
-    <div className="mx-auto max-w-7xl">
+    <div className="mx-auto max-w-7xl space-y-6">
       {error && (
-        <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 p-4 shadow-sm">
+        <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 shadow-sm">
           <p className="text-sm text-rose-700">Erreur : {error}</p>
         </div>
       )}
 
-      {/* En-tête */}
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-slate-900">{opportunity.title}</h1>
+      {/* En-tête modernisé */}
+      <div className="flex items-start justify-between">
+        <div className="flex-1">
+          <div className="flex items-center gap-3 mb-2">
+            <h1 className="text-3xl font-bold text-slate-900">{opportunity.title}</h1>
+            <span className={`rounded-full px-3 py-1 text-sm font-semibold ${STAGES[opportunity.stage].color}`}>
+              {STAGES[opportunity.stage].label}
+            </span>
+          </div>
           {opportunity.companyId && (
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="text-base text-slate-600">
               {companies.find(c => c.id === opportunity.companyId)?.name}
             </p>
           )}
         </div>
-        <button
-          type="button"
-          onClick={handleDelete}
-          className="flex items-center gap-2 rounded-lg border border-rose-200 px-4 py-2 text-sm font-medium text-rose-600 hover:bg-rose-50 transition-colors"
-        >
-          <TrashIcon className="h-5 w-5" />
-          Supprimer
-        </button>
+        <div className="flex items-center gap-3">
+          {/* Accès rapide aux documents */}
+          {driveFolderId && (
+            <a
+              href={`https://drive.google.com/drive/folders/${driveFolderId}`}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-2 rounded-lg border border-green-300 bg-green-50 px-4 py-2 text-sm font-medium text-green-700 hover:bg-green-100 transition-colors"
+            >
+              <FolderIcon className="h-5 w-5" />
+              Drive
+            </a>
+          )}
+          <button
+            type="button"
+            onClick={handleDelete}
+            className="flex items-center gap-2 rounded-lg border border-rose-200 px-4 py-2 text-sm font-medium text-rose-600 hover:bg-rose-50 transition-colors"
+          >
+            <TrashIcon className="h-5 w-5" />
+            Supprimer
+          </button>
+        </div>
       </div>
 
-      {/* Onglets */}
-      <div className="mb-6 border-b border-slate-200">
-        <nav className="flex space-x-8" aria-label="Tabs">
-          <button
-            onClick={() => setActiveTab('overview')}
-            className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
-              activeTab === 'overview'
-                ? 'border-indigo-500 text-indigo-600'
-                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
-            }`}
-          >
-            Vue d'ensemble
-          </button>
-          <button
-            onClick={() => setActiveTab('quotes')}
-            className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
-              activeTab === 'quotes'
-                ? 'border-indigo-500 text-indigo-600'
-                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
-            }`}
-          >
-            <DocumentTextIcon className="w-5 h-5 inline mr-2" />
-            Devis & Factures
-          </button>
-          <button
-            onClick={() => setActiveTab('debours')}
-            className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
-              activeTab === 'debours'
-                ? 'border-indigo-500 text-indigo-600'
-                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
-            }`}
-          >
-            <ReceiptRefundIcon className="w-5 h-5 inline mr-2" />
-            Notes de débours
-          </button>
-          <button
-            onClick={() => setActiveTab('expenses')}
-            className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
-              activeTab === 'expenses'
-                ? 'border-indigo-500 text-indigo-600'
-                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
-            }`}
-          >
-            <DocumentDuplicateIcon className="w-5 h-5 inline mr-2" />
-            Dépenses
-          </button>
-          <button
-            onClick={() => setActiveTab('payments')}
-            className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
-              activeTab === 'payments'
-                ? 'border-indigo-500 text-indigo-600'
-                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
-            }`}
-          >
-            <BanknotesIcon className="w-5 h-5 inline mr-2" />
-            Paiements
-          </button>
-          <button
-            onClick={() => setActiveTab('documents')}
-            className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
-              activeTab === 'documents'
-                ? 'border-indigo-500 text-indigo-600'
-                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
-            }`}
-          >
-            Documents
-          </button>
-        </nav>
-      </div>
-
-      {/* Contenu des onglets */}
-      <div className="space-y-6">
-        {/* Onglet Vue d'ensemble */}
-        {activeTab === 'overview' && (
-          <div className="space-y-6">
-            <form onSubmit={onSubmit} className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-              <h2 className="text-lg font-semibold text-slate-900 mb-4">Informations générales</h2>
+      {/* Informations générales remontées - Mode compact */}
+      <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
+        {isGeneralInfoCollapsed ? (
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-6 flex-wrap">
+              {opportunity.amount && (
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-slate-600">Montant:</span>
+                  <span className="text-base font-semibold text-slate-900">
+                    {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(opportunity.amount)}
+                  </span>
+                </div>
+              )}
+              {opportunity.closeDate && (
+                <div className="flex items-center gap-2">
+                  <CalendarIcon className="h-4 w-4 text-slate-400" />
+                  <span className="text-sm text-slate-600">
+                    Facturation: {new Date(opportunity.closeDate).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}
+                  </span>
+                </div>
+              )}
+              {opportunity.expectedPaymentDate && (
+                <div className="flex items-center gap-2">
+                  <CalendarIcon className="h-4 w-4 text-slate-400" />
+                  <span className="text-sm text-slate-600">
+                    Paiement: {new Date(opportunity.expectedPaymentDate).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}
+                  </span>
+                </div>
+              )}
+              {opportunity.contactId && (
+                <div className="text-sm text-slate-600">
+                  Contact: {contacts.find(c => c.id === opportunity.contactId)?.firstName} {contacts.find(c => c.id === opportunity.contactId)?.lastName || ''}
+                </div>
+              )}
+              {opportunity.companyId && (
+                <div className="text-sm text-slate-600">
+                  {companies.find(c => c.id === opportunity.companyId)?.name}
+                </div>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsGeneralInfoCollapsed(false)}
+              className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+            >
+              <PencilIcon className="h-4 w-4" />
+              Éditer
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-slate-900">Informations générales</h2>
+              <button
+                type="button"
+                onClick={() => setIsGeneralInfoCollapsed(true)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <ChevronUpIcon className="h-5 w-5" />
+              </button>
+            </div>
+            <form onSubmit={onSubmit} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Titre *</label>
@@ -571,10 +591,10 @@ export function OpportunityDetailPage() {
                   />
                 </div>
               </div>
-              <div className="mt-6 flex justify-end gap-3">
+              <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
                 <button
                   type="button"
-                  onClick={() => navigate('/opportunites')}
+                  onClick={() => setIsGeneralInfoCollapsed(true)}
                   className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                 >
                   Annuler
@@ -589,187 +609,45 @@ export function OpportunityDetailPage() {
             </form>
           </div>
         )}
+      </div>
 
-        {/* Onglet Devis & Factures */}
-        {activeTab === 'quotes' && (
-          <div className="space-y-6">
-            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-xl font-semibold text-slate-900">Devis</h2>
-                <button
-                  type="button"
-                  onClick={() => navigate(`/quotes/new?opportunityId=${id}`)}
-                  className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
-                >
-                  <PlusIcon className="w-5 h-5" />
-                  Créer un devis
-                </button>
-              </div>
-              
-              {quotes.length === 0 ? (
-                <div className="text-center py-12">
-                  <DocumentTextIcon className="w-12 h-12 mx-auto text-slate-400 mb-4" />
-                  <p className="text-sm text-slate-500">Aucun devis pour cette opportunité</p>
-                </div>
-              ) : (
-                <div className="grid gap-4 md:grid-cols-2">
-                  {quotes.map((quote) => (
-                    <div
-                      key={quote.id}
-                      className="group rounded-lg border border-slate-200 bg-white p-4 hover:border-indigo-300 hover:shadow-md transition-all cursor-pointer"
-                      onClick={() => navigate(`/quotes/${quote.id}`)}
-                    >
-                      <div className="flex items-start justify-between mb-2">
-                        <h3 className="font-semibold text-slate-900">{quote.label}</h3>
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                          quote.status === 'DRAFT' ? 'bg-slate-100 text-slate-700' :
-                          quote.status === 'SENT' ? 'bg-blue-100 text-blue-700' :
-                          quote.status === 'ACCEPTED' ? 'bg-green-100 text-green-700' :
-                          quote.status === 'REJECTED' ? 'bg-red-100 text-red-700' :
-                          'bg-amber-100 text-amber-700'
-                        }`}>
-                          {quote.status === 'DRAFT' ? 'Brouillon' :
-                           quote.status === 'SENT' ? 'Envoyé' :
-                           quote.status === 'ACCEPTED' ? 'Accepté' :
-                           quote.status === 'REJECTED' ? 'Refusé' :
-                           'Expiré'}
-                        </span>
-                      </div>
-                      <div className="text-sm text-slate-600 space-y-1">
-                        {quote.quoteNumber && <div>N° {quote.quoteNumber}</div>}
-                        {quote.totalTTC && (
-                          <div className="font-semibold text-slate-900">
-                            {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(parseFloat(quote.totalTTC))} TTC
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+      {/* Layout 2 colonnes */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Colonne gauche (1/3) */}
+        <div className="space-y-6">
+          {/* Métriques compactes */}
+          <OpportunityMetrics
+            opportunityAmount={opportunity.amount}
+            invoiceUrls={invoiceUrls}
+            expenses={expenses}
+          />
 
-            {/* Section Factures (préparée pour Tiime) */}
-            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-xl font-semibold text-slate-900">Factures</h2>
-                <button
-                  type="button"
-                  disabled
-                  className="flex items-center gap-2 rounded-lg bg-slate-100 px-4 py-2 text-sm font-medium text-slate-400 cursor-not-allowed"
-                >
-                  <PlusIcon className="w-5 h-5" />
-                  Importer depuis Tiime (bientôt)
-                </button>
-              </div>
-              {invoiceUrls && invoiceUrls.length > 0 ? (
-                <div className="space-y-2">
-                  {invoiceUrls.map((url, index) => (
-                    <a
-                      key={index}
-                      href={url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex items-center gap-2 p-3 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors"
-                    >
-                      <span className="text-amber-600">🧾</span>
-                      <span className="text-sm font-medium text-slate-900">Facture {index + 1}</span>
-                    </a>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-12">
-                  <p className="text-sm text-slate-500">Aucune facture importée</p>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
+          {/* Documents */}
+          <DocumentSection
+            driveFolderId={driveFolderId}
+            quoteUrl={quoteUrl}
+            invoiceUrls={invoiceUrls}
+          />
+        </div>
 
-        {/* Onglet Notes de débours */}
-        {activeTab === 'debours' && (
-          <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-semibold text-slate-900">Notes de débours</h2>
-              <button
-                type="button"
-                onClick={() => setShowDeboursNoteModal(true)}
-                className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
-              >
-                <PlusIcon className="w-5 h-5" />
-                Créer une note de débours
-              </button>
-            </div>
-            
-            {deboursNotes.length === 0 ? (
-              <div className="text-center py-12">
-                <ReceiptRefundIcon className="w-12 h-12 mx-auto text-slate-400 mb-4" />
-                <p className="text-sm text-slate-500">Aucune note de débours pour cette opportunité</p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {deboursNotes.map((note) => (
-                  <div
-                    key={note.id}
-                    className="rounded-lg border border-slate-200 bg-white p-4 hover:border-indigo-300 hover:shadow-md transition-all"
-                  >
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex-1">
-                        <h3 className="font-semibold text-slate-900 mb-1">{note.title}</h3>
-                        <div className="flex items-center gap-4 text-sm text-slate-600">
-                          <span>
-                            {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(note.totalAmount)} TTC
-                          </span>
-                          {note.expectedPaymentDate && (
-                            <span>
-                              Paiement prévu : {new Date(note.expectedPaymentDate).toLocaleDateString('fr-FR')}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                        note.status === 'DRAFT' ? 'bg-slate-100 text-slate-700' :
-                        note.status === 'SENT' ? 'bg-blue-100 text-blue-700' :
-                        'bg-green-100 text-green-700'
-                      }`}>
-                        {note.status === 'DRAFT' ? 'Brouillon' :
-                         note.status === 'SENT' ? 'Envoyée' :
-                         'Payée'}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 mt-4">
-                      {note.googleDocUrl && (
-                        <a
-                          href={note.googleDocUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-sm text-indigo-600 hover:text-indigo-700 font-medium"
-                        >
-                          📄 Voir le document
-                        </a>
-                      )}
-                      {note.status !== 'PAID' && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowPaymentModal(true);
-                            // TODO: Passer deboursNoteId au modal
-                          }}
-                          className="text-sm text-indigo-600 hover:text-indigo-700 font-medium"
-                        >
-                          Marquer comme payé
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+        {/* Colonne droite (2/3) */}
+        <div className="lg:col-span-2 space-y-6">
+          {/* Tableau des recettes */}
+          <RevenueTable
+            quotes={quotes}
+            invoiceUrls={invoiceUrls}
+            deboursNotes={deboursNotes}
+            payments={payments}
+            opportunityId={id!}
+            opportunityTitle={opportunity.title}
+            opportunityAmount={opportunity.amount}
+            opportunityTaxRate={taxRate}
+            onRefresh={refreshAllData}
+            onCreateQuote={() => navigate(`/quotes/new?opportunityId=${id}`)}
+            onCreateDeboursNote={() => setShowDeboursNoteModal(true)}
+          />
 
-        {/* Onglet Dépenses */}
-        {activeTab === 'expenses' && (
+          {/* Section Dépenses */}
           <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-semibold text-slate-900">Dépenses</h2>
@@ -833,129 +711,10 @@ export function OpportunityDetailPage() {
               </div>
             )}
           </div>
-        )}
-
-        {/* Onglet Paiements */}
-        {activeTab === 'payments' && (
-          <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-semibold text-slate-900">Paiements</h2>
-              <button
-                type="button"
-                onClick={() => setShowPaymentModal(true)}
-                className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
-              >
-                <PlusIcon className="w-5 h-5" />
-                Ajouter un paiement
-              </button>
-            </div>
-            
-            {payments.length === 0 ? (
-              <div className="text-center py-12">
-                <BanknotesIcon className="w-12 h-12 mx-auto text-slate-400 mb-4" />
-                <p className="text-sm text-slate-500">Aucun paiement enregistré</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {payments.map((payment) => (
-                  <div
-                    key={payment.id}
-                    className="rounded-lg border border-slate-200 bg-white p-4 hover:border-indigo-300 hover:shadow-sm transition-all"
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                          <span className="text-lg font-semibold text-slate-900">
-                            {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(payment.amount)}
-                          </span>
-                          {payment.deboursNoteId && (
-                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">
-                              Note de débours
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-sm text-slate-600 space-y-1">
-                          <div>Payé le {new Date(payment.paymentDate).toLocaleDateString('fr-FR')}</div>
-                          {payment.taxAmount > 0 && (
-                            <div>Taxes : {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(payment.taxAmount)}</div>
-                          )}
-                          {payment.notes && (
-                            <div className="text-xs text-slate-400 mt-1">{payment.notes}</div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Onglet Documents */}
-        {activeTab === 'documents' && (
-          <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="text-xl font-semibold text-slate-900 mb-6">Documents</h2>
-            <div className="flex flex-wrap gap-3">
-              {driveFolderId ? (
-                <a
-                  href={`https://drive.google.com/drive/folders/${driveFolderId}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm font-medium text-green-700 hover:bg-green-100 transition-colors"
-                >
-                  <span>📂</span>
-                  Dossier Drive
-                </a>
-              ) : (
-                <span className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
-                  <span>📂</span>
-                  Dossier Drive (création en cours...)
-                </span>
-              )}
-              {quoteUrl && (
-                <a
-                  href={quoteUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm font-medium text-indigo-700 hover:bg-indigo-100 transition-colors"
-                >
-                  <span>📄</span>
-                  Dernier devis
-                </a>
-              )}
-              {invoiceUrls && invoiceUrls.length > 0 && (
-                <a
-                  href={invoiceUrls[invoiceUrls.length - 1]}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-700 hover:bg-amber-100 transition-colors"
-                >
-                  <span>🧾</span>
-                  Dernière facture
-                </a>
-              )}
-            </div>
-          </div>
-        )}
+        </div>
       </div>
 
       {/* Modals */}
-      {showPaymentModal && (
-        <PaymentModal
-          isOpen={showPaymentModal}
-          onClose={() => setShowPaymentModal(false)}
-          opportunityId={id}
-          opportunityTitle={opportunity.title}
-          opportunityAmount={opportunity.amount}
-          opportunityTaxRate={taxRate}
-          onSuccess={async () => {
-            await loadPayments(id!);
-            setShowPaymentModal(false);
-          }}
-        />
-      )}
-
       {showDeboursNoteModal && id && (
         <DeboursNoteModal
           isOpen={showDeboursNoteModal}
@@ -965,17 +724,20 @@ export function OpportunityDetailPage() {
           onSuccess={async () => {
             await loadDeboursNotes(id);
             setShowDeboursNoteModal(false);
+            await refreshAllData();
           }}
         />
       )}
 
       {showExpenseModal && (
         <ExpenseUploadModal
-          onClose={() => setShowExpenseModal(false)}
+          onClose={() => {
+            setShowExpenseModal(false);
+            void refreshAllData();
+          }}
           opportunityId={id}
         />
       )}
     </div>
   );
 }
-

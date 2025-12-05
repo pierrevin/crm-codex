@@ -1,7 +1,10 @@
 import { useState, FormEvent, useEffect } from 'react';
-import { XMarkIcon } from '@heroicons/react/24/outline';
+import { XMarkIcon, PlusIcon } from '@heroicons/react/24/outline';
 import { deboursNoteService, CreateDeboursNoteDto, DeboursNote } from '../services/deboursNoteService';
-import { expensesService, Expense } from '../services/expensesService';
+import { expensesService, Expense, CreateExpenseDto } from '../services/expensesService';
+import { SupplierSearchSelect } from './SupplierSearchSelect';
+import { AccountCodeSelector } from './AccountCodeSelector';
+import { supplierPreferencesService } from '../services/supplierPreferences';
 import api from '../services/apiClient';
 
 interface DeboursNoteModalProps {
@@ -29,6 +32,19 @@ export function DeboursNoteModal({
   const [availableExpenses, setAvailableExpenses] = useState<Expense[]>([]);
   const [selectedExpenseIds, setSelectedExpenseIds] = useState<string[]>([]);
   const [generatingDoc, setGeneratingDoc] = useState(false);
+  const [showCreateExpense, setShowCreateExpense] = useState(false);
+  const [creatingExpense, setCreatingExpense] = useState(false);
+  const [selectedSupplierId, setSelectedSupplierId] = useState<string>('');
+  const [newExpense, setNewExpense] = useState({
+    supplierName: '',
+    invoiceNumber: '',
+    invoiceDate: new Date().toISOString().split('T')[0],
+    amountTTC: '',
+    amountHT: '',
+    vatRate: '20',
+    accountCode: '',
+    accountLabel: ''
+  });
 
   useEffect(() => {
     if (isOpen) {
@@ -39,6 +55,18 @@ export function DeboursNoteModal({
       setNotes('');
       setSelectedExpenseIds([]);
       setError(null);
+      setShowCreateExpense(false);
+      setSelectedSupplierId('');
+      setNewExpense({
+        supplierName: '',
+        invoiceNumber: '',
+        invoiceDate: new Date().toISOString().split('T')[0],
+        amountTTC: '',
+        amountHT: '',
+        vatRate: '20',
+        accountCode: '',
+        accountLabel: ''
+      });
       void loadAvailableExpenses();
     }
   }, [isOpen, opportunityId, opportunityTitle]);
@@ -112,6 +140,94 @@ export function DeboursNoteModal({
         ? prev.filter(id => id !== expenseId)
         : [...prev, expenseId]
     );
+  };
+
+  // Charger les préférences du fournisseur sélectionné
+  useEffect(() => {
+    if (selectedSupplierId && showCreateExpense) {
+      const prefs = supplierPreferencesService.get(selectedSupplierId);
+      if (prefs) {
+        if (prefs.vatRate !== undefined) {
+          setNewExpense(prev => ({ ...prev, vatRate: (prefs.vatRate! * 100).toFixed(2) }));
+        }
+        if (prefs.accountCode) {
+          setNewExpense(prev => ({ ...prev, accountCode: prefs.accountCode!, accountLabel: prefs.accountLabel || '' }));
+        }
+      }
+    } else if (newExpense.supplierName && !selectedSupplierId && showCreateExpense) {
+      // Si pas d'ID mais un nom, essayer de charger par nom
+      const prefs = supplierPreferencesService.getByName(newExpense.supplierName);
+      if (prefs) {
+        if (prefs.vatRate !== undefined) {
+          setNewExpense(prev => ({ ...prev, vatRate: (prefs.vatRate! * 100).toFixed(2) }));
+        }
+        if (prefs.accountCode) {
+          setNewExpense(prev => ({ ...prev, accountCode: prefs.accountCode!, accountLabel: prefs.accountLabel || '' }));
+        }
+      }
+    }
+  }, [selectedSupplierId, newExpense.supplierName, showCreateExpense]);
+
+  const handleCreateExpense = async (e: FormEvent) => {
+    e.preventDefault();
+    setCreatingExpense(true);
+    setError(null);
+
+    try {
+      const expenseDto: CreateExpenseDto = {
+        supplierName: newExpense.supplierName || undefined,
+        invoiceNumber: newExpense.invoiceNumber || undefined,
+        invoiceDate: newExpense.invoiceDate || undefined,
+        amountTTC: newExpense.amountTTC ? parseFloat(newExpense.amountTTC) : undefined,
+        amountHT: newExpense.amountHT ? parseFloat(newExpense.amountHT) : undefined,
+        vatRate: newExpense.vatRate ? parseFloat(newExpense.vatRate) / 100 : undefined,
+        accountCode: newExpense.accountCode || undefined,
+        accountLabel: newExpense.accountLabel || undefined,
+        opportunityId,
+        status: 'VERIFIED'
+      };
+
+      const createdExpense = await expensesService.create(expenseDto);
+      
+      // Sauvegarder les préférences du fournisseur
+      if (selectedSupplierId && (newExpense.vatRate || newExpense.accountCode)) {
+        supplierPreferencesService.save(selectedSupplierId, {
+          vatRate: newExpense.vatRate ? parseFloat(newExpense.vatRate) / 100 : undefined,
+          accountCode: newExpense.accountCode || undefined,
+          accountLabel: newExpense.accountLabel || undefined
+        });
+      } else if (newExpense.supplierName && (newExpense.vatRate || newExpense.accountCode)) {
+        supplierPreferencesService.saveByName(newExpense.supplierName, {
+          vatRate: newExpense.vatRate ? parseFloat(newExpense.vatRate) / 100 : undefined,
+          accountCode: newExpense.accountCode || undefined,
+          accountLabel: newExpense.accountLabel || undefined
+        });
+      }
+      
+      // Rafraîchir la liste des dépenses
+      await loadAvailableExpenses();
+      
+      // Sélectionner automatiquement la nouvelle dépense
+      setSelectedExpenseIds([...selectedExpenseIds, createdExpense.id]);
+      
+      // Réinitialiser le formulaire et masquer
+      setSelectedSupplierId('');
+      setNewExpense({
+        supplierName: '',
+        invoiceNumber: '',
+        invoiceDate: new Date().toISOString().split('T')[0],
+        amountTTC: '',
+        amountHT: '',
+        vatRate: '20',
+        accountCode: '',
+        accountLabel: ''
+      });
+      setShowCreateExpense(false);
+    } catch (err: any) {
+      setError(err.response?.data?.message || err.message || 'Erreur lors de la création de la dépense');
+    } finally {
+      setCreatingExpense(false);
+    }
   };
 
   return (
@@ -200,14 +316,226 @@ export function DeboursNoteModal({
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">
-                Dépenses à inclure (optionnel)
-              </label>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-sm font-medium text-slate-700">
+                  Dépenses à inclure (optionnel)
+                </label>
+                {!showCreateExpense && (
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateExpense(true)}
+                    className="flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+                  >
+                    <PlusIcon className="h-4 w-4" />
+                    Créer une dépense
+                  </button>
+                )}
+              </div>
+              
+              {showCreateExpense && (
+                <div className="mb-3 rounded-lg border border-indigo-200 bg-indigo-50 p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-semibold text-indigo-900">Nouvelle dépense</h3>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowCreateExpense(false);
+                        setSelectedSupplierId('');
+                        setNewExpense({
+                          supplierName: '',
+                          invoiceNumber: '',
+                          invoiceDate: new Date().toISOString().split('T')[0],
+                          amountTTC: '',
+                          amountHT: '',
+                          vatRate: '20',
+                          accountCode: '',
+                          accountLabel: ''
+                        });
+                      }}
+                      className="text-indigo-600 hover:text-indigo-700"
+                    >
+                      <XMarkIcon className="h-5 w-5" />
+                    </button>
+                  </div>
+                  <form onSubmit={handleCreateExpense} className="space-y-3">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Fournisseur *
+                      </label>
+                      <SupplierSearchSelect
+                        selectedSupplierId={selectedSupplierId}
+                        onSelectSupplier={(supplierId, supplierName) => {
+                          setSelectedSupplierId(supplierId || '');
+                          setNewExpense({ ...newExpense, supplierName: supplierName || '' });
+                        }}
+                        onCreateSupplier={async (name: string, companyData?: any) => {
+                          try {
+                            const dataToSend = companyData || { name, statusSupplier: true };
+                            if (!companyData) {
+                              dataToSend.statusSupplier = true;
+                            }
+                            const { data } = await api.post('/api/companies', dataToSend);
+                            setSelectedSupplierId(data.id);
+                            setNewExpense({ ...newExpense, supplierName: data.name });
+                            return data;
+                          } catch (error) {
+                            console.error('Erreur création fournisseur:', error);
+                            throw error;
+                          }
+                        }}
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          N° Facture
+                        </label>
+                        <input
+                          type="text"
+                          value={newExpense.invoiceNumber}
+                          onChange={(e) => setNewExpense({ ...newExpense, invoiceNumber: e.target.value })}
+                          className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm focus:border-indigo-500 focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          Date facture *
+                        </label>
+                        <input
+                          type="date"
+                          value={newExpense.invoiceDate}
+                          onChange={(e) => setNewExpense({ ...newExpense, invoiceDate: e.target.value })}
+                          required
+                          className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm focus:border-indigo-500 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          Montant HT (€)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={newExpense.amountHT}
+                          onChange={(e) => {
+                            const ht = e.target.value;
+                            const rate = parseFloat(newExpense.vatRate) / 100;
+                            const ttc = ht && !isNaN(parseFloat(ht))
+                              ? (parseFloat(ht) * (1 + rate)).toFixed(2)
+                              : '';
+                            setNewExpense({ ...newExpense, amountHT: ht, amountTTC: ttc });
+                          }}
+                          className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm focus:border-indigo-500 focus:outline-none"
+                          placeholder="0.00"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          Taux TVA (%)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={newExpense.vatRate}
+                          onChange={(e) => {
+                            const vat = e.target.value;
+                            const rate = parseFloat(vat) / 100;
+                            const ttc = newExpense.amountHT && !isNaN(parseFloat(newExpense.amountHT))
+                              ? (parseFloat(newExpense.amountHT) * (1 + rate)).toFixed(2)
+                              : newExpense.amountTTC;
+                            setNewExpense({ ...newExpense, vatRate: vat, amountTTC: ttc });
+                          }}
+                          className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm focus:border-indigo-500 focus:outline-none"
+                          placeholder="20"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Montant TTC (€) *
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={newExpense.amountTTC}
+                        onChange={(e) => {
+                          const ttc = e.target.value;
+                          const rate = parseFloat(newExpense.vatRate) / 100;
+                          const ht = ttc && !isNaN(parseFloat(ttc)) && rate > 0
+                            ? (parseFloat(ttc) / (1 + rate)).toFixed(2)
+                            : newExpense.amountHT;
+                          setNewExpense({ ...newExpense, amountTTC: ttc, amountHT: ht });
+                        }}
+                        required
+                        className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm font-semibold focus:border-indigo-500 focus:outline-none"
+                        placeholder="0.00"
+                      />
+                    </div>
+
+                    <div>
+                      <AccountCodeSelector
+                        value={newExpense.accountCode}
+                        onChange={(code, label) => {
+                          setNewExpense({ ...newExpense, accountCode: code, accountLabel: label });
+                        }}
+                        label="Code compte"
+                        required
+                        className="text-xs"
+                      />
+                    </div>
+
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowCreateExpense(false);
+                          setSelectedSupplierId('');
+                          setNewExpense({
+                            supplierName: '',
+                            invoiceNumber: '',
+                            invoiceDate: new Date().toISOString().split('T')[0],
+                            amountTTC: '',
+                            amountHT: '',
+                            vatRate: '20',
+                            accountCode: '',
+                            accountLabel: ''
+                          });
+                        }}
+                        className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 rounded-md hover:bg-slate-200"
+                      >
+                        Annuler
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={creatingExpense || !newExpense.amountTTC || !newExpense.supplierName || !newExpense.accountCode}
+                        className="px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50"
+                      >
+                        {creatingExpense ? 'Création...' : 'Créer'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
+
               <div className="border border-slate-200 rounded-md max-h-48 overflow-y-auto">
-                {availableExpenses.length === 0 ? (
-                  <p className="p-4 text-sm text-slate-500 text-center">
-                    Aucune dépense disponible pour cette opportunité
-                  </p>
+                {availableExpenses.length === 0 && !showCreateExpense ? (
+                  <div className="p-4 text-center">
+                    <p className="text-sm text-slate-500 mb-2">
+                      Aucune dépense disponible pour cette opportunité
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setShowCreateExpense(true)}
+                      className="text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+                    >
+                      Créer une dépense maintenant
+                    </button>
+                  </div>
                 ) : (
                   <div className="divide-y divide-slate-200">
                     {availableExpenses.map(expense => (
