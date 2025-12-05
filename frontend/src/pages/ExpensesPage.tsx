@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { PlusIcon, MagnifyingGlassIcon, CheckIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, MagnifyingGlassIcon, CheckIcon, ArrowPathIcon } from '@heroicons/react/24/outline';
 import { expensesService, Expense, ExpenseStatus, ExpenseFilters } from '../services/expensesService';
+import { recurringExpensesService, RecurringExpense } from '../services/recurringExpensesService';
 import { ExpenseUploadModal } from '../components/ExpenseUploadModal';
 
 const STATUS_COLORS: Record<ExpenseStatus, string> = {
@@ -21,12 +22,14 @@ const STATUS_LABELS: Record<ExpenseStatus, string> = {
 export function ExpensesPage() {
   const navigate = useNavigate();
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [filters, setFilters] = useState<ExpenseFilters>({});
 
   useEffect(() => {
     void loadExpenses();
+    void loadRecurringExpenses();
   }, [filters]);
 
   const loadExpenses = async () => {
@@ -38,6 +41,35 @@ export function ExpensesPage() {
       console.error('Erreur chargement dépenses:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadRecurringExpenses = async () => {
+    try {
+      const data = await recurringExpensesService.getAll();
+      setRecurringExpenses(data);
+    } catch (error) {
+      console.error('Erreur chargement dépenses récurrentes:', error);
+    }
+  };
+
+  const handleGenerateForecast = async (recurringExpenseId: string) => {
+    try {
+      const startDate = new Date();
+      const endDate = new Date();
+      endDate.setMonth(endDate.getMonth() + 12);
+      
+      const generated = await recurringExpensesService.generateForecast(
+        recurringExpenseId,
+        startDate.toISOString(),
+        endDate.toISOString()
+      );
+      
+      alert(`${generated.length} dépense(s) prévisionnelle(s) générée(s)`);
+      await loadExpenses(); // Recharger la liste des dépenses
+    } catch (error) {
+      console.error('Erreur génération prévisionnelles:', error);
+      alert('Erreur lors de la génération des dépenses prévisionnelles');
     }
   };
 
