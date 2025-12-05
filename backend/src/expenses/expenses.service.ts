@@ -66,6 +66,7 @@ export class ExpensesService {
         accountCode: accountCode || parsedData.accountCode,
         accountLabel: parsedData.accountLabel,
         companyId: parsedData.companyId,
+        opportunityId: parsedData.opportunityId,
         userId,
         status: 'PENDING', // À valider manuellement
         notes: document ? null : 'OCR non disponible - Informations à remplir manuellement'
@@ -102,6 +103,10 @@ export class ExpensesService {
 
     if (filters?.companyId) {
       where.companyId = filters.companyId;
+    }
+
+    if (filters?.opportunityId) {
+      where.opportunityId = filters.opportunityId;
     }
 
     if (filters?.startDate || filters?.endDate) {

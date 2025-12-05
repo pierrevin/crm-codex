@@ -5,11 +5,12 @@ import { UsersModule } from '../users/users.module';
 
 import { GoogleController } from './google.controller';
 import { GoogleService } from './google.service';
+import { GoogleDocsService } from './google-docs.service';
 
 @Module({
   imports: [UsersModule, ActivitiesModule],
   controllers: [GoogleController],
-  providers: [GoogleService],
-  exports: [GoogleService]
+  providers: [GoogleService, GoogleDocsService],
+  exports: [GoogleService, GoogleDocsService]
 })
 export class GoogleModule {}

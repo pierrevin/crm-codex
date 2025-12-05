@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { PlusIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, MagnifyingGlassIcon, CheckIcon } from '@heroicons/react/24/outline';
 import { expensesService, Expense, ExpenseStatus, ExpenseFilters } from '../services/expensesService';
 import { ExpenseUploadModal } from '../components/ExpenseUploadModal';
 
@@ -51,6 +51,16 @@ export function ExpensesPage() {
     } catch (error) {
       console.error('Erreur suppression:', error);
       alert('Erreur lors de la suppression');
+    }
+  };
+
+  const handleValidateForecast = async (id: string) => {
+    try {
+      await expensesService.validateForecast(id);
+      await loadExpenses();
+    } catch (error) {
+      console.error('Erreur validation:', error);
+      alert('Erreur lors de la validation');
     }
   };
 
@@ -184,12 +194,29 @@ export function ExpensesPage() {
                       {expense.accountCode || '-'}
                     </td>
                     <td className="px-4 py-3 text-sm">
-                      <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${STATUS_COLORS[expense.status]}`}>
-                        {STATUS_LABELS[expense.status]}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${STATUS_COLORS[expense.status]}`}>
+                          {STATUS_LABELS[expense.status]}
+                        </span>
+                        {expense.isForecast && (
+                          <span className="inline-flex px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
+                            Prévisionnel
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-sm text-right">
                       <div className="flex justify-end gap-2">
+                        {expense.isForecast && (
+                          <button
+                            onClick={() => handleValidateForecast(expense.id)}
+                            className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
+                            title="Valider cette dépense prévisionnelle"
+                          >
+                            <CheckIcon className="w-4 h-4" />
+                            Vérifier
+                          </button>
+                        )}
                         <button
                           onClick={() => navigate(`/depenses/${expense.id}`)}
                           className="text-blue-600 hover:text-blue-800"

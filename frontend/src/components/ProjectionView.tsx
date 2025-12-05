@@ -6,6 +6,7 @@ type Opportunity = {
   stage: 'QUALIFICATION' | 'PROPOSAL' | 'CLOSED_WON' | 'CLOSED_LOST';
   amount?: number;
   closeDate?: string;
+  expectedPaymentDate?: string;
   contact?: { id: string; firstName: string; lastName?: string } | null;
   company?: { id: string; name: string } | null;
 };
@@ -243,72 +244,6 @@ export function ProjectionView({
             <p className="text-sm mt-2">Ajoutez des opportunités avec des dates de clôture</p>
           </div>
         )}
-      </div>
-
-      {/* Tableau récapitulatif */}
-      <div className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
-        <div className="px-6 py-4 bg-slate-50 border-b border-slate-200">
-          <h3 className="text-lg font-semibold text-slate-900">📋 Récapitulatif mensuel</h3>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-slate-200">
-            <thead className="bg-slate-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                  Mois
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                  CA Prévu
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                  CA Net (-27%)
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                  Opportunités
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-slate-200">
-              {projectionData.map((month) => (
-                <tr key={month.monthKey}>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">
-                    {month.month}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
-                    {month.caPrev.toLocaleString()} €
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-emerald-600 font-semibold">
-                    {month.caNet.toLocaleString()} €
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                    {month.totalCount} ({month.wonCount} gagnées)
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        
-        {/* Totaux */}
-        <div className="bg-slate-50 px-6 py-4 border-t border-slate-200">
-          <div className="flex justify-between items-center">
-            <span className="text-lg font-semibold text-slate-900">Totaux</span>
-            <div className="flex gap-8 text-sm">
-              <div className="text-right">
-                <p className="text-slate-500">CA Prévu</p>
-                <p className="text-xl font-bold text-indigo-600">{totals.caPrev.toLocaleString()} €</p>
-              </div>
-              <div className="text-right">
-                <p className="text-slate-500">CA Net (-27%)</p>
-                <p className="text-xl font-bold text-emerald-600">{totals.caNet.toLocaleString()} €</p>
-              </div>
-              <div className="text-right">
-                <p className="text-slate-500">Opportunités</p>
-                <p className="text-xl font-bold text-slate-600">{totals.totalCount}</p>
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* Indicateurs de performance */}

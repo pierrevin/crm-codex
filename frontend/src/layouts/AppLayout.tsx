@@ -10,6 +10,7 @@ const navItems = [
   { to: '/contacts', label: 'Contacts' },
   { to: '/opportunites', label: 'Opportunités' },
   { to: '/depenses', label: 'Dépenses' },
+  { to: '/tresorerie', label: 'Trésorerie' },
   { to: '/webhooks', label: 'Webhooks' }
 ];
 

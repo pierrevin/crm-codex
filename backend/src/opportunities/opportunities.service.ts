@@ -32,7 +32,9 @@ export class OpportunitiesService {
   async create(dto: CreateOpportunityDto) {
     const data = {
       ...dto,
-      closeDate: dto.closeDate ? new Date(dto.closeDate) : undefined
+      closeDate: dto.closeDate ? new Date(dto.closeDate) : undefined,
+      expectedPaymentDate: dto.expectedPaymentDate ? new Date(dto.expectedPaymentDate) : undefined,
+      taxRate: dto.taxRate ?? 0.27 // Par défaut 27%
     };
     const opportunity = await this.prisma.opportunity.create({ data });
     await this.audit.log('opportunity', opportunity.id, 'created');
@@ -53,10 +55,16 @@ export class OpportunitiesService {
   }
 
   async update(id: string, dto: UpdateOpportunityDto) {
-    const data = {
+    const data: any = {
       ...dto,
-      closeDate: dto.closeDate ? new Date(dto.closeDate) : undefined
+      closeDate: dto.closeDate ? new Date(dto.closeDate) : undefined,
+      expectedPaymentDate: dto.expectedPaymentDate ? new Date(dto.expectedPaymentDate) : undefined
     };
+    
+    // Si taxRate est fourni, l'inclure, sinon garder la valeur existante
+    if (dto.taxRate !== undefined) {
+      data.taxRate = dto.taxRate;
+    }
     const before = await this.prisma.opportunity.findUnique({ where: { id } });
     const opportunity = await this.prisma.opportunity.update({ where: { id }, data });
     await this.audit.log('opportunity', id, 'updated');

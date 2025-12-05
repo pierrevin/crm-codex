@@ -2,12 +2,14 @@ import { useState, useEffect } from 'react';
 import { XMarkIcon, CheckIcon } from '@heroicons/react/24/outline';
 import { expensesService, Expense, UpdateExpenseDto } from '../services/expensesService';
 import { AccountCodeSelector } from './AccountCodeSelector';
+import api from '../services/apiClient';
 
 interface ExpenseValidationModalProps {
   expense: Expense;
   fileUrl: string;
   fileType?: string;
   fileName?: string;
+  opportunityId?: string; // ID de l'opportunité optionnelle
   onClose: () => void;
   onSave: () => void;
 }
@@ -17,11 +19,14 @@ export function ExpenseValidationModal({
   fileUrl,
   fileType,
   fileName,
+  opportunityId,
   onClose,
   onSave
 }: ExpenseValidationModalProps) {
   const [saving, setSaving] = useState(false);
   const [showImageZoom, setShowImageZoom] = useState(false);
+  const [opportunities, setOpportunities] = useState<any[]>([]);
+  const [selectedOpportunityId, setSelectedOpportunityId] = useState<string>(expense.opportunityId || opportunityId || '');
   
   // Champs modifiables
   const [supplierName, setSupplierName] = useState(expense.supplierName || '');
@@ -38,6 +43,19 @@ export function ExpenseValidationModal({
   const [accountCode, setAccountCode] = useState(expense.accountCode || '');
   const [accountLabel, setAccountLabel] = useState(expense.accountLabel || '');
   const [notes, setNotes] = useState(expense.notes || '');
+
+  useEffect(() => {
+    void loadOpportunities();
+  }, []);
+
+  const loadOpportunities = async () => {
+    try {
+      const { data } = await api.get('/api/opportunities?limit=1000');
+      setOpportunities(Array.isArray(data) ? data : (data.items || data.data || []));
+    } catch (error) {
+      console.error('Erreur chargement opportunités:', error);
+    }
+  };
 
   // Calculer automatiquement les montants si nécessaire
   useEffect(() => {

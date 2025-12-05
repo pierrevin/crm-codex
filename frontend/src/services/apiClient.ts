@@ -1,7 +1,11 @@
 import axios from 'axios';
 
+// Construire l'URL de base pour l'API Supabase Edge Function
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
+const API_BASE_URL = import.meta.env.VITE_API_URL || (SUPABASE_URL ? `${SUPABASE_URL}/functions/v1` : 'http://localhost:3000');
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL ?? 'http://localhost:3000'
+  baseURL: API_BASE_URL
 });
 
 api.interceptors.request.use((config) => {

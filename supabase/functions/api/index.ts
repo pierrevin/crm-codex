@@ -70,6 +70,22 @@ async function triggerWebhooks(event: string, payload: unknown): Promise<void> {
   }
 }
 
+// Fonction utilitaire pour extraire deboursNoteId depuis la colonne ou les notes (fallback)
+function getDeboursNoteId(payment: any): string | null {
+  // D'abord essayer la colonne (maintenant que la colonne existe)
+  if (payment.deboursNoteId) {
+    return payment.deboursNoteId
+  }
+  // Fallback : chercher dans les notes (pour les anciens paiements créés avant l'ajout de la colonne)
+  if (payment.notes) {
+    const match = payment.notes.match(/\[deboursNoteId: ([^\]]+)\]/)
+    if (match) {
+      return match[1]
+    }
+  }
+  return null
+}
+
 serve(async (req) => {
   // Handle CORS
   const corsResponse = handleCors(req)
@@ -82,6 +98,7 @@ serve(async (req) => {
     // For function named 'api', pathname will be like /api/auth/login
     // We need to extract the part after /api/
     let path = url.pathname
+    console.log('[INITIAL DEBUG] Full URL:', req.url, 'Pathname:', url.pathname, 'Method:', method)
     // Ultra-early bootstrap admin handling based on raw pathname (bypass any auth checks)
     if ((url.pathname.includes('/auth/bootstrap-admin') || url.pathname.endsWith('auth/bootstrap-admin')) && method === 'POST') {
       const adminEmail = Deno.env.get('ADMIN_EMAIL') ?? ''
@@ -136,17 +153,99 @@ serve(async (req) => {
       return new Response(JSON.stringify({ status: 'ok', action: 'created', user: data }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
     // Support both Vercel proxy (/api/...) and direct Supabase URL (/functions/v1/api/...)
+    // Supabase Edge Functions receive pathname like /api/expenses (without /functions/v1/)
+    // For function named 'api', pathname will be like /api/expenses, we need to extract 'expenses'
+    console.log('[PATH DEBUG INIT] Original pathname:', url.pathname, 'Full URL:', req.url)
+    let originalPath = path
     if (path.startsWith('/functions/v1/')) {
       path = path.substring('/functions/v1/'.length)
+      console.log('[PATH DEBUG] After removing /functions/v1/:', path)
     }
+    // Remove leading slash if present
+    if (path.startsWith('/')) {
+      path = path.substring(1)
+      console.log('[PATH DEBUG] After removing leading /:', path)
+    }
+    // Remove 'api/' prefix if present (for function named 'api')
     if (path.startsWith('api/')) {
       path = path.substring('api/'.length)
-    } else if (path.startsWith('/api/')) {
-      path = path.substring('/api/'.length)
-    } else if (path.startsWith('/')) {
-      path = path.substring(1)
+      console.log('[PATH DEBUG] After removing api/:', path)
     }
     // method already defined above
+    console.log('[PATH DEBUG] Original pathname:', url.pathname, 'Original path var:', originalPath, 'Normalized path:', path, 'Method:', method)
+
+    // ===== RECURRING EXPENSES ROUTES (PRIORITÉ ABSOLUE - AVANT TOUT) =====
+    // Cette vérification DOIT être la première après la normalisation du path
+    // pour éviter tout conflit avec les routes expenses
+    if (path === 'recurring-expenses' && method === 'POST') {
+      console.log('[RECURRING EXPENSES POST] Route matched at top level! path:', path, 'method:', method)
+      try {
+        // Extraire userId du token
+        let userId: string | null = null
+        const authHeader = req.headers.get('Authorization')
+        if (authHeader?.startsWith('Bearer ')) {
+          try {
+            const token = authHeader.substring(7)
+            const decoded = await verifyAccessToken(token)
+            userId = decoded.userId
+          } catch (e) {
+            // Si le token n'est pas valide, on continue sans userId
+          }
+        }
+
+        const body = await req.json()
+        console.log('[RECURRING EXPENSES POST] Body received:', JSON.stringify(body, null, 2))
+        
+        const insertData: any = {
+          ...body,
+          userId: userId || body.userId || null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        }
+        
+        console.log('[RECURRING EXPENSES POST] Insert data:', JSON.stringify(insertData, null, 2))
+        
+        const { data, error } = await supabase
+          .from('RecurringExpense')
+          .insert(insertData)
+          .select('*, company:Company(*), opportunity:Opportunity(*), user:User(id, email)')
+          .single()
+
+        if (error) {
+          console.error('[RECURRING EXPENSES POST] Error:', error)
+          return new Response(
+            JSON.stringify({ message: error.message, code: error.code, details: error.details }),
+            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+        
+        console.log('[RECURRING EXPENSES POST] Success:', data)
+        return new Response(
+          JSON.stringify(data),
+          { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      } catch (err: any) {
+        console.error('[RECURRING EXPENSES POST] Exception:', err)
+        return new Response(
+          JSON.stringify({ message: err.message || 'Erreur lors de la création' }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+    }
+
+    if (path === 'recurring-expenses' && method === 'GET') {
+      console.log('[RECURRING EXPENSES GET] Route matched at top level!')
+      const { data, error } = await supabase
+        .from('RecurringExpense')
+        .select('*, company:Company(*), opportunity:Opportunity(*), user:User(id, email)')
+        .order('createdAt', { ascending: false })
+
+      if (error) throw error
+      return new Response(
+        JSON.stringify(data),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
 
     // ===== AUTH ROUTES =====
     // Endpoint de test ultra-simple pour déblocage (TEMPORAIRE - À SUPPRIMER)
@@ -2292,6 +2391,8 @@ serve(async (req) => {
       const id = path.split('/')[1]
       const body = await req.json()
       
+      console.log('PATCH opportunity:', { id, body })
+      
       // Récupérer l'ancienne version pour détecter les changements (notamment stage)
       const { data: oldOpportunity } = await supabase
         .from('Opportunity')
@@ -2306,7 +2407,11 @@ serve(async (req) => {
         .select()
         .single()
 
-      if (error) throw error
+      if (error) {
+        console.error('Erreur Supabase update:', error)
+        console.error('Body envoyé:', JSON.stringify(body, null, 2))
+        throw error
+      }
 
       // Déclencher webhooks selon le type de changement
       if (data) {
@@ -2495,6 +2600,807 @@ serve(async (req) => {
       if (error) throw error
 
       return new Response(null, { status: 204, headers: corsHeaders })
+    }
+
+    // ===== PAYMENTS ROUTES =====
+    if (path === 'payments' && method === 'GET') {
+      const opportunityId = url.searchParams.get('opportunityId')
+      const startDate = url.searchParams.get('startDate')
+      const endDate = url.searchParams.get('endDate')
+      
+      const deboursNoteId = url.searchParams.get('deboursNoteId')
+      
+      let query = supabase
+        .from('Payment')
+        .select('*')
+        .order('paymentDate', { ascending: false })
+      
+      if (opportunityId) {
+        query = query.eq('opportunityId', opportunityId)
+      }
+      if (deboursNoteId) {
+        query = query.eq('deboursNoteId', deboursNoteId)
+      }
+      if (startDate) {
+        query = query.gte('paymentDate', startDate)
+      }
+      if (endDate) {
+        query = query.lte('paymentDate', endDate)
+      }
+      
+      const { data: payments, error } = await query
+      if (error) throw error
+      
+      // Enrichir avec les relations séparément pour éviter les problèmes de cache de schéma
+      const enrichedPayments = await Promise.all((payments || []).map(async (payment) => {
+        let opportunity = null
+        let deboursNote = null
+        
+        if (payment.opportunityId) {
+          const { data: oppData } = await supabase
+            .from('Opportunity')
+            .select('*, company:Company(*), contact:Contact(*)')
+            .eq('id', payment.opportunityId)
+            .single()
+          opportunity = oppData
+        }
+        
+        const actualDeboursNoteId = getDeboursNoteId(payment)
+        if (actualDeboursNoteId) {
+          const { data: deboursData } = await supabase
+            .from('DeboursNote')
+            .select('*, opportunity:Opportunity(*, company:Company(*))')
+            .eq('id', actualDeboursNoteId)
+            .single()
+          deboursNote = deboursData
+        }
+        
+        return {
+          ...payment,
+          opportunity,
+          deboursNote
+        }
+      }))
+      
+      return new Response(
+        JSON.stringify(enrichedPayments),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (path === 'payments' && method === 'POST') {
+      const body = await req.json()
+      const { opportunityId, deboursNoteId, amount, paymentDate, taxRate, notes } = body
+      
+      // Valider qu'au moins un des deux est fourni
+      if (!opportunityId && !deboursNoteId) {
+        return new Response(
+          JSON.stringify({ message: 'Either opportunityId or deboursNoteId must be provided' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      let finalTaxRate = taxRate ?? 0.27
+      let taxAmount = amount * finalTaxRate
+      
+      // Si c'est une opportunité, récupérer le taux de taxe depuis l'opportunité
+      if (opportunityId) {
+        const { data: opportunity, error: oppError } = await supabase
+          .from('Opportunity')
+          .select('id, taxRate')
+          .eq('id', opportunityId)
+          .single()
+        
+        if (oppError || !opportunity) {
+          return new Response(
+            JSON.stringify({ message: 'Opportunity not found' }),
+            { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+        
+        finalTaxRate = taxRate ?? (opportunity.taxRate ? Number(opportunity.taxRate) : 0.27)
+        taxAmount = amount * finalTaxRate
+      }
+      
+      // Si c'est une note de débours, pas de taxe (0%)
+      if (deboursNoteId) {
+        const { data: deboursNote, error: deboursError } = await supabase
+          .from('DeboursNote')
+          .select('id')
+          .eq('id', deboursNoteId)
+          .single()
+        
+        if (deboursError || !deboursNote) {
+          return new Response(
+            JSON.stringify({ message: 'DeboursNote not found' }),
+            { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+        
+        finalTaxRate = 0
+        taxAmount = 0
+      }
+      
+      const finalPaymentDate = paymentDate ? new Date(paymentDate) : new Date()
+      const now = new Date().toISOString()
+      const paymentId = crypto.randomUUID()
+      
+      // Préparer les données d'insertion
+      const insertData: any = {
+        id: paymentId,
+        opportunityId: opportunityId || null,
+        deboursNoteId: deboursNoteId || null,
+        amount,
+        paymentDate: finalPaymentDate.toISOString(),
+        taxRate: finalTaxRate,
+        taxAmount,
+        notes: notes || null,
+        createdAt: now,
+        updatedAt: now
+      }
+      
+      const { data: paymentData, error: insertError } = await supabase
+        .from('Payment')
+        .insert(insertData)
+        .select('*')
+        .single()
+      
+      if (insertError) {
+        console.error('[PAYMENT POST] Insert error:', insertError)
+        throw insertError
+      }
+      
+      // Récupérer les relations séparément pour éviter les problèmes de cache de schéma
+      let opportunity = null
+      let deboursNote = null
+      
+      if (paymentData.opportunityId) {
+        const { data: oppData } = await supabase
+          .from('Opportunity')
+          .select('*, company:Company(*), contact:Contact(*)')
+          .eq('id', paymentData.opportunityId)
+          .single()
+        opportunity = oppData
+      }
+      
+      const actualDeboursNoteId = getDeboursNoteId(paymentData)
+      if (actualDeboursNoteId) {
+        const { data: deboursData } = await supabase
+          .from('DeboursNote')
+          .select('*, opportunity:Opportunity(*, company:Company(*))')
+          .eq('id', actualDeboursNoteId)
+          .single()
+        deboursNote = deboursData
+      }
+      
+      const result = {
+        ...paymentData,
+        opportunity,
+        deboursNote
+      }
+      
+      return new Response(
+        JSON.stringify(result),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (path.startsWith('payments/') && method === 'GET') {
+      const id = path.split('/')[1]
+      if (id === 'opportunity') {
+        const opportunityId = path.split('/')[2]
+        const { data: payments, error } = await supabase
+          .from('Payment')
+          .select('*')
+          .eq('opportunityId', opportunityId)
+          .order('paymentDate', { ascending: false })
+        if (error) throw error
+        
+        // Enrichir avec les relations
+        const enrichedPayments = await Promise.all((payments || []).map(async (payment) => {
+          let opportunity = null
+          let deboursNote = null
+          
+          if (payment.opportunityId) {
+            const { data: oppData } = await supabase
+              .from('Opportunity')
+              .select('*, company:Company(*), contact:Contact(*)')
+              .eq('id', payment.opportunityId)
+              .single()
+            opportunity = oppData
+          }
+          
+          if (payment.deboursNoteId) {
+            const { data: deboursData } = await supabase
+              .from('DeboursNote')
+              .select('*, opportunity:Opportunity(*, company:Company(*))')
+              .eq('id', payment.deboursNoteId)
+              .single()
+            deboursNote = deboursData
+          }
+          
+          return {
+            ...payment,
+            opportunity,
+            deboursNote
+          }
+        }))
+        
+        return new Response(
+          JSON.stringify(enrichedPayments),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      const { data: paymentData, error } = await supabase
+        .from('Payment')
+        .select('*')
+        .eq('id', id)
+        .single()
+      if (error) throw error
+      
+      // Enrichir avec les relations
+      let opportunity = null
+      let deboursNote = null
+      
+      if (paymentData.opportunityId) {
+        const { data: oppData } = await supabase
+          .from('Opportunity')
+          .select('*, company:Company(*), contact:Contact(*)')
+          .eq('id', paymentData.opportunityId)
+          .single()
+        opportunity = oppData
+      }
+      
+      const actualDeboursNoteId = getDeboursNoteId(paymentData)
+      if (actualDeboursNoteId) {
+        const { data: deboursData } = await supabase
+          .from('DeboursNote')
+          .select('*, opportunity:Opportunity(*, company:Company(*))')
+          .eq('id', actualDeboursNoteId)
+          .single()
+        deboursNote = deboursData
+      }
+      
+      const result = {
+        ...paymentData,
+        opportunity,
+        deboursNote
+      }
+      
+      return new Response(
+        JSON.stringify(result),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (path.startsWith('payments/') && method === 'PATCH') {
+      const id = path.split('/')[1]
+      const body = await req.json()
+      const { amount, paymentDate, taxRate, notes } = body
+      
+      // Récupérer le paiement existant
+      const { data: existingPayment, error: fetchError } = await supabase
+        .from('Payment')
+        .select('*')
+        .eq('id', id)
+        .single()
+      
+      if (fetchError || !existingPayment) {
+        return new Response(
+          JSON.stringify({ message: 'Payment not found' }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      // Recalculer les taxes si nécessaire
+      const finalAmount = amount ?? Number(existingPayment.amount)
+      const finalTaxRate = taxRate ?? Number(existingPayment.taxRate)
+      const finalTaxAmount = finalAmount * finalTaxRate
+      const finalPaymentDate = paymentDate ? new Date(paymentDate) : existingPayment.paymentDate
+      
+      const updateData: any = {
+        amount: finalAmount,
+        taxRate: finalTaxRate,
+        taxAmount: finalTaxAmount,
+        paymentDate: finalPaymentDate.toISOString(),
+        updatedAt: new Date().toISOString()
+      }
+      if (notes !== undefined) updateData.notes = notes
+      
+      const { data: paymentData, error } = await supabase
+        .from('Payment')
+        .update(updateData)
+        .eq('id', id)
+        .select('*')
+        .single()
+      
+      if (error) throw error
+      
+      // Enrichir avec les relations
+      let opportunity = null
+      let deboursNote = null
+      
+      if (paymentData.opportunityId) {
+        const { data: oppData } = await supabase
+          .from('Opportunity')
+          .select('*, company:Company(*), contact:Contact(*)')
+          .eq('id', paymentData.opportunityId)
+          .single()
+        opportunity = oppData
+      }
+      
+      const actualDeboursNoteId = getDeboursNoteId(paymentData)
+      if (actualDeboursNoteId) {
+        const { data: deboursData } = await supabase
+          .from('DeboursNote')
+          .select('*, opportunity:Opportunity(*, company:Company(*))')
+          .eq('id', actualDeboursNoteId)
+          .single()
+        deboursNote = deboursData
+      }
+      
+      const result = {
+        ...paymentData,
+        opportunity,
+        deboursNote
+      }
+      
+      return new Response(
+        JSON.stringify(result),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (path.startsWith('payments/') && method === 'DELETE') {
+      const id = path.split('/')[1]
+      const { error } = await supabase
+        .from('Payment')
+        .delete()
+        .eq('id', id)
+      if (error) throw error
+      return new Response(
+        JSON.stringify({ message: 'Payment deleted successfully' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // ===== DEBOURS NOTES ROUTES =====
+    if (path === 'debours-notes' && method === 'GET') {
+      const opportunityId = url.searchParams.get('opportunityId')
+      const companyId = url.searchParams.get('companyId')
+      
+      let query = supabase
+        .from('DeboursNote')
+        .select('*, opportunity:Opportunity(*, company:Company(*)), company:Company(*), expenses:Expense(*), payments:Payment(*)')
+        .order('createdAt', { ascending: false })
+      
+      if (opportunityId) {
+        query = query.eq('opportunityId', opportunityId)
+      }
+      if (companyId) {
+        query = query.eq('companyId', companyId)
+      }
+      
+      const { data, error } = await query
+      if (error) throw error
+      return new Response(
+        JSON.stringify(data),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (path === 'debours-notes' && method === 'POST') {
+      const body = await req.json()
+      const { title, issueDate, expectedPaymentDate, totalAmount, status, opportunityId, companyId, expenseIds, notes } = body
+      
+      // Vérifier que l'opportunité existe
+      const { data: opportunity, error: oppError } = await supabase
+        .from('Opportunity')
+        .select('id, companyId')
+        .eq('id', opportunityId)
+        .single()
+      
+      if (oppError || !opportunity) {
+        return new Response(
+          JSON.stringify({ message: 'Opportunity not found' }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      const now = new Date().toISOString()
+      const deboursNoteId = crypto.randomUUID()
+      
+      // Créer la note de débours
+      const { data: deboursNote, error: createError } = await supabase
+        .from('DeboursNote')
+        .insert({
+          id: deboursNoteId,
+          title,
+          issueDate: issueDate ? new Date(issueDate).toISOString() : now,
+          expectedPaymentDate: expectedPaymentDate ? new Date(expectedPaymentDate).toISOString() : null,
+          totalAmount,
+          status: status || 'DRAFT',
+          opportunityId,
+          companyId: companyId || opportunity.companyId,
+          notes: notes || null,
+          createdAt: now,
+          updatedAt: now
+        })
+        .select('*, opportunity:Opportunity(*, company:Company(*)), company:Company(*)')
+        .single()
+      
+      if (createError) throw createError
+      
+      // Lier les dépenses si fournies
+      if (expenseIds && Array.isArray(expenseIds) && expenseIds.length > 0) {
+        // Créer les relations many-to-many
+        const relations = expenseIds.map((expenseId: string) => ({
+          A: deboursNoteId,
+          B: expenseId
+        }))
+        
+        const { error: linkError } = await supabase
+          .from('_DeboursNoteToExpense')
+          .insert(relations)
+        
+        if (linkError) {
+          console.error('Erreur liaison dépenses:', linkError)
+          // Ne pas échouer si la liaison échoue, la note est créée
+        }
+      }
+      
+      // Recharger avec les relations
+      const { data: fullDeboursNote, error: fetchError } = await supabase
+        .from('DeboursNote')
+        .select('*, opportunity:Opportunity(*, company:Company(*)), company:Company(*), expenses:Expense(*), payments:Payment(*)')
+        .eq('id', deboursNoteId)
+        .single()
+      
+      if (fetchError) throw fetchError
+      
+      return new Response(
+        JSON.stringify(fullDeboursNote),
+        { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (path.startsWith('debours-notes/') && method === 'GET') {
+      const id = path.split('/')[1]
+      const { data, error } = await supabase
+        .from('DeboursNote')
+        .select('*, opportunity:Opportunity(*, company:Company(*)), company:Company(*), expenses:Expense(*), payments:Payment(*)')
+        .eq('id', id)
+        .single()
+      if (error) throw error
+      return new Response(
+        JSON.stringify(data),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (path.startsWith('debours-notes/') && method === 'PATCH') {
+      const id = path.split('/')[1]
+      const body = await req.json()
+      const { title, issueDate, expectedPaymentDate, totalAmount, status, expenseIds, notes } = body
+      
+      const updateData: any = {
+        updatedAt: new Date().toISOString()
+      }
+      if (title !== undefined) updateData.title = title
+      if (issueDate !== undefined) updateData.issueDate = issueDate ? new Date(issueDate).toISOString() : null
+      if (expectedPaymentDate !== undefined) updateData.expectedPaymentDate = expectedPaymentDate ? new Date(expectedPaymentDate).toISOString() : null
+      if (totalAmount !== undefined) updateData.totalAmount = totalAmount
+      if (status !== undefined) updateData.status = status
+      if (notes !== undefined) updateData.notes = notes
+      
+      const { data, error } = await supabase
+        .from('DeboursNote')
+        .update(updateData)
+        .eq('id', id)
+        .select('*, opportunity:Opportunity(*, company:Company(*)), company:Company(*), expenses:Expense(*), payments:Payment(*)')
+        .single()
+      
+      if (error) throw error
+      
+      // Mettre à jour les relations avec les dépenses si fournies
+      if (expenseIds !== undefined) {
+        // Supprimer toutes les relations existantes
+        await supabase
+          .from('_DeboursNoteToExpense')
+          .delete()
+          .eq('A', id)
+        
+        // Créer les nouvelles relations
+        if (Array.isArray(expenseIds) && expenseIds.length > 0) {
+          const relations = expenseIds.map((expenseId: string) => ({
+            A: id,
+            B: expenseId
+          }))
+          
+          await supabase
+            .from('_DeboursNoteToExpense')
+            .insert(relations)
+        }
+        
+        // Recharger avec les relations mises à jour
+        const { data: updated, error: fetchError } = await supabase
+          .from('DeboursNote')
+          .select('*, opportunity:Opportunity(*, company:Company(*)), company:Company(*), expenses:Expense(*), payments:Payment(*)')
+          .eq('id', id)
+          .single()
+        
+        if (fetchError) throw fetchError
+        return new Response(
+          JSON.stringify(updated),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      return new Response(
+        JSON.stringify(data),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (path.startsWith('debours-notes/') && method === 'DELETE') {
+      const id = path.split('/')[1]
+      const { error } = await supabase
+        .from('DeboursNote')
+        .delete()
+        .eq('id', id)
+      if (error) throw error
+      return new Response(
+        JSON.stringify({ message: 'DeboursNote deleted successfully' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (path.startsWith('debours-notes/') && path.includes('/link-expenses') && method === 'POST') {
+      const id = path.split('/')[1]
+      const body = await req.json()
+      const { expenseIds } = body
+      
+      if (!Array.isArray(expenseIds)) {
+        return new Response(
+          JSON.stringify({ message: 'expenseIds must be an array' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      // Supprimer toutes les relations existantes
+      await supabase
+        .from('_DeboursNoteToExpense')
+        .delete()
+        .eq('A', id)
+      
+      // Créer les nouvelles relations
+      if (expenseIds.length > 0) {
+        const relations = expenseIds.map((expenseId: string) => ({
+          A: id,
+          B: expenseId
+        }))
+        
+        const { error: linkError } = await supabase
+          .from('_DeboursNoteToExpense')
+          .insert(relations)
+        
+        if (linkError) throw linkError
+      }
+      
+      // Recharger avec les relations
+      const { data, error } = await supabase
+        .from('DeboursNote')
+        .select('*, opportunity:Opportunity(*, company:Company(*)), company:Company(*), expenses:Expense(*), payments:Payment(*)')
+        .eq('id', id)
+        .single()
+      
+      if (error) throw error
+      return new Response(
+        JSON.stringify(data),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (path.startsWith('debours-notes/') && path.includes('/generate-doc') && method === 'POST') {
+      // Cette route sera gérée par le backend NestJS qui a accès à Google Docs API
+      // Pour l'instant, retourner une erreur indiquant que c'est géré par le backend
+      return new Response(
+        JSON.stringify({ message: 'Document generation is handled by the NestJS backend. Please use the backend API endpoint.' }),
+        { status: 501, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // ===== TREASURY ROUTES =====
+    if (path === 'treasury/balance' && method === 'GET') {
+      // Calculer le solde actuel automatiquement
+      const now = new Date()
+      
+      // Récupérer le dernier solde manuel
+      const { data: lastManualBalance } = await supabase
+        .from('TreasuryBalance')
+        .select('*')
+        .eq('isManual', true)
+        .order('date', { ascending: false })
+        .limit(1)
+        .single()
+      
+      let baseBalance = 0
+      let baseDate = new Date(0)
+      
+      if (lastManualBalance) {
+        baseBalance = Number(lastManualBalance.balance)
+        baseDate = new Date(lastManualBalance.date)
+      }
+      
+      // Calculer les mouvements depuis la date de base
+      const { data: payments } = await supabase
+        .from('Payment')
+        .select('amount, taxAmount')
+        .gte('paymentDate', baseDate.toISOString())
+        .lte('paymentDate', now.toISOString())
+      
+      const totalPayments = payments?.reduce((sum, p) => sum + Number(p.amount), 0) ?? 0
+      const totalTaxes = payments?.reduce((sum, p) => sum + Number(p.taxAmount), 0) ?? 0
+      
+      const { data: expenses } = await supabase
+        .from('Expense')
+        .select('amountTTC, amountHT')
+        .eq('status', 'VERIFIED')
+        .gte('invoiceDate', baseDate.toISOString())
+        .lte('invoiceDate', now.toISOString())
+      
+      const totalExpenses = expenses?.reduce((sum, e) => sum + Number(e.amountTTC || e.amountHT || 0), 0) ?? 0
+      
+      const currentBalance = baseBalance + totalPayments - totalExpenses - totalTaxes
+      
+      return new Response(
+        JSON.stringify({
+          balance: currentBalance,
+          isManual: false,
+          date: now.toISOString()
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (path === 'treasury/balance' && method === 'POST') {
+      const body = await req.json()
+      const { balance, date, notes } = body
+      
+      const balanceDate = date ? new Date(date) : new Date()
+      
+      // Vérifier s'il existe déjà un solde pour cette date (sans utiliser .single() pour éviter l'erreur si aucun résultat)
+      const { data: existingData, error: existingError } = await supabase
+        .from('TreasuryBalance')
+        .select('id')
+        .eq('date', balanceDate.toISOString())
+        .maybeSingle()
+      
+      if (existingError && existingError.code !== 'PGRST116') {
+        throw existingError
+      }
+      
+      let result
+      if (existingData && existingData.id) {
+        // Mettre à jour l'enregistrement existant
+        const { data, error } = await supabase
+          .from('TreasuryBalance')
+          .update({
+            balance,
+            isManual: true,
+            notes: notes || null,
+            updatedAt: new Date().toISOString()
+          })
+          .eq('id', existingData.id)
+          .select()
+          .single()
+        if (error) throw error
+        result = data
+      } else {
+        // Créer un nouvel enregistrement
+        const newId = crypto.randomUUID()
+        const now = new Date().toISOString()
+        const { data, error } = await supabase
+          .from('TreasuryBalance')
+          .insert({
+            id: newId,
+            date: balanceDate.toISOString(),
+            balance,
+            isManual: true,
+            notes: notes || null,
+            createdAt: now,
+            updatedAt: now
+          })
+          .select()
+          .single()
+        if (error) throw error
+        result = data
+      }
+      
+      return new Response(
+        JSON.stringify(result),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (path === 'treasury/forecast' && method === 'GET') {
+      const startDate = url.searchParams.get('startDate')
+      const endDate = url.searchParams.get('endDate')
+      
+      const start = startDate ? new Date(startDate) : new Date()
+      const end = endDate ? new Date(endDate) : new Date(new Date().setMonth(new Date().getMonth() + 12))
+      
+      // Récupérer les paiements prévisionnels (opportunités avec expectedPaymentDate, y compris finalisées)
+      const { data: opportunities } = await supabase
+        .from('Opportunity')
+        .select('id, title, amount, expectedPaymentDate, taxRate, stage')
+        .not('expectedPaymentDate', 'is', null)
+        .gte('expectedPaymentDate', start.toISOString())
+        .lte('expectedPaymentDate', end.toISOString())
+      
+      // Récupérer les paiements réels
+      const { data: payments } = await supabase
+        .from('Payment')
+        .select('amount, taxAmount, paymentDate, opportunityId')
+        .gte('paymentDate', start.toISOString())
+        .lte('paymentDate', end.toISOString())
+      
+      // Récupérer toutes les dépenses (y compris celles liées aux opportunités finalisées)
+      const { data: expenses } = await supabase
+        .from('Expense')
+        .select('amountTTC, amountHT, invoiceDate, opportunityId')
+        .eq('status', 'VERIFIED')
+        .gte('invoiceDate', start.toISOString())
+        .lte('invoiceDate', end.toISOString())
+      
+      // Récupérer les notes de débours pour les opportunités finalisées
+      const { data: deboursNotes } = await supabase
+        .from('DeboursNote')
+        .select('id, totalAmount, issueDate, expectedPaymentDate, opportunityId')
+        .gte('issueDate', start.toISOString())
+        .lte('issueDate', end.toISOString())
+      
+      // Pour les opportunités finalisées, récupérer leurs dépenses et notes de débours réelles
+      const finalizedOpportunities = opportunities?.filter(opp => opp.stage === 'FINALIZED') || []
+      const finalizedOppIds = finalizedOpportunities.map(opp => opp.id)
+      
+      // Récupérer les dépenses spécifiques aux opportunités finalisées
+      const { data: finalizedExpenses } = finalizedOppIds.length > 0 ? await supabase
+        .from('Expense')
+        .select('amountTTC, amountHT, invoiceDate, opportunityId')
+        .eq('status', 'VERIFIED')
+        .in('opportunityId', finalizedOppIds)
+        : { data: [] }
+      
+      // Récupérer les notes de débours spécifiques aux opportunités finalisées
+      const { data: finalizedDeboursNotes } = finalizedOppIds.length > 0 ? await supabase
+        .from('DeboursNote')
+        .select('id, totalAmount, issueDate, expectedPaymentDate, opportunityId')
+        .in('opportunityId', finalizedOppIds)
+        : { data: [] }
+      
+      // Calculer les taxes à payer (mois +1, au 30)
+      const taxPayments: Record<string, number> = {}
+      payments?.forEach(payment => {
+        const paymentDate = new Date(payment.paymentDate)
+        // Les taxes sont imputées au 30 du mois suivant le paiement
+        const taxMonth = new Date(paymentDate.getFullYear(), paymentDate.getMonth() + 1, 1)
+        const monthKey = `${taxMonth.getFullYear()}-${String(taxMonth.getMonth() + 1).padStart(2, '0')}`
+        taxPayments[monthKey] = (taxPayments[monthKey] || 0) + Number(payment.taxAmount)
+      })
+      
+      return new Response(
+        JSON.stringify({
+          opportunities: opportunities || [],
+          payments: payments || [],
+          expenses: expenses || [],
+          deboursNotes: deboursNotes || [],
+          finalizedExpenses: finalizedExpenses || [],
+          finalizedDeboursNotes: finalizedDeboursNotes || [],
+          taxPayments
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
     }
 
     // ===== ACTIVITIES ROUTES =====
@@ -3244,6 +4150,747 @@ serve(async (req) => {
         )
       }
     }
+
+    // ===== RECURRING EXPENSES ROUTES (AVANT EXPENSES) =====
+    // Vérifier d'abord les routes recurring-expenses pour éviter les conflits
+    // IMPORTANT: Cette section DOIT être avant toutes les routes expenses
+    console.log('[BEFORE RECURRING CHECK] path:', path, 'method:', method, 'path === recurring-expenses:', path === 'recurring-expenses')
+    
+    // Vérification directe pour POST /recurring-expenses
+    if (path === 'recurring-expenses' && method === 'POST') {
+      console.log('[RECURRING EXPENSES POST] Route matched directly! path:', path, 'method:', method)
+      try {
+        const body = await req.json()
+        console.log('[RECURRING EXPENSES POST] Body received:', JSON.stringify(body, null, 2))
+        
+        const insertData: any = {
+          ...body,
+          userId: userId || body.userId || null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        }
+        
+        console.log('[RECURRING EXPENSES POST] Insert data:', JSON.stringify(insertData, null, 2))
+        
+        const { data, error } = await supabase
+          .from('RecurringExpense')
+          .insert(insertData)
+          .select('*, company:Company(*), opportunity:Opportunity(*), user:User(id, email)')
+          .single()
+
+        if (error) {
+          console.error('[RECURRING EXPENSES POST] Error:', error)
+          return new Response(
+            JSON.stringify({ message: error.message, code: error.code, details: error.details }),
+            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+        
+        console.log('[RECURRING EXPENSES POST] Success:', data)
+        return new Response(
+          JSON.stringify(data),
+          { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      } catch (err: any) {
+        console.error('[RECURRING EXPENSES POST] Exception:', err)
+        return new Response(
+          JSON.stringify({ message: err.message || 'Erreur lors de la création' }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+    }
+    
+    if (path === 'recurring-expenses' && method === 'GET') {
+      console.log('[RECURRING EXPENSES GET] Route matched directly!')
+      const { data, error } = await supabase
+        .from('RecurringExpense')
+        .select('*, company:Company(*), opportunity:Opportunity(*), user:User(id, email)')
+        .order('createdAt', { ascending: false })
+
+      if (error) throw error
+      return new Response(
+        JSON.stringify(data),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+    
+    // Ancienne vérification (gardée pour compatibilité)
+    if (path === 'recurring-expenses') {
+      console.log('[RECURRING EXPENSES] Route matched! path:', path, 'method:', method)
+      
+      if (method === 'POST') {
+        console.log('[RECURRING EXPENSES POST] Creating recurring expense, userId:', userId)
+        try {
+          const body = await req.json()
+          console.log('[RECURRING EXPENSES POST] Body received:', JSON.stringify(body, null, 2))
+          
+          const insertData: any = {
+            ...body,
+            userId: userId || body.userId || null,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          }
+          
+          console.log('[RECURRING EXPENSES POST] Insert data:', JSON.stringify(insertData, null, 2))
+          
+          const { data, error } = await supabase
+            .from('RecurringExpense')
+            .insert(insertData)
+            .select('*, company:Company(*), opportunity:Opportunity(*), user:User(id, email)')
+            .single()
+
+          if (error) {
+            console.error('[RECURRING EXPENSES POST] Error:', error)
+            return new Response(
+              JSON.stringify({ message: error.message, code: error.code, details: error.details }),
+              { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            )
+          }
+          
+          console.log('[RECURRING EXPENSES POST] Success:', data)
+          return new Response(
+            JSON.stringify(data),
+            { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        } catch (err: any) {
+          console.error('[RECURRING EXPENSES POST] Exception:', err)
+          return new Response(
+            JSON.stringify({ message: err.message || 'Erreur lors de la création' }),
+            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+      }
+      
+      if (method === 'GET') {
+        console.log('[RECURRING EXPENSES GET] Route matched!')
+        const { data, error } = await supabase
+          .from('RecurringExpense')
+          .select('*, company:Company(*), opportunity:Opportunity(*), user:User(id, email)')
+          .order('createdAt', { ascending: false })
+
+        if (error) throw error
+        return new Response(
+          JSON.stringify(data),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+    }
+    
+    // Routes avec ID pour recurring-expenses
+    if (path.startsWith('recurring-expenses/') && method === 'GET') {
+      const id = path.split('/')[1]
+      const { data, error } = await supabase
+        .from('RecurringExpense')
+        .select('*, company:Company(*), opportunity:Opportunity(*), user:User(id, email), expenses:Expense(*)')
+        .eq('id', id)
+        .single()
+
+      if (error) throw error
+      return new Response(
+        JSON.stringify(data),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (path.startsWith('recurring-expenses/') && !path.includes('/generate') && method === 'PUT') {
+      const id = path.split('/')[1]
+      console.log('[RECURRING EXPENSES PUT] Updating recurring expense:', id)
+      const body = await req.json()
+      
+      const { data, error } = await supabase
+        .from('RecurringExpense')
+        .update({
+          ...body,
+          updatedAt: new Date().toISOString()
+        })
+        .eq('id', id)
+        .select('*, company:Company(*), opportunity:Opportunity(*), user:User(id, email)')
+        .single()
+
+      if (error) {
+        console.error('[RECURRING EXPENSES PUT] Error:', error)
+        return new Response(
+          JSON.stringify({ message: error.message, code: error.code, details: error.details }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      return new Response(
+        JSON.stringify(data),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (path.startsWith('recurring-expenses/') && path.endsWith('/generate') && method === 'POST') {
+      const id = path.split('/')[1]
+      const url = new URL(req.url)
+      const startDate = url.searchParams.get('startDate') || new Date().toISOString()
+      const endDate = url.searchParams.get('endDate') || (() => {
+        const d = new Date()
+        d.setMonth(d.getMonth() + 12)
+        return d.toISOString()
+      })()
+
+      // Récupérer le modèle récurrent
+      const { data: recurringExpense, error: fetchError } = await supabase
+        .from('RecurringExpense')
+        .select('*')
+        .eq('id', id)
+        .single()
+
+      if (fetchError || !recurringExpense || !recurringExpense.isActive) {
+        return new Response(
+          JSON.stringify({ message: 'Dépense récurrente non trouvée ou inactive' }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      // Générer les dépenses prévisionnelles
+      const generated = []
+      const currentDate = new Date(startDate)
+      const finalEndDate = new Date(endDate)
+
+      while (currentDate <= finalEndDate) {
+        const paymentDate = new Date(currentDate)
+        const lastDayOfMonth = new Date(paymentDate.getFullYear(), paymentDate.getMonth() + 1, 0).getDate()
+        const day = Math.min(recurringExpense.paymentDay, lastDayOfMonth)
+        paymentDate.setDate(day)
+
+        if (paymentDate >= new Date(recurringExpense.startDate) &&
+            (!recurringExpense.endDate || paymentDate <= new Date(recurringExpense.endDate))) {
+          
+          // Vérifier si une dépense existe déjà
+          const { data: existing } = await supabase
+            .from('Expense')
+            .select('id')
+            .eq('recurringExpenseId', id)
+            .eq('forecastDate', paymentDate.toISOString())
+            .eq('isForecast', true)
+            .single()
+
+          if (!existing) {
+            const { data: expense, error: insertError } = await supabase
+              .from('Expense')
+              .insert({
+                supplierName: recurringExpense.supplierName,
+                amountHT: recurringExpense.amountHT,
+                amountTTC: recurringExpense.amountTTC,
+                vatAmount: recurringExpense.vatAmount,
+                vatRate: recurringExpense.vatRate,
+                accountCode: recurringExpense.accountCode,
+                accountLabel: recurringExpense.accountLabel,
+                invoiceDate: paymentDate.toISOString(),
+                forecastDate: paymentDate.toISOString(),
+                isForecast: true,
+                status: 'PENDING',
+                recurringExpenseId: recurringExpense.id,
+                companyId: recurringExpense.companyId,
+                userId: recurringExpense.userId,
+                opportunityId: recurringExpense.opportunityId,
+                notes: recurringExpense.notes
+              })
+              .select()
+              .single()
+
+            if (!insertError && expense) {
+              generated.push(expense)
+            }
+          }
+        }
+
+        currentDate.setMonth(currentDate.getMonth() + 1)
+      }
+
+      return new Response(
+        JSON.stringify(generated),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (path.startsWith('recurring-expenses/') && method === 'DELETE') {
+      const id = path.split('/')[1]
+      const { error } = await supabase
+        .from('RecurringExpense')
+        .delete()
+        .eq('id', id)
+
+      if (error) throw error
+      return new Response(
+        JSON.stringify({ message: 'Recurring expense deleted successfully' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // ===== EXPENSES ROUTES =====
+    console.log('[EXPENSES DEBUG] path:', path, 'method:', method, 'path === expenses:', path === 'expenses')
+    
+    if (path === 'expenses' && method === 'GET') {
+      const userId = url.searchParams.get('userId')
+      const status = url.searchParams.get('status')
+      const companyId = url.searchParams.get('companyId')
+      const opportunityId = url.searchParams.get('opportunityId')
+      const startDate = url.searchParams.get('startDate')
+      const endDate = url.searchParams.get('endDate')
+
+      let query = supabase
+        .from('Expense')
+        .select('*, company:Company(*), opportunity:Opportunity(*), user:User(id, email)')
+        .order('createdAt', { ascending: false })
+
+      if (userId) {
+        query = query.eq('userId', userId)
+      }
+      if (status) {
+        query = query.eq('status', status)
+      }
+      if (companyId) {
+        query = query.eq('companyId', companyId)
+      }
+      if (opportunityId) {
+        query = query.eq('opportunityId', opportunityId)
+      }
+      if (startDate) {
+        query = query.gte('invoiceDate', startDate)
+      }
+      if (endDate) {
+        query = query.lte('invoiceDate', endDate)
+      }
+
+      const { data, error } = await query
+      if (error) {
+        console.error('[EXPENSES GET] Error:', error)
+        throw error
+      }
+      console.log('[EXPENSES GET] Found', data?.length || 0, 'expenses with filters:', { userId, status, companyId, opportunityId, startDate, endDate })
+      return new Response(
+        JSON.stringify(data),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Interface et fonction de sérialisation pour les dépenses (identique à expenses/index.ts)
+    type ExpenseStatus = 'PENDING' | 'PROCESSED' | 'VERIFIED' | 'REJECTED'
+
+    interface ExpensePayload {
+      supplierName?: string
+      invoiceNumber?: string
+      invoiceDate?: string
+      amountHT?: number
+      amountTTC?: number
+      vatAmount?: number
+      vatRate?: number
+      accountCode?: string
+      accountLabel?: string
+      companyId?: string | null
+      notes?: string | null
+      status?: ExpenseStatus
+    }
+
+    function serializeExpensePayload(payload: ExpensePayload) {
+      const data: Record<string, unknown> = {}
+      if (payload.supplierName !== undefined) data.supplierName = payload.supplierName
+      if (payload.invoiceNumber !== undefined) data.invoiceNumber = payload.invoiceNumber
+      if (payload.invoiceDate !== undefined && payload.invoiceDate !== null) {
+        data.invoiceDate = new Date(payload.invoiceDate).toISOString()
+      } else if (payload.invoiceDate === null) {
+        data.invoiceDate = null
+      }
+      if (payload.amountHT !== undefined) data.amountHT = payload.amountHT
+      if (payload.amountTTC !== undefined) data.amountTTC = payload.amountTTC
+      if (payload.vatAmount !== undefined) data.vatAmount = payload.vatAmount
+      if (payload.vatRate !== undefined) data.vatRate = payload.vatRate
+      if (payload.accountCode !== undefined) data.accountCode = payload.accountCode
+      if (payload.accountLabel !== undefined) data.accountLabel = payload.accountLabel
+      if (payload.companyId !== undefined) data.companyId = payload.companyId
+      if (payload.notes !== undefined) data.notes = payload.notes
+      if (payload.status !== undefined) data.status = payload.status
+      return data
+    }
+
+    if (path === 'expenses' && method === 'POST') {
+      try {
+      let body
+      try {
+        body = await req.json()
+      } catch (e) {
+        console.error('[EXPENSES POST] Error parsing JSON:', e)
+        return new Response(
+          JSON.stringify({ message: 'Erreur lors du parsing du JSON' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      const {
+        supplierName,
+        invoiceNumber,
+        invoiceDate,
+        amountHT,
+        amountTTC,
+        vatAmount,
+        vatRate,
+        accountCode,
+        accountLabel,
+        status,
+        notes,
+        companyId,
+        opportunityId
+      } = body
+
+      // Récupérer l'utilisateur depuis le token
+      const accessToken = req.headers.get('x-user-authorization')?.replace('Bearer ', '') || 
+                         req.headers.get('authorization')?.replace('Bearer ', '')
+      let userId: string | null = null
+      if (accessToken) {
+        try {
+          const decoded = await verifyAccessToken(accessToken)
+          if (decoded && decoded.userId) {
+            userId = decoded.userId
+          }
+        } catch (e) {
+          // Si le token n'est pas valide, on continue sans userId
+        }
+      }
+
+      const now = new Date().toISOString()
+      const newId = crypto.randomUUID()
+
+      // Utiliser la même logique de sérialisation que expenses/index.ts
+      const expensePayload: ExpensePayload = {
+        supplierName,
+        invoiceNumber,
+        invoiceDate,
+        amountHT,
+        amountTTC,
+        vatAmount,
+        vatRate,
+        accountCode,
+        accountLabel,
+        companyId,
+        notes,
+        status: status || 'VERIFIED'
+      }
+
+      const expenseData = serializeExpensePayload(expensePayload)
+
+      // Nettoyer les valeurs undefined avant l'insertion (PostgreSQL les rejette)
+      const cleanExpenseData: Record<string, unknown> = {}
+      for (const [key, value] of Object.entries(expenseData)) {
+        if (value !== undefined) {
+          cleanExpenseData[key] = value
+        }
+      }
+
+      // Ajouter les champs système
+      const insertData: Record<string, unknown> = {
+        id: newId,
+        ...cleanExpenseData,
+        status: status || 'VERIFIED',
+        createdAt: now,
+        updatedAt: now
+      }
+
+      // Ajouter userId séparément
+      if (userId !== undefined && userId !== null) {
+        insertData.userId = userId
+      }
+      // Ajouter opportunityId si elle est fournie (la colonne existe maintenant dans la base)
+      if (opportunityId !== undefined && opportunityId !== null && opportunityId !== '') {
+        insertData.opportunityId = opportunityId
+      }
+
+      const { data, error } = await supabase
+        .from('Expense')
+        .insert(insertData)
+        .select('*, company:Company(*), opportunity:Opportunity(*), user:User(id, email)')
+        .single()
+
+      if (error) {
+        console.error('[EXPENSES POST] Error inserting expense:', error)
+        console.error('[EXPENSES POST] Error details:', JSON.stringify(error, null, 2))
+        console.error('[EXPENSES POST] Request body:', JSON.stringify(body, null, 2))
+        console.error('[EXPENSES POST] Insert data:', JSON.stringify(insertData, null, 2))
+        
+        // Détecter les erreurs de colonne inexistante (PGRST204 ou messages d'erreur PostgreSQL)
+        const isColumnMissingError = 
+          error.code === 'PGRST204' ||
+          error.message?.includes("Could not find") ||
+          (error.message?.includes("column") && error.message?.includes("does not exist")) ||
+          error.message?.match(/column "(\w+)" does not exist/i) ||
+          error.message?.match(/column (\w+) does not exist/i)
+        
+        console.log('[EXPENSES POST] isColumnMissingError:', isColumnMissingError, 'error.code:', error.code)
+        
+        if (isColumnMissingError) {
+          // Extraire le nom de la colonne manquante
+          let missingColumn: string | null = null
+          if (error.code === 'PGRST204' && error.message) {
+            const match = error.message.match(/'(\w+)'/i)
+            if (match) {
+              missingColumn = match[1]
+              console.log('[EXPENSES POST] Extracted missing column from PGRST204:', missingColumn)
+            }
+          } else if (error.message) {
+            const match = error.message.match(/column "(\w+)" does not exist/i) || 
+                         error.message.match(/column (\w+) does not exist/i) ||
+                         error.message.match(/'(\w+)'/i)
+            if (match) {
+              missingColumn = match[1]
+              console.log('[EXPENSES POST] Extracted missing column from message:', missingColumn)
+            }
+          }
+          
+          if (missingColumn) {
+            console.warn(`[EXPENSES POST] Column ${missingColumn} does not exist (${error.code}), retrying without it`)
+            console.log('[EXPENSES POST] Insert data before delete:', JSON.stringify(insertData, null, 2))
+            delete insertData[missingColumn]
+            console.log('[EXPENSES POST] Insert data after delete:', JSON.stringify(insertData, null, 2))
+            
+            const { data: retryData, error: retryError } = await supabase
+              .from('Expense')
+              .insert(insertData)
+              .select('*, company:Company(*), opportunity:Opportunity(*), user:User(id, email)')
+              .single()
+            
+            if (retryError) {
+              console.error('[EXPENSES POST] Retry error:', retryError)
+              console.error('[EXPENSES POST] Retry error details:', JSON.stringify(retryError, null, 2))
+              return new Response(
+                JSON.stringify({ 
+                  message: 'Erreur lors de la création de la dépense',
+                  error: retryError.message,
+                  code: retryError.code,
+                  details: retryError.details,
+                  hint: retryError.hint
+                }),
+                { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+              )
+            }
+            
+            console.log('[EXPENSES POST] Successfully created expense without', missingColumn)
+            return new Response(
+              JSON.stringify(retryData),
+              { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            )
+          } else {
+            console.warn('[EXPENSES POST] Column missing error detected but could not extract column name')
+          }
+        }
+        
+        return new Response(
+          JSON.stringify({ 
+            message: 'Erreur lors de la création de la dépense',
+            error: error.message,
+            code: error.code,
+            details: error.details,
+            hint: error.hint
+          }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      return new Response(
+        JSON.stringify(data),
+        { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+      } catch (expenseError: any) {
+        console.error('[EXPENSES POST] Unexpected error in expense creation:', expenseError)
+        console.error('[EXPENSES POST] Error stack:', expenseError?.stack)
+        console.error('[EXPENSES POST] Error details:', JSON.stringify(expenseError, Object.getOwnPropertyNames(expenseError || {})))
+        return new Response(
+          JSON.stringify({ 
+            message: 'Erreur lors de la création de la dépense',
+            error: expenseError?.message || expenseError?.toString() || String(expenseError),
+            stack: expenseError?.stack
+          }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+    }
+
+    if (path.startsWith('expenses/') && method === 'GET') {
+      const id = path.split('/')[1]
+      const { data, error } = await supabase
+        .from('Expense')
+        .select('*, opportunity:Opportunity(*), user:User(id, email)')
+        .eq('id', id)
+        .single()
+      if (error) throw error
+      return new Response(
+        JSON.stringify(data),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (path.startsWith('expenses/') && method === 'PUT') {
+      const id = path.split('/')[1]
+      const body = await req.json()
+      const {
+        supplierName,
+        invoiceNumber,
+        invoiceDate,
+        amountHT,
+        amountTTC,
+        vatAmount,
+        vatRate,
+        accountCode,
+        accountLabel,
+        status,
+        notes,
+        companyId,
+        opportunityId
+      } = body
+
+      const updateData: any = {
+        updatedAt: new Date().toISOString()
+      }
+
+      if (supplierName !== undefined) updateData.supplierName = supplierName || null
+      if (invoiceNumber !== undefined) updateData.invoiceNumber = invoiceNumber || null
+      if (invoiceDate !== undefined) updateData.invoiceDate = invoiceDate ? new Date(invoiceDate).toISOString() : null
+      if (amountHT !== undefined) updateData.amountHT = amountHT ? amountHT.toString() : null
+      if (amountTTC !== undefined) updateData.amountTTC = amountTTC ? amountTTC.toString() : null
+      if (vatAmount !== undefined) updateData.vatAmount = vatAmount ? vatAmount.toString() : null
+      if (vatRate !== undefined) updateData.vatRate = vatRate ? vatRate.toString() : null
+      if (accountCode !== undefined) updateData.accountCode = accountCode || null
+      if (accountLabel !== undefined) updateData.accountLabel = accountLabel || null
+      if (status !== undefined) updateData.status = status
+      if (notes !== undefined) updateData.notes = notes || null
+      if (companyId !== undefined) updateData.companyId = companyId || null
+      if (opportunityId !== undefined) updateData.opportunityId = opportunityId || null
+      if (body.isForecast !== undefined) updateData.isForecast = body.isForecast
+      if (body.forecastDate !== undefined) updateData.forecastDate = body.forecastDate ? new Date(body.forecastDate).toISOString() : null
+      if (body.recurringExpenseId !== undefined) updateData.recurringExpenseId = body.recurringExpenseId || null
+
+      const { data, error } = await supabase
+        .from('Expense')
+        .update(updateData)
+        .eq('id', id)
+        .select('*, company:Company(*), opportunity:Opportunity(*), user:User(id, email)')
+        .single()
+
+      if (error) throw error
+      return new Response(
+        JSON.stringify(data),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (path.startsWith('expenses/') && method === 'DELETE') {
+      const id = path.split('/')[1]
+      const { error } = await supabase
+        .from('Expense')
+        .delete()
+        .eq('id', id)
+      if (error) throw error
+      return new Response(
+        JSON.stringify({ message: 'Expense deleted successfully' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (path === 'expenses/scan' && method === 'POST') {
+      // Pour le scan, on redirige vers la fonction expenses dédiée
+      // ou on peut implémenter ici si nécessaire
+      // Pour l'instant, retourner une erreur indiquant que le scan doit être fait via la fonction expenses
+      return new Response(
+        JSON.stringify({ message: 'Scan endpoint not available in main API. Use /functions/v1/expenses/scan' }),
+        { status: 501, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Route pour valider une dépense prévisionnelle
+    if (path.startsWith('expenses/') && path.endsWith('/validate') && method === 'POST') {
+      const id = path.split('/')[1]
+      
+      // Récupérer la dépense
+      const { data: expense, error: fetchError } = await supabase
+        .from('Expense')
+        .select('*, recurringExpense:RecurringExpense(*)')
+        .eq('id', id)
+        .single()
+
+      if (fetchError || !expense) {
+        return new Response(
+          JSON.stringify({ message: 'Dépense non trouvée' }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      if (!expense.isForecast) {
+        return new Response(
+          JSON.stringify({ message: 'Cette dépense n\'est pas une dépense prévisionnelle' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      // Mettre à jour la dépense
+      const { data: updatedExpense, error: updateError } = await supabase
+        .from('Expense')
+        .update({
+          isForecast: false,
+          status: 'VERIFIED',
+          forecastDate: null,
+          updatedAt: new Date().toISOString()
+        })
+        .eq('id', id)
+        .select('*, company:Company(*), opportunity:Opportunity(*), user:User(id, email)')
+        .single()
+
+      if (updateError) {
+        return new Response(
+          JSON.stringify({ message: updateError.message }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      // Optionnellement, générer la prochaine dépense prévisionnelle
+      if (expense.recurringExpense && expense.recurringExpense.isActive) {
+        const forecastDate = expense.forecastDate || expense.invoiceDate
+        if (forecastDate) {
+          const nextDate = new Date(forecastDate)
+          nextDate.setMonth(nextDate.getMonth() + 1)
+          
+          // Vérifier si une dépense existe déjà pour cette date
+          const { data: existing } = await supabase
+            .from('Expense')
+            .select('id')
+            .eq('recurringExpenseId', expense.recurringExpenseId)
+            .eq('forecastDate', nextDate.toISOString())
+            .eq('isForecast', true)
+            .single()
+
+          if (!existing) {
+            await supabase
+              .from('Expense')
+              .insert({
+                supplierName: expense.recurringExpense.supplierName,
+                amountHT: expense.recurringExpense.amountHT,
+                amountTTC: expense.recurringExpense.amountTTC,
+                vatAmount: expense.recurringExpense.vatAmount,
+                vatRate: expense.recurringExpense.vatRate,
+                accountCode: expense.recurringExpense.accountCode,
+                accountLabel: expense.recurringExpense.accountLabel,
+                invoiceDate: nextDate.toISOString(),
+                forecastDate: nextDate.toISOString(),
+                isForecast: true,
+                status: 'PENDING',
+                recurringExpenseId: expense.recurringExpenseId,
+                companyId: expense.recurringExpense.companyId,
+                userId: expense.recurringExpense.userId,
+                opportunityId: expense.recurringExpense.opportunityId,
+                notes: expense.recurringExpense.notes
+              })
+          }
+        }
+      }
+
+      return new Response(
+        JSON.stringify(updatedExpense),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+
     } // Fin du bloc if (!isPublicRoute)
 
     // Route not found
@@ -3252,10 +4899,16 @@ serve(async (req) => {
       { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
 
-  } catch (error) {
-    console.error('Error:', error)
+  } catch (error: any) {
+    console.error('[API ERROR] Unhandled error:', error)
+    console.error('[API ERROR] Error stack:', error?.stack)
+    console.error('[API ERROR] Error details:', JSON.stringify(error, Object.getOwnPropertyNames(error || {})))
     return new Response(
-      JSON.stringify({ message: error.message }),
+      JSON.stringify({ 
+        message: error?.message || 'Erreur interne du serveur',
+        error: error?.toString() || String(error),
+        stack: error?.stack
+      }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }

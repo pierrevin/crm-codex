@@ -1,14 +1,28 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { PencilIcon, TrashIcon, ArrowLeftIcon, CheckIcon, XMarkIcon } from '@heroicons/react/24/outline';
+import { 
+  PencilIcon, 
+  TrashIcon, 
+  ArrowLeftIcon, 
+  CheckIcon, 
+  XMarkIcon,
+  CalendarIcon,
+  BuildingOfficeIcon,
+  DocumentTextIcon,
+  CurrencyEuroIcon,
+  InformationCircleIcon,
+  LinkIcon
+} from '@heroicons/react/24/outline';
 import { expensesService, Expense, ExpenseStatus, UpdateExpenseDto } from '../services/expensesService';
+import { recurringExpensesService, RecurringExpense, RecurrenceType, CreateRecurringExpenseDto } from '../services/recurringExpensesService';
 import { AccountCodeSelector } from '../components/AccountCodeSelector';
+import api from '../services/apiClient';
 
 const STATUS_COLORS: Record<ExpenseStatus, string> = {
-  PENDING: 'bg-yellow-100 text-yellow-700',
-  PROCESSED: 'bg-blue-100 text-blue-700',
-  VERIFIED: 'bg-green-100 text-green-700',
-  REJECTED: 'bg-red-100 text-red-700'
+  PENDING: 'bg-yellow-100 text-yellow-700 border-yellow-200',
+  PROCESSED: 'bg-blue-100 text-blue-700 border-blue-200',
+  VERIFIED: 'bg-green-100 text-green-700 border-green-200',
+  REJECTED: 'bg-red-100 text-red-700 border-red-200'
 };
 
 const STATUS_LABELS: Record<ExpenseStatus, string> = {
@@ -26,6 +40,7 @@ export function ExpenseDetailPage() {
   const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showImageZoom, setShowImageZoom] = useState(false);
+  const [showSystemInfo, setShowSystemInfo] = useState(false);
   
   // Champs éditables
   const [supplierName, setSupplierName] = useState('');
@@ -39,17 +54,40 @@ export function ExpenseDetailPage() {
   const [accountLabel, setAccountLabel] = useState('');
   const [status, setStatus] = useState<ExpenseStatus>('PENDING');
   const [notes, setNotes] = useState('');
+  const [selectedOpportunityId, setSelectedOpportunityId] = useState<string>('');
+  const [opportunities, setOpportunities] = useState<any[]>([]);
+  
+  // États pour la récurrence
+  const [isRecurring, setIsRecurring] = useState(false);
+  const [recurringExpense, setRecurringExpense] = useState<RecurringExpense | null>(null);
+  const [recurrenceType, setRecurrenceType] = useState<RecurrenceType>('MONTHLY');
+  const [paymentDay, setPaymentDay] = useState('1');
+  const [recurrenceStartDate, setRecurrenceStartDate] = useState('');
+  const [recurrenceEndDate, setRecurrenceEndDate] = useState('');
 
   useEffect(() => {
     if (id) {
       void loadExpense(id);
     }
+    void loadOpportunities();
   }, [id]);
+
+  const loadOpportunities = async () => {
+    try {
+      const { data } = await api.get('/api/opportunities?limit=1000');
+      setOpportunities(Array.isArray(data) ? data : (data.items || data.data || []));
+    } catch (error) {
+      console.error('Erreur chargement opportunités:', error);
+    }
+  };
 
   const loadExpense = async (expenseId: string) => {
     setLoading(true);
     try {
       const data = await expensesService.getById(expenseId);
+      console.log('[EXPENSE DETAIL] Loaded expense:', data);
+      console.log('[EXPENSE DETAIL] Opportunity:', data.opportunity);
+      console.log('[EXPENSE DETAIL] OpportunityId:', data.opportunityId);
       setExpense(data);
       // Initialiser les champs éditables
       setSupplierName(data.supplierName || '');
@@ -63,6 +101,25 @@ export function ExpenseDetailPage() {
       setAccountLabel(data.accountLabel || '');
       setStatus(data.status);
       setNotes(data.notes || '');
+      setSelectedOpportunityId(data.opportunityId || '');
+      
+      // Charger les informations de récurrence si la dépense est liée à un modèle récurrent
+      if (data.recurringExpenseId) {
+        setIsRecurring(true);
+        try {
+          const recurring = await recurringExpensesService.getById(data.recurringExpenseId);
+          setRecurringExpense(recurring);
+          setRecurrenceType(recurring.recurrenceType);
+          setPaymentDay(recurring.paymentDay.toString());
+          setRecurrenceStartDate(recurring.startDate ? recurring.startDate.split('T')[0] : '');
+          setRecurrenceEndDate(recurring.endDate ? recurring.endDate.split('T')[0] : '');
+        } catch (error) {
+          console.error('Erreur chargement dépense récurrente:', error);
+        }
+      } else {
+        setIsRecurring(false);
+        setRecurringExpense(null);
+      }
     } catch (error) {
       console.error('Erreur chargement dépense:', error);
     } finally {
@@ -86,10 +143,79 @@ export function ExpenseDetailPage() {
         accountCode: accountCode || undefined,
         accountLabel: accountLabel || undefined,
         status,
-        notes: notes || undefined
+        notes: notes || undefined,
+        opportunityId: selectedOpportunityId || undefined
       };
 
       await expensesService.update(expense.id, updateData);
+      
+      // Gérer la récurrence
+      if (isRecurring) {
+        if (expense.recurringExpenseId && recurringExpense) {
+          // Mettre à jour le modèle récurrent existant
+          await recurringExpensesService.update(expense.recurringExpenseId, {
+            supplierName: supplierName || undefined,
+            amountHT: amountHT ? parseFloat(amountHT) : undefined,
+            amountTTC: amountTTC ? parseFloat(amountTTC) : undefined,
+            vatRate: vatRate ? parseFloat(vatRate) / 100 : undefined,
+            vatAmount: vatAmount ? parseFloat(vatAmount) : undefined,
+            accountCode: accountCode || undefined,
+            accountLabel: accountLabel || undefined,
+            recurrenceType,
+            paymentDay: parseInt(paymentDay, 10),
+            startDate: recurrenceStartDate ? new Date(recurrenceStartDate + 'T00:00:00').toISOString() : undefined,
+            endDate: recurrenceEndDate ? new Date(recurrenceEndDate + 'T00:00:00').toISOString() : undefined,
+            notes: notes || undefined,
+            opportunityId: selectedOpportunityId || undefined,
+          });
+        } else {
+          // Créer un nouveau modèle récurrent
+          const recurringDto: CreateRecurringExpenseDto = {
+            supplierName: supplierName || undefined,
+            amountHT: amountHT ? parseFloat(amountHT) : undefined,
+            amountTTC: amountTTC ? parseFloat(amountTTC) : undefined,
+            vatRate: vatRate ? parseFloat(vatRate) / 100 : undefined,
+            vatAmount: vatAmount ? parseFloat(vatAmount) : undefined,
+            accountCode: accountCode || undefined,
+            accountLabel: accountLabel || undefined,
+            recurrenceType,
+            paymentDay: parseInt(paymentDay, 10),
+            startDate: recurrenceStartDate ? new Date(recurrenceStartDate + 'T00:00:00').toISOString() : new Date().toISOString(),
+            endDate: recurrenceEndDate ? new Date(recurrenceEndDate + 'T00:00:00').toISOString() : undefined,
+            isActive: true,
+            notes: notes || undefined,
+            opportunityId: selectedOpportunityId || undefined,
+          };
+
+          const newRecurringExpense = await recurringExpensesService.create(recurringDto);
+          
+          // Lier la dépense au modèle récurrent
+          await expensesService.update(expense.id, {
+            recurringExpenseId: newRecurringExpense.id
+          });
+          
+          // Générer les dépenses prévisionnelles pour les 12 prochains mois
+          const startDate = new Date(recurrenceStartDate);
+          const endDate = new Date(startDate);
+          endDate.setMonth(endDate.getMonth() + 12);
+          
+          await recurringExpensesService.generateForecast(
+            newRecurringExpense.id,
+            startDate.toISOString(),
+            endDate.toISOString()
+          );
+        }
+      } else if (expense.recurringExpenseId && !isRecurring) {
+        // Si on décoche la récurrence, on peut soit supprimer le lien, soit désactiver le modèle
+        // Pour l'instant, on garde juste le lien mais on ne génère plus de nouvelles dépenses
+        // (le modèle reste mais devient inactif)
+        if (recurringExpense) {
+          await recurringExpensesService.update(expense.recurringExpenseId, {
+            isActive: false
+          });
+        }
+      }
+      
       setIsEditing(false);
       await loadExpense(expense.id);
     } catch (error) {
@@ -115,6 +241,17 @@ export function ExpenseDetailPage() {
     }
   };
 
+  const handleValidateForecast = async () => {
+    if (!expense) return;
+    try {
+      await expensesService.validateForecast(expense.id);
+      await loadExpense(expense.id);
+    } catch (error) {
+      console.error('Erreur validation:', error);
+      alert('Erreur lors de la validation');
+    }
+  };
+
   const formatCurrency = (amount?: number) => {
     if (!amount) return '-';
     return new Intl.NumberFormat('fr-FR', {
@@ -125,284 +262,554 @@ export function ExpenseDetailPage() {
 
   const formatDate = (date?: string) => {
     if (!date) return '-';
-    return new Date(date).toLocaleDateString('fr-FR');
+    return new Date(date).toLocaleDateString('fr-FR', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric'
+    });
   };
 
   const getExpenseTitle = (expense: Expense): string => {
-    // Si on a un numéro de facture et un fournisseur
     if (expense.invoiceNumber && expense.supplierName) {
-      return `Facture ${expense.invoiceNumber} - ${expense.supplierName}`;
+      return `Facture ${expense.invoiceNumber}`;
     }
-    
-    // Si on a un numéro de facture
     if (expense.invoiceNumber) {
       return `Facture ${expense.invoiceNumber}`;
     }
-    
-    // Si on a un fournisseur
     if (expense.supplierName) {
-      const date = expense.invoiceDate 
-        ? formatDate(expense.invoiceDate)
-        : formatDate(expense.createdAt);
-      return `${expense.supplierName} - ${date}`;
+      return expense.supplierName;
     }
-    
-    // Si on a une entreprise liée
     if (expense.company?.name) {
-      const date = expense.invoiceDate 
-        ? formatDate(expense.invoiceDate)
-        : formatDate(expense.createdAt);
-      return `${expense.company.name} - ${date}`;
+      return expense.company.name;
     }
-    
-    // Par défaut : date de création
-    return `Dépense du ${formatDate(expense.createdAt)}`;
+    return 'Dépense';
   };
 
   if (loading) {
     return (
-      <div className="p-8 text-center text-slate-500">Chargement...</div>
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-slate-600">Chargement...</p>
+        </div>
+      </div>
     );
   }
 
   if (!expense) {
     return (
-      <div className="p-8 text-center text-slate-500">
-        <p>Dépense non trouvée</p>
-        <button
-          onClick={() => navigate('/depenses')}
-          className="mt-4 text-blue-600 hover:text-blue-800"
-        >
-          Retour à la liste
-        </button>
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-slate-600 mb-4">Dépense non trouvée</p>
+          <button
+            onClick={() => navigate('/depenses')}
+            className="text-blue-600 hover:text-blue-800 font-medium"
+          >
+            ← Retour à la liste
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      {/* En-tête */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <button
-            onClick={() => navigate('/depenses')}
-            className="text-slate-600 hover:text-slate-900"
-          >
-            <ArrowLeftIcon className="w-6 h-6" />
-          </button>
-          <div>
-            <h1 className="text-2xl font-semibold text-slate-900">
-              {getExpenseTitle(expense)}
-            </h1>
-            <p className="text-sm text-slate-500">
-              {expense.invoiceDate 
-                ? `Facture du ${formatDate(expense.invoiceDate)}`
-                : `Créée le ${formatDate(expense.createdAt)}`
-              }
-            </p>
-          </div>
-        </div>
-        <div className="flex gap-2">
-          {isEditing ? (
-            <>
+    <div className="min-h-screen bg-slate-50">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* En-tête avec statut en évidence */}
+        <div className="mb-8">
+          <div className="flex items-start justify-between mb-6">
+            <div className="flex items-center gap-4">
               <button
-                onClick={handleSave}
-                disabled={saving}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                onClick={() => navigate('/depenses')}
+                className="p-2 text-slate-600 hover:text-slate-900 hover:bg-white rounded-lg transition-colors"
               >
-                <CheckIcon className="w-5 h-5" />
-                Enregistrer
+                <ArrowLeftIcon className="w-5 h-5" />
               </button>
-              <button
-                onClick={() => {
-                  setIsEditing(false);
-                  void loadExpense(expense.id);
-                }}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300"
-              >
-                <XMarkIcon className="w-5 h-5" />
-                Annuler
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                onClick={() => setIsEditing(true)}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-              >
-                <PencilIcon className="w-5 h-5" />
-                Modifier
-              </button>
-              <button
-                onClick={handleDelete}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
-              >
-                <TrashIcon className="w-5 h-5" />
-                Supprimer
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Informations principales */}
-        <div className="lg:col-span-2 space-y-6">
-          <div className="bg-white rounded-lg border border-slate-200 p-6">
-            <h2 className="text-lg font-semibold text-slate-900 mb-4">Informations</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Fournisseur
-                </label>
-                {isEditing ? (
-                  <input
-                    type="text"
-                    value={supplierName}
-                    onChange={(e) => setSupplierName(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md"
-                  />
-                ) : (
-                  <p className="text-slate-900">{expense.supplierName || expense.company?.name || '-'}</p>
+                <h1 className="text-3xl font-bold text-slate-900 mb-3">
+                  {getExpenseTitle(expense)}
+                </h1>
+                {expense.invoiceDate && (
+                  <div className="flex items-center gap-2 mb-2">
+                    <CalendarIcon className="w-5 h-5 text-blue-600" />
+                    <span className="text-lg font-semibold text-slate-900">
+                      {formatDate(expense.invoiceDate)}
+                    </span>
+                  </div>
+                )}
+                {/* Afficher le fournisseur seulement s'il n'est pas déjà dans le titre */}
+                {expense.supplierName && getExpenseTitle(expense) !== expense.supplierName && (
+                  <div className="flex items-center gap-1 text-sm text-slate-600">
+                    <BuildingOfficeIcon className="w-4 h-4" />
+                    <span>{expense.supplierName}</span>
+                  </div>
+                )}
+                {/* Afficher l'entreprise si elle est différente du fournisseur et du titre */}
+                {expense.company?.name && 
+                 getExpenseTitle(expense) !== expense.company.name && 
+                 expense.supplierName !== expense.company.name && (
+                  <div className="flex items-center gap-1 text-sm text-slate-600">
+                    <BuildingOfficeIcon className="w-4 h-4" />
+                    <span>{expense.company.name}</span>
+                  </div>
                 )}
               </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Numéro de facture
-                </label>
-                {isEditing ? (
-                  <input
-                    type="text"
-                    value={invoiceNumber}
-                    onChange={(e) => setInvoiceNumber(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md"
-                  />
-                ) : (
-                  <p className="text-slate-900">{expense.invoiceNumber || '-'}</p>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Date de facture
-                </label>
-                {isEditing ? (
-                  <input
-                    type="date"
-                    value={invoiceDate}
-                    onChange={(e) => setInvoiceDate(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md"
-                  />
-                ) : (
-                  <p className="text-slate-900">{formatDate(expense.invoiceDate)}</p>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Statut
-                </label>
-                {isEditing ? (
-                  <select
-                    value={status}
-                    onChange={(e) => setStatus(e.target.value as ExpenseStatus)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md"
-                  >
-                    {Object.entries(STATUS_LABELS).map(([value, label]) => (
-                      <option key={value} value={value}>{label}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${STATUS_COLORS[expense.status]}`}>
-                    {STATUS_LABELS[expense.status]}
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
+                <span className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border ${STATUS_COLORS[expense.status]}`}>
+                  {STATUS_LABELS[expense.status]}
+                </span>
+                {expense.isForecast && (
+                  <span className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border bg-purple-100 text-purple-700 border-purple-200">
+                    Prévisionnel
                   </span>
                 )}
               </div>
+              {isEditing ? (
+                <>
+                  <button
+                    onClick={handleSave}
+                    disabled={saving}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors font-medium"
+                  >
+                    <CheckIcon className="w-5 h-5" />
+                    Enregistrer
+                  </button>
+                  <button
+                    onClick={() => {
+                      setIsEditing(false);
+                      void loadExpense(expense.id);
+                    }}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 transition-colors font-medium"
+                  >
+                    <XMarkIcon className="w-5 h-5" />
+                    Annuler
+                  </button>
+                </>
+              ) : (
+                <>
+                  {expense.isForecast && (
+                    <button
+                      onClick={handleValidateForecast}
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
+                    >
+                      <CheckIcon className="w-5 h-5" />
+                      Vérifier
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      // Initialiser les champs de récurrence si nécessaire
+                      if (!expense.recurringExpenseId && !recurrenceStartDate) {
+                        setRecurrenceStartDate(invoiceDate || new Date().toISOString().split('T')[0]);
+                      }
+                      setIsEditing(true);
+                    }}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-white text-slate-700 border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors font-medium"
+                  >
+                    <PencilIcon className="w-5 h-5" />
+                    Modifier
+                  </button>
+                  <button
+                    onClick={handleDelete}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium"
+                  >
+                    <TrashIcon className="w-5 h-5" />
+                    Supprimer
+                  </button>
+                </>
+              )}
             </div>
           </div>
+        </div>
 
-          {/* Montants */}
-          <div className="bg-white rounded-lg border border-slate-200 p-6">
-            <h2 className="text-lg font-semibold text-slate-900 mb-4">Montants</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Montant HT
-                </label>
-                {isEditing ? (
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={amountHT}
-                    onChange={(e) => setAmountHT(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md"
-                  />
-                ) : (
-                  <p className="text-slate-900 font-medium">{formatCurrency(expense.amountHT)}</p>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  TVA
-                </label>
-                {isEditing ? (
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={vatAmount}
-                    onChange={(e) => setVatAmount(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md"
-                  />
-                ) : (
-                  <p className="text-slate-900">{formatCurrency(expense.vatAmount)}</p>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Taux TVA (%)
-                </label>
-                {isEditing ? (
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={vatRate}
-                    onChange={(e) => setVatRate(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md"
-                  />
-                ) : (
-                  <p className="text-slate-900">
-                    {expense.vatRate ? (Number(expense.vatRate) * 100).toFixed(2) + '%' : '-'}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Colonne principale */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* Montant principal en évidence */}
+            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl border border-blue-200 p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-slate-600 mb-1">Montant TTC</p>
+                  <p className="text-4xl font-bold text-slate-900">
+                    {isEditing ? (
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={amountTTC}
+                        onChange={(e) => setAmountTTC(e.target.value)}
+                        className="bg-white/80 border border-blue-300 rounded-lg px-4 py-2 text-3xl font-bold w-48 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    ) : (
+                      formatCurrency(expense.amountTTC)
+                    )}
                   </p>
-                )}
+                </div>
+                <div className="text-right">
+                  <p className="text-sm text-slate-600 mb-1">HT</p>
+                  <p className="text-xl font-semibold text-slate-700">
+                    {isEditing ? (
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={amountHT}
+                        onChange={(e) => setAmountHT(e.target.value)}
+                        className="bg-white/80 border border-blue-300 rounded-lg px-3 py-1.5 text-lg font-semibold w-32 text-right focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    ) : (
+                      formatCurrency(expense.amountHT)
+                    )}
+                  </p>
+                </div>
               </div>
+              {!isEditing && expense.vatAmount && Number(expense.vatAmount) > 0 && (
+                <div className="mt-4 pt-4 border-t border-blue-200 flex items-center justify-between text-sm">
+                  <span className="text-slate-600">TVA</span>
+                  <span className="font-medium text-slate-700">
+                    {formatCurrency(expense.vatAmount)} ({expense.vatRate ? (Number(expense.vatRate) * 100).toFixed(2) : '0'}%)
+                  </span>
+                </div>
+              )}
+            </div>
 
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Montant TTC
-                </label>
-                {isEditing ? (
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={amountTTC}
-                    onChange={(e) => setAmountTTC(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md"
-                  />
-                ) : (
-                  <p className="text-slate-900 font-semibold text-lg">{formatCurrency(expense.amountTTC)}</p>
-                )}
+            {/* Informations principales */}
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+              <h2 className="text-lg font-semibold text-slate-900 mb-6 flex items-center gap-2">
+                <DocumentTextIcon className="w-5 h-5 text-slate-400" />
+                Informations
+              </h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Fournisseur
+                  </label>
+                  {isEditing ? (
+                    <input
+                      type="text"
+                      value={supplierName}
+                      onChange={(e) => setSupplierName(e.target.value)}
+                      className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  ) : (
+                    <p className="text-slate-900 font-medium">{expense.supplierName || expense.company?.name || '-'}</p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Numéro de facture
+                  </label>
+                  {isEditing ? (
+                    <input
+                      type="text"
+                      value={invoiceNumber}
+                      onChange={(e) => setInvoiceNumber(e.target.value)}
+                      className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  ) : (
+                    <p className="text-slate-900 font-medium">{expense.invoiceNumber || '-'}</p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Date de facture
+                  </label>
+                  {isEditing ? (
+                    <input
+                      type="date"
+                      value={invoiceDate}
+                      onChange={(e) => setInvoiceDate(e.target.value)}
+                      className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  ) : (
+                    <p className="text-slate-900">{formatDate(expense.invoiceDate)}</p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Opportunité
+                  </label>
+                  {isEditing ? (
+                    <select
+                      value={selectedOpportunityId}
+                      onChange={(e) => setSelectedOpportunityId(e.target.value)}
+                      className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      <option value="">Aucune</option>
+                      {opportunities.map(opp => {
+                        const companyName = opp.company?.name || '';
+                        const displayText = companyName 
+                          ? `${opp.title} - ${companyName}`
+                          : opp.title;
+                        return (
+                          <option key={opp.id} value={opp.id}>{displayText}</option>
+                        );
+                      })}
+                    </select>
+                  ) : (
+                    (expense.opportunity || expense.opportunityId) ? (
+                      <button
+                        onClick={() => {
+                          const oppId = expense.opportunity?.id || expense.opportunityId;
+                          console.log('[EXPENSE DETAIL] Navigating to opportunity:', oppId);
+                          if (oppId) {
+                            navigate(`/opportunites/${oppId}`);
+                          } else {
+                            console.error('[EXPENSE DETAIL] No opportunity ID found:', { 
+                              opportunity: expense.opportunity, 
+                              opportunityId: expense.opportunityId 
+                            });
+                          }
+                        }}
+                        className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium underline"
+                      >
+                        <LinkIcon className="w-4 h-4" />
+                        {expense.opportunity?.title || 'Voir l\'opportunité'}
+                      </button>
+                    ) : (
+                      <p className="text-slate-400">Aucune opportunité liée</p>
+                    )
+                  )}
+                </div>
               </div>
+            </div>
+
+            {/* Détails financiers */}
+            {isEditing && (
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+                <h2 className="text-lg font-semibold text-slate-900 mb-6 flex items-center gap-2">
+                  <CurrencyEuroIcon className="w-5 h-5 text-slate-400" />
+                  Détails financiers
+                </h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                      Montant HT
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={amountHT}
+                      onChange={(e) => setAmountHT(e.target.value)}
+                      className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                      Montant TVA
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={vatAmount}
+                      onChange={(e) => setVatAmount(e.target.value)}
+                      className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                      Taux TVA (%)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={vatRate}
+                      onChange={(e) => setVatRate(e.target.value)}
+                      className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                      Statut
+                    </label>
+                    <select
+                      value={status}
+                      onChange={(e) => setStatus(e.target.value as ExpenseStatus)}
+                      className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      {Object.entries(STATUS_LABELS).map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )}
+
+
+            {/* Notes */}
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+              <h2 className="text-lg font-semibold text-slate-900 mb-4">Notes</h2>
+              {isEditing ? (
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  rows={4}
+                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="Ajoutez des notes..."
+                />
+              ) : (
+                <p className="text-slate-900 whitespace-pre-wrap">{expense.notes || <span className="text-slate-400">Aucune note</span>}</p>
+              )}
+            </div>
+
+            {/* Dépense récurrente */}
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+              <h2 className="text-lg font-semibold text-slate-900 mb-4">Dépense récurrente</h2>
+              {isEditing ? (
+                <div className="space-y-4">
+                  <div className="flex items-center">
+                    <input
+                      type="checkbox"
+                      id="isRecurring"
+                      checked={isRecurring}
+                      onChange={(e) => setIsRecurring(e.target.checked)}
+                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-slate-300 rounded"
+                    />
+                    <label htmlFor="isRecurring" className="ml-2 block text-sm font-medium text-slate-700">
+                      Cette dépense est récurrente (salaire, loyer, etc.)
+                    </label>
+                  </div>
+
+                  {isRecurring && (
+                    <div className="space-y-4 bg-slate-50 p-4 rounded-lg">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-slate-700 mb-2">
+                            Type de récurrence *
+                          </label>
+                          <select
+                            value={recurrenceType}
+                            onChange={(e) => setRecurrenceType(e.target.value as RecurrenceType)}
+                            required={isRecurring}
+                            className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          >
+                            <option value="WEEKLY">Hebdomadaire</option>
+                            <option value="MONTHLY">Mensuelle</option>
+                            <option value="QUARTERLY">Trimestrielle</option>
+                            <option value="YEARLY">Annuelle</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-slate-700 mb-2">
+                            Jour de paiement (1-31) *
+                          </label>
+                          <input
+                            type="number"
+                            min="1"
+                            max="31"
+                            value={paymentDay}
+                            onChange={(e) => setPaymentDay(e.target.value)}
+                            required={isRecurring}
+                            className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-slate-700 mb-2">
+                            Date de début *
+                          </label>
+                          <input
+                            type="date"
+                            value={recurrenceStartDate}
+                            onChange={(e) => setRecurrenceStartDate(e.target.value)}
+                            required={isRecurring}
+                            className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-slate-700 mb-2">
+                            Date de fin (optionnel)
+                          </label>
+                          <input
+                            type="date"
+                            value={recurrenceEndDate}
+                            onChange={(e) => setRecurrenceEndDate(e.target.value)}
+                            className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          />
+                        </div>
+                      </div>
+
+                      <p className="text-xs text-slate-500">
+                        Les dépenses prévisionnelles seront générées automatiquement chaque mois à partir de la date de début.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {expense.recurringExpenseId && recurringExpense ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <span className="inline-flex px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
+                          Dépense récurrente
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <span className="text-slate-500">Type de récurrence:</span>
+                          <span className="ml-2 font-medium text-slate-900">
+                            {recurringExpense.recurrenceType === 'MONTHLY' ? 'Mensuelle' :
+                             recurringExpense.recurrenceType === 'WEEKLY' ? 'Hebdomadaire' :
+                             recurringExpense.recurrenceType === 'QUARTERLY' ? 'Trimestrielle' :
+                             recurringExpense.recurrenceType === 'YEARLY' ? 'Annuelle' : recurringExpense.recurrenceType}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500">Jour de paiement:</span>
+                          <span className="ml-2 font-medium text-slate-900">{recurringExpense.paymentDay}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500">Date de début:</span>
+                          <span className="ml-2 font-medium text-slate-900">
+                            {recurringExpense.startDate ? formatDate(recurringExpense.startDate) : '-'}
+                          </span>
+                        </div>
+                        {recurringExpense.endDate && (
+                          <div>
+                            <span className="text-slate-500">Date de fin:</span>
+                            <span className="ml-2 font-medium text-slate-900">
+                              {formatDate(recurringExpense.endDate)}
+                            </span>
+                          </div>
+                        )}
+                        <div>
+                          <span className="text-slate-500">Statut:</span>
+                          <span className={`ml-2 font-medium ${
+                            recurringExpense.isActive ? 'text-green-700' : 'text-slate-500'
+                          }`}>
+                            {recurringExpense.isActive ? 'Actif' : 'Inactif'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-slate-400 text-sm">Cette dépense n'est pas récurrente</p>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Comptabilité */}
-          <div className="bg-white rounded-lg border border-slate-200 p-6">
-            <h2 className="text-lg font-semibold text-slate-900 mb-4">Comptabilité</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
+          {/* Sidebar */}
+          <div className="space-y-6">
+            {/* Comptabilité */}
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+              <h2 className="text-lg font-semibold text-slate-900 mb-4 flex items-center gap-2">
+                <CurrencyEuroIcon className="w-5 h-5 text-slate-400" />
+                Comptabilité
+              </h2>
+              <div className="space-y-3">
                 {isEditing ? (
                   <AccountCodeSelector
                     value={accountCode}
@@ -414,120 +821,104 @@ export function ExpenseDetailPage() {
                     required
                   />
                 ) : (
-                  <>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">
                       Code compte
                     </label>
-                    <p className="text-slate-900">
+                    <p className="text-slate-900 font-medium text-lg">
                       {expense.accountCode || '-'}
                       {expense.accountLabel && (
-                        <span className="ml-2 text-slate-600 text-sm">({expense.accountLabel})</span>
+                        <span className="ml-2 text-slate-600 font-normal text-base">({expense.accountLabel})</span>
                       )}
                     </p>
-                  </>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Libellé compte
-                </label>
-                {isEditing ? (
-                  <input
-                    type="text"
-                    value={accountLabel}
-                    onChange={(e) => setAccountLabel(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md"
-                    placeholder="Libellé du compte"
-                  />
-                ) : (
-                  <p className="text-slate-900">{expense.accountLabel || '-'}</p>
+                  </div>
                 )}
               </div>
             </div>
-          </div>
 
-          {/* Notes */}
-          <div className="bg-white rounded-lg border border-slate-200 p-6">
-            <h2 className="text-lg font-semibold text-slate-900 mb-4">Notes</h2>
-            {isEditing ? (
-              <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                rows={4}
-                className="w-full px-3 py-2 border border-slate-300 rounded-md"
-                placeholder="Ajoutez des notes..."
-              />
-            ) : (
-              <p className="text-slate-900 whitespace-pre-wrap">{expense.notes || 'Aucune note'}</p>
-            )}
-          </div>
-        </div>
-
-        {/* Sidebar */}
-        <div className="space-y-6">
-          {/* Aperçu du document */}
-          {expense.fileUrl && (
-            <div className="bg-white rounded-lg border border-slate-200 p-6">
-              <h2 className="text-lg font-semibold text-slate-900 mb-4">Document</h2>
-              <div className="space-y-3">
-                <p className="text-sm text-slate-600">{expense.fileName || 'Fichier'}</p>
-                
-                {/* Aperçu selon le type de fichier */}
-                {expense.fileType?.startsWith('image/') ? (
-                  <div className="border border-slate-200 rounded-lg overflow-hidden cursor-pointer group relative" onClick={() => setShowImageZoom(true)}>
-                    <img
-                      src={expense.fileUrl}
-                      alt="Aperçu facture"
-                      className="w-full h-auto max-h-96 object-contain transition-transform group-hover:scale-105"
-                    />
-                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
-                      <svg className="w-8 h-8 text-white opacity-0 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
-                      </svg>
+            {/* Document */}
+            {expense.fileUrl && (
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+                <h2 className="text-lg font-semibold text-slate-900 mb-4">Document</h2>
+                <div className="space-y-4">
+                  <p className="text-sm text-slate-600">{expense.fileName || 'Fichier'}</p>
+                  
+                  {expense.fileType?.startsWith('image/') ? (
+                    <div 
+                      className="border border-slate-200 rounded-lg overflow-hidden cursor-pointer group relative"
+                      onClick={() => setShowImageZoom(true)}
+                    >
+                      <img
+                        src={expense.fileUrl}
+                        alt="Aperçu facture"
+                        className="w-full h-auto max-h-64 object-contain transition-transform group-hover:scale-105"
+                      />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+                        <svg className="w-8 h-8 text-white opacity-0 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
+                        </svg>
+                      </div>
                     </div>
-                  </div>
-                ) : expense.fileType === 'application/pdf' ? (
-                  <div className="border border-slate-200 rounded-lg overflow-hidden bg-slate-50">
-                    <iframe
-                      src={expense.fileUrl}
-                      className="w-full h-96"
-                      title="Aperçu PDF"
-                    />
-                  </div>
-                ) : null}
-                
-                <a
-                  href={expense.fileUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm w-full justify-center"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                  </svg>
-                  Ouvrir dans un nouvel onglet
-                </a>
+                  ) : expense.fileType === 'application/pdf' ? (
+                    <div className="border border-slate-200 rounded-lg overflow-hidden bg-slate-50">
+                      <iframe
+                        src={expense.fileUrl}
+                        className="w-full h-64"
+                        title="Aperçu PDF"
+                      />
+                    </div>
+                  ) : null}
+                  
+                  <a
+                    href={expense.fileUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center gap-2 w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium transition-colors"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                    Ouvrir dans un nouvel onglet
+                  </a>
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Métadonnées */}
-          <div className="bg-white rounded-lg border border-slate-200 p-6">
-            <h2 className="text-lg font-semibold text-slate-900 mb-4">Informations système</h2>
-            <div className="space-y-2 text-sm">
-              <div>
-                <span className="text-slate-500">Créée le:</span>
-                <p className="text-slate-900">{formatDate(expense.createdAt)}</p>
-              </div>
-              <div>
-                <span className="text-slate-500">Modifiée le:</span>
-                <p className="text-slate-900">{formatDate(expense.updatedAt)}</p>
-              </div>
-              {expense.user && (
-                <div>
-                  <span className="text-slate-500">Créée par:</span>
-                  <p className="text-slate-900">{expense.user.email}</p>
+            {/* Informations système - Compact et pliable */}
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+              <button
+                onClick={() => setShowSystemInfo(!showSystemInfo)}
+                className="w-full px-6 py-4 flex items-center justify-between text-left hover:bg-slate-50 transition-colors"
+              >
+                <div className="flex items-center gap-2">
+                  <InformationCircleIcon className="w-5 h-5 text-slate-400" />
+                  <span className="text-sm font-medium text-slate-700">Informations système</span>
+                </div>
+                <svg 
+                  className={`w-5 h-5 text-slate-400 transition-transform ${showSystemInfo ? 'rotate-180' : ''}`}
+                  fill="none" 
+                  stroke="currentColor" 
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              {showSystemInfo && (
+                <div className="px-6 py-4 border-t border-slate-200 space-y-3 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Créée le</span>
+                    <span className="text-slate-900 font-medium">{formatDate(expense.createdAt)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Modifiée le</span>
+                    <span className="text-slate-900 font-medium">{formatDate(expense.updatedAt)}</span>
+                  </div>
+                  {expense.user && (
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Créée par</span>
+                      <span className="text-slate-900 font-medium">{expense.user.email}</span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -558,4 +949,3 @@ export function ExpenseDetailPage() {
     </div>
   );
 }
-

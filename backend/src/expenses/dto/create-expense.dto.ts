@@ -77,5 +77,10 @@ export class CreateExpenseDto {
   @IsOptional()
   @IsString()
   companyId?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  opportunityId?: string;
 }
 

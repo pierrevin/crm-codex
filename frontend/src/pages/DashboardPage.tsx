@@ -12,6 +12,7 @@ import {
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Line, PieChart, Pie, Cell } from 'recharts';
 import api from '../services/apiClient';
 import { ProjectionView } from '../components/ProjectionView';
+import { TreasuryView } from '../components/TreasuryView';
 import { GlobalSearch } from '../components/GlobalSearch';
 
 const STAGES = {
@@ -41,9 +42,13 @@ export function DashboardPage() {
   // États pour la projection CA
   const [projectionPeriod, setProjectionPeriod] = useState<3 | 6 | 12>(6);
   const [projectionSelectedStages, setProjectionSelectedStages] = useState<Set<string>>(new Set(['CLOSED_WON']));
+  
+  // État pour toutes les opportunités (pour TreasuryView)
+  const [allOpportunities, setAllOpportunities] = useState<any[]>([]);
 
   useEffect(() => {
     void loadStats();
+    void loadAllOpportunities();
     void checkGoogleConnection();
     
     // Afficher un message si Google OAuth callback
@@ -135,6 +140,17 @@ export function DashboardPage() {
       }
     }
     setLoading(false);
+  };
+
+  const loadAllOpportunities = async () => {
+    try {
+      const { data } = await api.get('/api/opportunities', { params: { limit: 1000 } });
+      const opps = data.items || data.data || [];
+      console.log('DashboardPage - Opportunités chargées pour TreasuryView:', opps.length);
+      setAllOpportunities(opps);
+    } catch (error) {
+      console.error('Erreur chargement opportunités:', error);
+    }
   };
 
   const connectGoogle = async () => {
@@ -407,6 +423,11 @@ export function DashboardPage() {
         onPeriodChange={setProjectionPeriod}
         selectedStages={projectionSelectedStages}
         onStagesChange={setProjectionSelectedStages}
+      />
+
+      {/* Suivi trésorerie */}
+      <TreasuryView 
+        opportunities={allOpportunities}
       />
 
       {/* Graphique pipeline value par étape */}

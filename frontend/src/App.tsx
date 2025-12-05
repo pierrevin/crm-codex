@@ -17,6 +17,7 @@ import { QuoteDetailPage } from './pages/QuoteDetailPage';
 import { WebhooksPage } from './pages/WebhooksPage';
 import { ExpensesPage } from './pages/ExpensesPage';
 import { ExpenseDetailPage } from './pages/ExpenseDetailPage';
+import { TreasuryPage } from './pages/TreasuryPage';
 
 function App() {
   return (
@@ -41,6 +42,7 @@ function App() {
           <Route path="/webhooks" element={<WebhooksPage />} />
           <Route path="/depenses" element={<ExpensesPage />} />
           <Route path="/depenses/:id" element={<ExpenseDetailPage />} />
+          <Route path="/tresorerie" element={<TreasuryPage />} />
           
           {/* Redirections pour les anciennes URLs */}
           <Route path="/companies" element={<Navigate to="/entreprises" replace />} />

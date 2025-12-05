@@ -13,6 +13,7 @@ enum OpportunityStage {
   PROPOSAL
   NEGOTIATION
   CLOSED_WON
+  FINALIZED
   CLOSED_LOST
 }
 
@@ -46,6 +47,19 @@ enum ExpenseStatus {
   REJECTED
 }
 
+enum RecurrenceType {
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+enum DeboursNoteStatus {
+  DRAFT
+  SENT
+  PAID
+}
+
 model User {
   id                 String          @id @default(cuid())
   email              String          @unique
@@ -60,6 +74,7 @@ model User {
   auditLogs          AuditLog[]
   companiesOwned     Company[]       @relation("CompanyOwner")
   expenses           Expense[]
+  recurringExpenses  RecurringExpense[]
 }
 
 model RefreshToken {
@@ -115,6 +130,8 @@ model Company {
   opportunities Opportunity[]
   quotes     Quote[]
   expenses   Expense[]
+  deboursNotes DeboursNote[]
+  recurringExpenses RecurringExpense[]
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt
 }
@@ -148,6 +165,8 @@ model Opportunity {
   stage       OpportunityStage @default(QUALIFICATION)
   amount      Float?
   closeDate   DateTime?
+  expectedPaymentDate DateTime?
+  taxRate     Decimal?         @db.Decimal(5, 4) // Taux de taxe (0.27 pour 27%)
   contact     Contact?         @relation(fields: [contactId], references: [id])
   contactId   String?
   company     Company?         @relation(fields: [companyId], references: [id])
@@ -156,6 +175,10 @@ model Opportunity {
   ownerId     String?
   activities  Activity[]
   quotes      Quote[]
+  payments    Payment[]
+  expenses    Expense[]
+  deboursNotes DeboursNote[]
+  recurringExpenses RecurringExpense[]
   // Intégrations externes
   googleDriveFolderId String?
   tiimeQuoteId        String?
@@ -280,11 +303,95 @@ model Expense {
   // Statut et validation
   status            ExpenseStatus @default(PENDING)
   notes             String?
+  // Dépenses récurrentes
+  isForecast        Boolean       @default(false) // Indique si c'est une dépense prévisionnelle
+  forecastDate      DateTime?     // Date prévisionnelle de paiement
+  recurringExpense  RecurringExpense? @relation(fields: [recurringExpenseId], references: [id])
+  recurringExpenseId String?      // Lien vers le modèle récurrent
   // Relations
   company           Company?      @relation(fields: [companyId], references: [id])
   companyId         String?       // Fournisseur lié (si trouvé)
   user              User?         @relation(fields: [userId], references: [id])
   userId            String?       // Utilisateur qui a uploadé
+  opportunity       Opportunity?  @relation(fields: [opportunityId], references: [id])
+  opportunityId     String?       // Opportunité liée
+  deboursNotes      DeboursNote[]
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
+}
+
+model Payment {
+  id            String      @id @default(cuid())
+  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  opportunityId String?
+  deboursNote   DeboursNote? @relation(fields: [deboursNoteId], references: [id], onDelete: Cascade)
+  deboursNoteId String?
+  amount        Decimal     @db.Decimal(18, 2) // Montant payé
+  paymentDate   DateTime    @default(now()) // Date de paiement réel
+  taxRate       Decimal     @db.Decimal(5, 4) @default(0.27) // Taux de taxe appliqué
+  taxAmount     Decimal     @db.Decimal(18, 2) // Montant des taxes (calculé)
+  notes         String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+}
+
+model TreasuryBalance {
+  id        String   @id @default(cuid())
+  date      DateTime @unique // Date du solde (unique)
+  balance   Decimal  @db.Decimal(18, 2) // Solde à cette date
+  isManual  Boolean  @default(false) // true si modifié manuellement
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model DeboursNote {
+  id                  String            @id @default(cuid())
+  title               String            // Titre de la note de débours
+  issueDate           DateTime          @default(now()) // Date d'émission
+  expectedPaymentDate DateTime?         // Date prévisionnelle de paiement
+  totalAmount         Decimal           @db.Decimal(18, 2) // Montant total TTC
+  status              DeboursNoteStatus @default(DRAFT) // Statut : Brouillon, Envoyée, Payée
+  googleDocId         String?           // ID du document Google Docs créé
+  googleDocUrl        String?           // URL du document Google Docs
+  notes               String?           // Notes additionnelles
+  // Relations
+  opportunity         Opportunity       @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  opportunityId       String
+  company             Company?          @relation(fields: [companyId], references: [id])
+  companyId           String?           // Client destinataire
+  expenses            Expense[]         // Dépenses incluses dans la note
+  payments            Payment[]         // Paiements reçus pour cette note
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+}
+
+model RecurringExpense {
+  id                String          @id @default(cuid())
+  // Informations de la dépense
+  supplierName      String?         // Nom du fournisseur
+  amountHT          Decimal?        @db.Decimal(18, 2) // Montant HT
+  amountTTC         Decimal?        @db.Decimal(18, 2) // Montant TTC
+  vatAmount         Decimal?        @db.Decimal(18, 2) // Montant TVA
+  vatRate           Decimal?        @db.Decimal(5, 4)  // Taux TVA
+  // Comptabilité
+  accountCode       String?         // Code compte comptable
+  accountLabel       String?         // Libellé du compte
+  // Récurrence
+  recurrenceType    RecurrenceType  @default(MONTHLY) // Type de récurrence
+  paymentDay        Int             // Jour du mois pour le paiement (1-31)
+  startDate         DateTime        // Date de début de la récurrence
+  endDate           DateTime?       // Date de fin optionnelle
+  isActive          Boolean         @default(true) // Pour activer/désactiver
+  notes             String?         // Notes additionnelles
+  // Relations
+  company           Company?        @relation(fields: [companyId], references: [id])
+  companyId         String?         // Fournisseur lié
+  user              User?           @relation(fields: [userId], references: [id])
+  userId            String?          // Utilisateur propriétaire
+  opportunity       Opportunity?    @relation(fields: [opportunityId], references: [id])
+  opportunityId     String?         // Opportunité liée
+  expenses          Expense[]       // Dépenses générées à partir de ce modèle
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
 }

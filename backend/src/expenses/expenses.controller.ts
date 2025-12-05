@@ -15,6 +15,7 @@ import { FastifyRequest } from 'fastify';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { ExpensesService } from './expenses.service';
+import { RecurringExpensesService } from './recurring-expenses.service';
 import { UpdateExpenseDto } from './dto';
 
 @ApiTags('expenses')
@@ -23,6 +24,7 @@ import { UpdateExpenseDto } from './dto';
 export class ExpensesController {
   constructor(
     private readonly expensesService: ExpensesService,
+    private readonly recurringExpensesService: RecurringExpensesService,
     private readonly prisma: PrismaService
   ) {}
 
@@ -307,6 +309,12 @@ export class ExpensesController {
     }
 
     return this.expensesService.delete(id);
+  }
+
+  @Post(':id/validate')
+  @UseGuards(JwtAuthGuard)
+  async validateForecast(@Param('id') id: string) {
+    return this.recurringExpensesService.validateForecastExpense(id);
   }
 }
 

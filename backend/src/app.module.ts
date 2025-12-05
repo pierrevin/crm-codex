@@ -11,11 +11,14 @@ import { ContactsModule } from './contacts/contacts.module';
 import { GoogleModule } from './google/google.module';
 import { ImportsModule } from './imports/imports.module';
 import { OpportunitiesModule } from './opportunities/opportunities.module';
+import { PaymentsModule } from './payments/payments.module';
 import { PrismaModule } from './common/prisma/prisma.module';
 import { UsersModule } from './users/users.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { IntegrationsModule } from './integrations/integrations.module';
 import { ExpensesModule } from './expenses/expenses.module';
+import { TreasuryModule } from './treasury/treasury.module';
+import { DeboursNotesModule } from './debours-notes/debours-notes.module';
 
 @Module({
   imports: [
@@ -35,12 +38,15 @@ import { ExpensesModule } from './expenses/expenses.module';
     ContactsModule,
     CompaniesModule,
     OpportunitiesModule,
+    PaymentsModule,
     ActivitiesModule,
     ImportsModule,
     WebhooksModule,
     GoogleModule,
     IntegrationsModule,
-    ExpensesModule
+    ExpensesModule,
+    TreasuryModule,
+    DeboursNotesModule
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard }

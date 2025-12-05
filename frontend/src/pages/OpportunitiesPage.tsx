@@ -1,16 +1,20 @@
 import { useEffect, useState } from 'react';
-import { PlusIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, CurrencyEuroIcon } from '@heroicons/react/24/outline';
 
 import api from '../services/apiClient';
 import { CompanySearchSelect } from '../components/CompanySearchSelect';
 import { ContactSearchSelect } from '../components/ContactSearchSelect';
+import { PaymentModal } from '../components/PaymentModal';
+import { paymentService, Payment } from '../services/paymentService';
 
 type Opportunity = {
   id: string;
   title: string;
-  stage: 'QUALIFICATION' | 'PROPOSAL' | 'CLOSED_WON' | 'CLOSED_LOST';
+  stage: 'QUALIFICATION' | 'PROPOSAL' | 'CLOSED_WON' | 'FINALIZED' | 'CLOSED_LOST';
   amount?: number;
   closeDate?: string;
+  expectedPaymentDate?: string;
+  taxRate?: number;
   contact?: { id: string; firstName: string; lastName?: string } | null;
   company?: { id: string; name: string } | null;
 };
@@ -26,6 +30,7 @@ const STAGES = {
   QUALIFICATION: { label: 'Qualification', color: 'bg-blue-100 text-blue-700' },
   PROPOSAL: { label: 'Proposition', color: 'bg-purple-100 text-purple-700' },
   CLOSED_WON: { label: 'Gagné', color: 'bg-green-100 text-green-700' },
+  FINALIZED: { label: 'Finalisé / réglé', color: 'bg-emerald-100 text-emerald-700' },
   CLOSED_LOST: { label: 'Perdu', color: 'bg-rose-100 text-rose-700' }
 };
 
@@ -34,14 +39,39 @@ export function OpportunitiesPage() {
   const [view, setView] = useState<'kanban' | 'list'>('kanban');
   const [showModal, setShowModal] = useState(false);
   const [draggedOpp, setDraggedOpp] = useState<Opportunity | null>(null);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [selectedOpportunity, setSelectedOpportunity] = useState<Opportunity | null>(null);
+  const [payments, setPayments] = useState<Payment[]>([]);
 
   useEffect(() => {
     void loadOpportunities();
+    void loadPayments();
   }, []);
 
   const loadOpportunities = async () => {
     const { data } = await api.get<PaginatedResponse<Opportunity>>('/api/opportunities');
       setOpportunities(data.items || data.data || []);
+  };
+
+  const loadPayments = async () => {
+    try {
+      const data = await paymentService.getAll();
+      setPayments(data);
+    } catch (error) {
+      console.error('Erreur chargement paiements:', error);
+    }
+  };
+
+  const handleMarkAsPaid = (opportunity: Opportunity) => {
+    setSelectedOpportunity(opportunity);
+    setShowPaymentModal(true);
+  };
+
+  const handlePaymentSuccess = async () => {
+    await loadPayments();
+    await loadOpportunities();
+    setShowPaymentModal(false);
+    setSelectedOpportunity(null);
   };
 
   const handleDragStart = (opp: Opportunity) => {
@@ -141,32 +171,61 @@ export function OpportunitiesPage() {
                 </div>
               </div>
               <div className="flex-1 space-y-2 p-2 sm:p-3">
-                {opportunitiesByStage[stage]?.map((opp) => (
-                  <div
-                    key={opp.id}
-                    draggable
-                    onDragStart={() => handleDragStart(opp)}
-                    onClick={() => window.location.href = `/opportunites/${opp.id}`}
-                    className={`w-full rounded-lg border border-slate-200 bg-white p-2 sm:p-3 shadow-sm hover:shadow-md transition-all cursor-move text-left ${draggedOpp?.id === opp.id ? 'opacity-50' : ''}`}
-                  >
-                    <h4 className="font-medium text-slate-900 text-xs sm:text-sm mb-1 line-clamp-2">{opp.title}</h4>
-                    {opp.amount && (
-                      <p className="text-xs sm:text-sm font-semibold text-indigo-600 mb-1">
-                        {Number(opp.amount).toFixed(0)} €
-                      </p>
-                    )}
-                    {opp.closeDate && (
-                      <p className="text-xs text-slate-400 mb-1">
-                        📅 {new Date(opp.closeDate).toLocaleDateString('fr-FR', { month: 'short', day: 'numeric' })}
-                      </p>
-                    )}
-                    <p className="text-xs text-slate-500 truncate">
-                      {opp.contact
-                        ? `${opp.contact.firstName} ${opp.contact.lastName ?? ''}`
-                        : opp.company?.name ?? 'Sans client'}
-                    </p>
-                  </div>
-                ))}
+                {opportunitiesByStage[stage]?.map((opp) => {
+                  const hasPayment = payments.some(p => p.opportunityId === opp.id);
+                  return (
+                    <div
+                      key={opp.id}
+                      draggable
+                      onDragStart={() => handleDragStart(opp)}
+                      className={`w-full rounded-lg border border-slate-200 bg-white p-2 sm:p-3 shadow-sm hover:shadow-md transition-all text-left ${draggedOpp?.id === opp.id ? 'opacity-50' : ''}`}
+                    >
+                      <div 
+                        onClick={() => window.location.href = `/opportunites/${opp.id}`}
+                        className="cursor-pointer"
+                      >
+                        <h4 className="font-medium text-slate-900 text-xs sm:text-sm mb-1 line-clamp-2">{opp.title}</h4>
+                        {opp.amount && (
+                          <p className="text-xs sm:text-sm font-semibold text-indigo-600 mb-1">
+                            {Number(opp.amount).toFixed(0)} €
+                          </p>
+                        )}
+                        {opp.closeDate && (
+                          <p className="text-xs text-slate-400 mb-1">
+                            📅 {new Date(opp.closeDate).toLocaleDateString('fr-FR', { month: 'short', day: 'numeric' })}
+                          </p>
+                        )}
+                        {opp.expectedPaymentDate && (
+                          <p className="text-xs text-slate-400 mb-1">
+                            💰 Prévisionnel: {new Date(opp.expectedPaymentDate).toLocaleDateString('fr-FR', { month: 'short', day: 'numeric' })}
+                          </p>
+                        )}
+                        {hasPayment && (
+                          <p className="text-xs text-green-600 mb-1 font-semibold">
+                            ✅ Payé
+                          </p>
+                        )}
+                        <p className="text-xs text-slate-500 truncate">
+                          {opp.contact
+                            ? `${opp.contact.firstName} ${opp.contact.lastName ?? ''}`
+                            : opp.company?.name ?? 'Sans client'}
+                        </p>
+                      </div>
+                      <div className="mt-2 pt-2 border-t border-slate-100">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleMarkAsPaid(opp);
+                          }}
+                          className="w-full flex items-center justify-center gap-1 px-2 py-1 text-xs bg-indigo-50 text-indigo-700 rounded hover:bg-indigo-100"
+                        >
+                          <CurrencyEuroIcon className="h-3 w-3" />
+                          {hasPayment ? 'Ajouter paiement' : 'Marquer comme payé'}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           ))}
@@ -177,37 +236,66 @@ export function OpportunitiesPage() {
         <div className="space-y-3 sm:space-y-0">
           {/* Vue mobile : cartes */}
           <div className="sm:hidden space-y-3">
-            {opportunities.map((opportunity) => (
-              <div
-                key={opportunity.id}
-                onClick={() => window.location.href = `/opportunites/${opportunity.id}`}
-                className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm hover:shadow-md transition-all cursor-pointer"
-              >
-                <div className="flex items-start justify-between mb-2">
-                  <h3 className="font-medium text-slate-900 text-sm flex-1">{opportunity.title}</h3>
-                  <span className={`ml-2 rounded-full px-2 py-1 text-xs font-semibold ${STAGES[opportunity.stage].color}`}>
-                    {STAGES[opportunity.stage].label}
-                  </span>
+            {opportunities.map((opportunity) => {
+              const hasPayment = payments.some(p => p.opportunityId === opportunity.id);
+              return (
+                <div
+                  key={opportunity.id}
+                  className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm hover:shadow-md transition-all"
+                >
+                  <div 
+                    onClick={() => window.location.href = `/opportunites/${opportunity.id}`}
+                    className="cursor-pointer"
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <h3 className="font-medium text-slate-900 text-sm flex-1">{opportunity.title}</h3>
+                      <span className={`ml-2 rounded-full px-2 py-1 text-xs font-semibold ${STAGES[opportunity.stage].color}`}>
+                        {STAGES[opportunity.stage].label}
+                      </span>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold text-indigo-600">
+                        {opportunity.amount !== undefined && opportunity.amount !== null 
+                          ? `${Number(opportunity.amount).toFixed(0)} €` 
+                          : 'Montant non défini'}
+                      </p>
+                      {opportunity.closeDate && (
+                        <p className="text-xs text-slate-400">
+                          📅 {new Date(opportunity.closeDate).toLocaleDateString('fr-FR')}
+                        </p>
+                      )}
+                      {opportunity.expectedPaymentDate && (
+                        <p className="text-xs text-slate-400">
+                          💰 Prévisionnel: {new Date(opportunity.expectedPaymentDate).toLocaleDateString('fr-FR')}
+                        </p>
+                      )}
+                      {hasPayment && (
+                        <p className="text-xs text-green-600 font-semibold">
+                          ✅ Payé
+                        </p>
+                      )}
+                      <p className="text-xs text-slate-500">
+                        {opportunity.contact
+                          ? `${opportunity.contact.firstName} ${opportunity.contact.lastName ?? ''}`
+                          : opportunity.company?.name ?? '-'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-3 pt-3 border-t border-slate-100">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleMarkAsPaid(opportunity);
+                      }}
+                      className="w-full flex items-center justify-center gap-1 px-3 py-2 text-xs bg-indigo-50 text-indigo-700 rounded hover:bg-indigo-100"
+                    >
+                      <CurrencyEuroIcon className="h-4 w-4" />
+                      {hasPayment ? 'Ajouter un paiement' : 'Marquer comme payé'}
+                    </button>
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  <p className="text-sm font-semibold text-indigo-600">
-                    {opportunity.amount !== undefined && opportunity.amount !== null 
-                      ? `${Number(opportunity.amount).toFixed(0)} €` 
-                      : 'Montant non défini'}
-                  </p>
-                  {opportunity.closeDate && (
-                    <p className="text-xs text-slate-400">
-                      📅 {new Date(opportunity.closeDate).toLocaleDateString('fr-FR')}
-                    </p>
-                  )}
-                  <p className="text-xs text-slate-500">
-                    {opportunity.contact
-                      ? `${opportunity.contact.firstName} ${opportunity.contact.lastName ?? ''}`
-                      : opportunity.company?.name ?? '-'}
-                  </p>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* Vue desktop : tableau */}
@@ -220,40 +308,79 @@ export function OpportunitiesPage() {
                     <th className="px-4 py-3">Étape</th>
                     <th className="px-4 py-3">Montant</th>
                     <th className="px-4 py-3">Contact</th>
+                    <th className="px-4 py-3">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {opportunities.map((opportunity) => (
-                    <tr 
-                      key={opportunity.id} 
-                      onClick={() => window.location.href = `/opportunites/${opportunity.id}`}
-                      className="text-sm text-slate-700 cursor-pointer hover:bg-slate-50"
-                    >
-                      <td className="px-4 py-3 font-medium text-slate-900">{opportunity.title}</td>
-                      <td className="px-4 py-3">
-                        <span className={`rounded-full px-2 py-1 text-xs font-semibold ${STAGES[opportunity.stage].color}`}>
-                          {STAGES[opportunity.stage].label}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div>
-                          {opportunity.amount !== undefined && opportunity.amount !== null 
-                            ? `${Number(opportunity.amount).toFixed(2)} €` 
-                            : '-'}
-                        </div>
-                        {opportunity.closeDate && (
-                          <div className="text-xs text-slate-400 mt-1">
-                            📅 {new Date(opportunity.closeDate).toLocaleDateString('fr-FR')}
+                  {opportunities.map((opportunity) => {
+                    const hasPayment = payments.some(p => p.opportunityId === opportunity.id);
+                    return (
+                      <tr 
+                        key={opportunity.id} 
+                        className="text-sm text-slate-700 hover:bg-slate-50"
+                      >
+                        <td 
+                          onClick={() => window.location.href = `/opportunites/${opportunity.id}`}
+                          className="px-4 py-3 font-medium text-slate-900 cursor-pointer"
+                        >
+                          {opportunity.title}
+                        </td>
+                        <td 
+                          onClick={() => window.location.href = `/opportunites/${opportunity.id}`}
+                          className="px-4 py-3 cursor-pointer"
+                        >
+                          <span className={`rounded-full px-2 py-1 text-xs font-semibold ${STAGES[opportunity.stage].color}`}>
+                            {STAGES[opportunity.stage].label}
+                          </span>
+                        </td>
+                        <td 
+                          onClick={() => window.location.href = `/opportunites/${opportunity.id}`}
+                          className="px-4 py-3 cursor-pointer"
+                        >
+                          <div>
+                            {opportunity.amount !== undefined && opportunity.amount !== null 
+                              ? `${Number(opportunity.amount).toFixed(2)} €` 
+                              : '-'}
                           </div>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        {opportunity.contact
-                          ? `${opportunity.contact.firstName} ${opportunity.contact.lastName ?? ''}`
-                          : opportunity.company?.name ?? '-'}
-                      </td>
-                    </tr>
-                  ))}
+                          {opportunity.closeDate && (
+                            <div className="text-xs text-slate-400 mt-1">
+                              📅 {new Date(opportunity.closeDate).toLocaleDateString('fr-FR')}
+                            </div>
+                          )}
+                          {opportunity.expectedPaymentDate && (
+                            <div className="text-xs text-slate-400 mt-1">
+                              💰 {new Date(opportunity.expectedPaymentDate).toLocaleDateString('fr-FR')}
+                            </div>
+                          )}
+                          {hasPayment && (
+                            <div className="text-xs text-green-600 mt-1 font-semibold">
+                              ✅ Payé
+                            </div>
+                          )}
+                        </td>
+                        <td 
+                          onClick={() => window.location.href = `/opportunites/${opportunity.id}`}
+                          className="px-4 py-3 cursor-pointer"
+                        >
+                          {opportunity.contact
+                            ? `${opportunity.contact.firstName} ${opportunity.contact.lastName ?? ''}`
+                            : opportunity.company?.name ?? '-'}
+                        </td>
+                        <td className="px-4 py-3">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleMarkAsPaid(opportunity);
+                            }}
+                            className="flex items-center gap-1 px-2 py-1 text-xs bg-indigo-50 text-indigo-700 rounded hover:bg-indigo-100"
+                          >
+                            <CurrencyEuroIcon className="h-3 w-3" />
+                            {hasPayment ? 'Ajouter' : 'Payer'}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -263,6 +390,21 @@ export function OpportunitiesPage() {
 
 
       {showModal && <CreateOpportunityModal onClose={() => setShowModal(false)} onCreated={loadOpportunities} />}
+      
+      {selectedOpportunity && (
+        <PaymentModal
+          isOpen={showPaymentModal}
+          onClose={() => {
+            setShowPaymentModal(false);
+            setSelectedOpportunity(null);
+          }}
+          opportunityId={selectedOpportunity.id}
+          opportunityTitle={selectedOpportunity.title}
+          opportunityAmount={selectedOpportunity.amount}
+          opportunityTaxRate={selectedOpportunity.taxRate}
+          onSuccess={handlePaymentSuccess}
+        />
+      )}
     </div>
   );
 }
@@ -272,6 +414,7 @@ function CreateOpportunityModal({ onClose, onCreated }: { onClose: () => void; o
   const [stage, setStage] = useState<keyof typeof STAGES>('QUALIFICATION');
   const [amount, setAmount] = useState('');
   const [closeDate, setCloseDate] = useState('');
+  const [expectedPaymentDate, setExpectedPaymentDate] = useState('');
   const [contacts, setContacts] = useState<any[]>([]);
   const [companies, setCompanies] = useState<any[]>([]);
   const [selectedContact, setSelectedContact] = useState<string | undefined>();
@@ -311,6 +454,7 @@ function CreateOpportunityModal({ onClose, onCreated }: { onClose: () => void; o
         stage,
         amount: amount ? parseFloat(amount) : undefined,
         closeDate: closeDate || undefined,
+        expectedPaymentDate: expectedPaymentDate || undefined,
         contactId: selectedContact,
         companyId: selectedCompany
       });
@@ -430,6 +574,15 @@ function CreateOpportunityModal({ onClose, onCreated }: { onClose: () => void; o
               type="date"
               value={closeDate}
               onChange={(e) => setCloseDate(e.target.value)}
+              className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Date paiement prévisionnelle</label>
+            <input
+              type="date"
+              value={expectedPaymentDate}
+              onChange={(e) => setExpectedPaymentDate(e.target.value)}
               className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
             />
           </div>

@@ -60,6 +60,15 @@ serve(async (req) => {
       return json(await scanExpense(req, user.id), 200)
     }
 
+    // Route POST pour créer une dépense sans justificatif
+    if (method === 'POST' && (path === '/' || path === '')) {
+      const user = await authenticateUser(req)
+      if (!user) {
+        return json({ message: 'Unauthorized' }, 401)
+      }
+      return json(await createExpense(await req.json(), user.id), 201)
+    }
+
     if (method === 'PUT' && path.startsWith('/') && path !== '/') {
       const id = path.slice(1)
       const user = await authenticateUser(req)
@@ -124,6 +133,7 @@ async function scanExpense(req: Request, userId: string) {
   const formData = await req.formData()
   const file = formData.get('file')
   const accountCode = formData.get('accountCode')?.toString()
+  const opportunityId = formData.get('opportunityId')?.toString()
 
   if (!(file instanceof File)) {
     throw new Error('File is required')
@@ -176,10 +186,11 @@ async function scanExpense(req: Request, userId: string) {
       fileType: mimeType,
       rawOcrData: ocrDocument,
       userId,
+      opportunityId: opportunityId || null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     })
-    .select('*, company:Company(*), user:User(id,email)')
+    .select('*, company:Company(*), opportunity:Opportunity(*), user:User(id,email)')
     .single()
 
   if (error) {
@@ -193,7 +204,7 @@ async function scanExpense(req: Request, userId: string) {
 async function listExpenses(params: URLSearchParams, defaultUserId?: string) {
   let query = supabaseClient
     .from('Expense')
-    .select('*, company:Company(*), user:User(id,email)')
+    .select('*, company:Company(*), opportunity:Opportunity(*), user:User(id,email)')
     .order('createdAt', { ascending: false })
 
   const userId = params.get('userId') ?? defaultUserId
@@ -207,6 +218,10 @@ async function listExpenses(params: URLSearchParams, defaultUserId?: string) {
   const companyId = params.get('companyId')
   if (companyId) {
     query = query.eq('companyId', companyId)
+  }
+  const opportunityId = params.get('opportunityId')
+  if (opportunityId) {
+    query = query.eq('opportunityId', opportunityId)
   }
   const startDate = params.get('startDate')
   if (startDate) {
@@ -280,6 +295,32 @@ async function deleteExpense(id: string, userId: string) {
     throw new Error(error.message)
   }
   return { success: true }
+}
+
+async function createExpense(payload: ExpensePayload, userId: string) {
+  const expenseData = serializeExpensePayload(payload)
+  expenseData.userId = userId
+  expenseData.status = payload.status || 'VERIFIED' // Par défaut vérifié si pas de justificatif
+  
+  // Générer un ID unique
+  const expenseId = crypto.randomUUID()
+  const now = new Date().toISOString()
+  
+  const { data, error } = await supabaseClient
+    .from('Expense')
+    .insert({
+      id: expenseId,
+      ...expenseData,
+      createdAt: now,
+      updatedAt: now
+    })
+    .select('*, company:Company(*), user:User(id,email)')
+    .single()
+
+  if (error) {
+    throw new Error(error.message)
+  }
+  return data
 }
 
 function serializeExpensePayload(payload: ExpensePayload) {

@@ -143,10 +143,18 @@ export function CompanyDetailPage() {
       setEditSalesNav(companyData.salesNavigatorUrl || '');
       setEditNotes(companyData.notes || '');
       setEditTags((companyData.tags || []).join(', '));
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erreur chargement entreprise:', error);
+      // Si l'entreprise n'est pas trouvée (404), définir company à null
+      if (error.response?.status === 404) {
+        setCompany(null);
+      } else {
+        // Pour les autres erreurs, afficher un message d'erreur
+        console.error('Détails de l\'erreur:', error.response?.data || error.message);
+      }
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleSave = async () => {
