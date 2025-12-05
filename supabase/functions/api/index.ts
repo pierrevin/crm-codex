@@ -177,7 +177,7 @@ serve(async (req) => {
     // ===== RECURRING EXPENSES ROUTES (PRIORITÉ ABSOLUE - AVANT TOUT) =====
     // Cette vérification DOIT être la première après la normalisation du path
     // pour éviter tout conflit avec les routes expenses
-    // Version déployée: 2025-12-05 - Route en priorité absolue
+    // Version déployée: 2025-12-05 21:10 - Route en priorité absolue
     if (path === 'recurring-expenses' && method === 'POST') {
       console.log('[RECURRING EXPENSES POST] Route matched at top level! path:', path, 'method:', method)
       try {
