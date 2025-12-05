@@ -4352,6 +4352,7 @@ serve(async (req) => {
       }
 
       // Générer les dépenses prévisionnelles
+      console.log('[RECURRING EXPENSES GENERATE] Starting generation for recurring expense:', id, 'from', startDate, 'to', endDate)
       const generated = []
       const currentDate = new Date(startDate)
       const finalEndDate = new Date(endDate)
@@ -4406,14 +4407,29 @@ serve(async (req) => {
               .single()
 
             if (!insertError && expense) {
+              console.log('[RECURRING EXPENSES GENERATE] Created forecast expense:', expense.id, 'for date:', paymentDate.toISOString())
               generated.push(expense)
+            } else if (insertError) {
+              console.error('[RECURRING EXPENSES GENERATE] Error creating forecast expense:', insertError)
             }
+          } else {
+            console.log('[RECURRING EXPENSES GENERATE] Forecast expense already exists for date:', paymentDate.toISOString())
           }
         }
 
-        currentDate.setMonth(currentDate.getMonth() + 1)
+        // Passer au mois suivant selon le type de récurrence
+        if (recurringExpense.recurrenceType === 'WEEKLY') {
+          currentDate.setDate(currentDate.getDate() + 7)
+        } else if (recurringExpense.recurrenceType === 'MONTHLY') {
+          currentDate.setMonth(currentDate.getMonth() + 1)
+        } else if (recurringExpense.recurrenceType === 'QUARTERLY') {
+          currentDate.setMonth(currentDate.getMonth() + 3)
+        } else if (recurringExpense.recurrenceType === 'YEARLY') {
+          currentDate.setFullYear(currentDate.getFullYear() + 1)
+        }
       }
 
+      console.log('[RECURRING EXPENSES GENERATE] Generated', generated.length, 'forecast expenses')
       return new Response(
         JSON.stringify(generated),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

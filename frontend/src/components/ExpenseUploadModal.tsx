@@ -487,11 +487,13 @@ export function ExpenseUploadModal({ onClose, opportunityId }: ExpenseUploadModa
           const endDate = new Date(startDate);
           endDate.setMonth(endDate.getMonth() + 12);
           
-          await recurringExpensesService.generateForecast(
+          console.log('[ExpenseUploadModal] Generating forecast expenses for recurring expense:', recurringExpense.id)
+          const generatedExpenses = await recurringExpensesService.generateForecast(
             recurringExpense.id,
             startDate.toISOString(),
             endDate.toISOString()
           );
+          console.log('[ExpenseUploadModal] Generated', generatedExpenses?.length || 0, 'forecast expenses')
         } else {
           // Créer une nouvelle dépense sans fichier
           const dto: CreateExpenseDto = {
