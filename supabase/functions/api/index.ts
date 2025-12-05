@@ -4375,9 +4375,14 @@ serve(async (req) => {
             .single()
 
           if (!existing) {
+            // Générer un ID unique pour la dépense prévisionnelle
+            const expenseId = crypto.randomUUID()
+            const now = new Date().toISOString()
+            
             const { data: expense, error: insertError } = await supabase
               .from('Expense')
               .insert({
+                id: expenseId,
                 supplierName: recurringExpense.supplierName,
                 amountHT: recurringExpense.amountHT,
                 amountTTC: recurringExpense.amountTTC,
@@ -4393,7 +4398,9 @@ serve(async (req) => {
                 companyId: recurringExpense.companyId,
                 userId: recurringExpense.userId,
                 opportunityId: recurringExpense.opportunityId,
-                notes: recurringExpense.notes
+                notes: recurringExpense.notes,
+                createdAt: now,
+                updatedAt: now
               })
               .select()
               .single()
