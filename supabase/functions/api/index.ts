@@ -197,11 +197,16 @@ serve(async (req) => {
         const body = await req.json()
         console.log('[RECURRING EXPENSES POST] Body received:', JSON.stringify(body, null, 2))
         
+        // Générer un ID unique
+        const recurringExpenseId = crypto.randomUUID()
+        const now = new Date().toISOString()
+        
         const insertData: any = {
+          id: recurringExpenseId,
           ...body,
           userId: userId || body.userId || null,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
+          createdAt: now,
+          updatedAt: now
         }
         
         console.log('[RECURRING EXPENSES POST] Insert data:', JSON.stringify(insertData, null, 2))
