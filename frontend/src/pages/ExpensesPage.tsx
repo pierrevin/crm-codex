@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { PlusIcon, MagnifyingGlassIcon, CheckIcon, ArrowPathIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, MagnifyingGlassIcon, CheckIcon, PencilIcon, TrashIcon } from '@heroicons/react/24/outline';
 import { expensesService, Expense, ExpenseStatus, ExpenseFilters } from '../services/expensesService';
 import { recurringExpensesService, RecurringExpense } from '../services/recurringExpensesService';
 import { ExpenseUploadModal } from '../components/ExpenseUploadModal';
@@ -53,23 +53,17 @@ export function ExpensesPage() {
     }
   };
 
-  const handleGenerateForecast = async (recurringExpenseId: string) => {
+  const handleDeleteRecurring = async (id: string) => {
+    if (!confirm('Êtes-vous sûr de vouloir supprimer cette dépense récurrente ?')) {
+      return;
+    }
     try {
-      const startDate = new Date();
-      const endDate = new Date();
-      endDate.setMonth(endDate.getMonth() + 12);
-      
-      const generated = await recurringExpensesService.generateForecast(
-        recurringExpenseId,
-        startDate.toISOString(),
-        endDate.toISOString()
-      );
-      
-      alert(`${generated.length} dépense(s) prévisionnelle(s) générée(s)`);
-      await loadExpenses(); // Recharger la liste des dépenses
+      await recurringExpensesService.delete(id);
+      await loadRecurringExpenses();
+      await loadExpenses(); // Recharger aussi les dépenses car les prévisionnelles liées peuvent être affectées
     } catch (error) {
-      console.error('Erreur génération prévisionnelles:', error);
-      alert('Erreur lors de la génération des dépenses prévisionnelles');
+      console.error('Erreur suppression:', error);
+      alert('Erreur lors de la suppression');
     }
   };
 
@@ -192,16 +186,27 @@ export function ExpensesPage() {
                      recurring.recurrenceType === 'WEEKLY' ? 'Hebdomadaire' :
                      recurring.recurrenceType === 'QUARTERLY' ? 'Trimestriel' : 'Annuel'}
                     {' • Jour '}{recurring.paymentDay}
+                    {recurring.isActive ? '' : ' • Inactif'}
                   </div>
                 </div>
-                <button
-                  onClick={() => handleGenerateForecast(recurring.id)}
-                  className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
-                  title="Générer les dépenses prévisionnelles pour les 12 prochains mois"
-                >
-                  <ArrowPathIcon className="w-4 h-4" />
-                  Générer prévisions
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => navigate(`/depenses-recurrentes/${recurring.id}`)}
+                    className="inline-flex items-center gap-2 px-3 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 transition-colors text-sm"
+                    title="Modifier cette dépense récurrente"
+                  >
+                    <PencilIcon className="w-4 h-4" />
+                    Modifier
+                  </button>
+                  <button
+                    onClick={() => handleDeleteRecurring(recurring.id)}
+                    className="inline-flex items-center gap-2 px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm"
+                    title="Supprimer cette dépense récurrente"
+                  >
+                    <TrashIcon className="w-4 h-4" />
+                    Supprimer
+                  </button>
+                </div>
               </div>
             ))}
           </div>

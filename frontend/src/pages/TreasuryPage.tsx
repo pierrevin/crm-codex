@@ -113,10 +113,13 @@ export function TreasuryPage() {
           startDate: startDate.toISOString(),
           endDate: endDate.toISOString()
         }).catch(() => []),
+        // Récupérer toutes les dépenses (vérifiées ET prévisionnelles) dans la période
         expensesService.getAll({
-          status: 'VERIFIED',
           startDate: startDate.toISOString().split('T')[0],
           endDate: endDate.toISOString().split('T')[0]
+        }).then(expenses => {
+          // Filtrer pour garder les dépenses vérifiées OU les dépenses prévisionnelles
+          return expenses.filter((e: any) => e.status === 'VERIFIED' || e.isForecast === true);
         }).catch(() => []),
         api.get('/api/opportunities', {
           params: { limit: 1000 }
