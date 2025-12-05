@@ -14,7 +14,7 @@ import {
   LinkIcon
 } from '@heroicons/react/24/outline';
 import { expensesService, Expense, ExpenseStatus, UpdateExpenseDto } from '../services/expensesService';
-import { recurringExpensesService, RecurringExpense, RecurrenceType, CreateRecurringExpenseDto } from '../services/recurringExpensesService';
+import { recurringExpensesService, RecurringExpense } from '../services/recurringExpensesService';
 import { AccountCodeSelector } from '../components/AccountCodeSelector';
 import api from '../services/apiClient';
 
@@ -57,13 +57,8 @@ export function ExpenseDetailPage() {
   const [selectedOpportunityId, setSelectedOpportunityId] = useState<string>('');
   const [opportunities, setOpportunities] = useState<any[]>([]);
   
-  // États pour la récurrence
-  const [isRecurring, setIsRecurring] = useState(false);
+  // État pour afficher les infos de récurrence (lecture seule)
   const [recurringExpense, setRecurringExpense] = useState<RecurringExpense | null>(null);
-  const [recurrenceType, setRecurrenceType] = useState<RecurrenceType>('MONTHLY');
-  const [paymentDay, setPaymentDay] = useState('1');
-  const [recurrenceStartDate, setRecurrenceStartDate] = useState('');
-  const [recurrenceEndDate, setRecurrenceEndDate] = useState('');
 
   useEffect(() => {
     if (id) {
@@ -103,21 +98,15 @@ export function ExpenseDetailPage() {
       setNotes(data.notes || '');
       setSelectedOpportunityId(data.opportunityId || '');
       
-      // Charger les informations de récurrence si la dépense est liée à un modèle récurrent
+      // Charger les informations de récurrence si la dépense est liée à un modèle récurrent (lecture seule)
       if (data.recurringExpenseId) {
-        setIsRecurring(true);
         try {
           const recurring = await recurringExpensesService.getById(data.recurringExpenseId);
           setRecurringExpense(recurring);
-          setRecurrenceType(recurring.recurrenceType);
-          setPaymentDay(recurring.paymentDay.toString());
-          setRecurrenceStartDate(recurring.startDate ? recurring.startDate.split('T')[0] : '');
-          setRecurrenceEndDate(recurring.endDate ? recurring.endDate.split('T')[0] : '');
         } catch (error) {
           console.error('Erreur chargement dépense récurrente:', error);
         }
       } else {
-        setIsRecurring(false);
         setRecurringExpense(null);
       }
     } catch (error) {
@@ -148,73 +137,6 @@ export function ExpenseDetailPage() {
       };
 
       await expensesService.update(expense.id, updateData);
-      
-      // Gérer la récurrence
-      if (isRecurring) {
-        if (expense.recurringExpenseId && recurringExpense) {
-          // Mettre à jour le modèle récurrent existant
-          await recurringExpensesService.update(expense.recurringExpenseId, {
-            supplierName: supplierName || undefined,
-            amountHT: amountHT ? parseFloat(amountHT) : undefined,
-            amountTTC: amountTTC ? parseFloat(amountTTC) : undefined,
-            vatRate: vatRate ? parseFloat(vatRate) / 100 : undefined,
-            vatAmount: vatAmount ? parseFloat(vatAmount) : undefined,
-            accountCode: accountCode || undefined,
-            accountLabel: accountLabel || undefined,
-            recurrenceType,
-            paymentDay: parseInt(paymentDay, 10),
-            startDate: recurrenceStartDate ? new Date(recurrenceStartDate + 'T00:00:00').toISOString() : undefined,
-            endDate: recurrenceEndDate ? new Date(recurrenceEndDate + 'T00:00:00').toISOString() : undefined,
-            notes: notes || undefined,
-            opportunityId: selectedOpportunityId || undefined,
-          });
-        } else {
-          // Créer un nouveau modèle récurrent
-          const recurringDto: CreateRecurringExpenseDto = {
-            supplierName: supplierName || undefined,
-            amountHT: amountHT ? parseFloat(amountHT) : undefined,
-            amountTTC: amountTTC ? parseFloat(amountTTC) : undefined,
-            vatRate: vatRate ? parseFloat(vatRate) / 100 : undefined,
-            vatAmount: vatAmount ? parseFloat(vatAmount) : undefined,
-            accountCode: accountCode || undefined,
-            accountLabel: accountLabel || undefined,
-            recurrenceType,
-            paymentDay: parseInt(paymentDay, 10),
-            startDate: recurrenceStartDate ? new Date(recurrenceStartDate + 'T00:00:00').toISOString() : new Date().toISOString(),
-            endDate: recurrenceEndDate ? new Date(recurrenceEndDate + 'T00:00:00').toISOString() : undefined,
-            isActive: true,
-            notes: notes || undefined,
-            opportunityId: selectedOpportunityId || undefined,
-          };
-
-          const newRecurringExpense = await recurringExpensesService.create(recurringDto);
-          
-          // Lier la dépense au modèle récurrent
-          await expensesService.update(expense.id, {
-            recurringExpenseId: newRecurringExpense.id
-          });
-          
-          // Générer les dépenses prévisionnelles pour les 12 prochains mois
-          const startDate = new Date(recurrenceStartDate);
-          const endDate = new Date(startDate);
-          endDate.setMonth(endDate.getMonth() + 12);
-          
-          await recurringExpensesService.generateForecast(
-            newRecurringExpense.id,
-            startDate.toISOString(),
-            endDate.toISOString()
-          );
-        }
-      } else if (expense.recurringExpenseId && !isRecurring) {
-        // Si on décoche la récurrence, on peut soit supprimer le lien, soit désactiver le modèle
-        // Pour l'instant, on garde juste le lien mais on ne génère plus de nouvelles dépenses
-        // (le modèle reste mais devient inactif)
-        if (recurringExpense) {
-          await recurringExpensesService.update(expense.recurringExpenseId, {
-            isActive: false
-          });
-        }
-      }
       
       setIsEditing(false);
       await loadExpense(expense.id);
@@ -401,9 +323,6 @@ export function ExpenseDetailPage() {
                   <button
                     onClick={() => {
                       // Initialiser les champs de récurrence si nécessaire
-                      if (!expense.recurringExpenseId && !recurrenceStartDate) {
-                        setRecurrenceStartDate(invoiceDate || new Date().toISOString().split('T')[0]);
-                      }
                       setIsEditing(true);
                     }}
                     className="inline-flex items-center gap-2 px-4 py-2 bg-white text-slate-700 border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors font-medium"
@@ -659,146 +578,42 @@ export function ExpenseDetailPage() {
               )}
             </div>
 
-            {/* Dépense récurrente */}
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-              <h2 className="text-lg font-semibold text-slate-900 mb-4">Dépense récurrente</h2>
-              {isEditing ? (
-                <div className="space-y-4">
-                  <div className="flex items-center">
-                    <input
-                      type="checkbox"
-                      id="isRecurring"
-                      checked={isRecurring}
-                      onChange={(e) => setIsRecurring(e.target.checked)}
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-slate-300 rounded"
-                    />
-                    <label htmlFor="isRecurring" className="ml-2 block text-sm font-medium text-slate-700">
-                      Cette dépense est récurrente (salaire, loyer, etc.)
-                    </label>
+            {/* Info dépense récurrente (lecture seule) */}
+            {expense.recurringExpenseId && recurringExpense && (
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+                <h2 className="text-lg font-semibold text-slate-900 mb-4">Dépense récurrente</h2>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
+                      Générée depuis un modèle récurrent
+                    </span>
+                    <span className={`text-xs font-medium ${
+                      recurringExpense.isActive ? 'text-green-700' : 'text-slate-500'
+                    }`}>
+                      {recurringExpense.isActive ? '• Modèle actif' : '• Modèle inactif'}
+                    </span>
                   </div>
-
-                  {isRecurring && (
-                    <div className="space-y-4 bg-slate-50 p-4 rounded-lg">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-sm font-medium text-slate-700 mb-2">
-                            Type de récurrence *
-                          </label>
-                          <select
-                            value={recurrenceType}
-                            onChange={(e) => setRecurrenceType(e.target.value as RecurrenceType)}
-                            required={isRecurring}
-                            className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                          >
-                            <option value="WEEKLY">Hebdomadaire</option>
-                            <option value="MONTHLY">Mensuelle</option>
-                            <option value="QUARTERLY">Trimestrielle</option>
-                            <option value="YEARLY">Annuelle</option>
-                          </select>
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-medium text-slate-700 mb-2">
-                            Jour de paiement (1-31) *
-                          </label>
-                          <input
-                            type="number"
-                            min="1"
-                            max="31"
-                            value={paymentDay}
-                            onChange={(e) => setPaymentDay(e.target.value)}
-                            required={isRecurring}
-                            className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-sm font-medium text-slate-700 mb-2">
-                            Date de début *
-                          </label>
-                          <input
-                            type="date"
-                            value={recurrenceStartDate}
-                            onChange={(e) => setRecurrenceStartDate(e.target.value)}
-                            required={isRecurring}
-                            className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-medium text-slate-700 mb-2">
-                            Date de fin (optionnel)
-                          </label>
-                          <input
-                            type="date"
-                            value={recurrenceEndDate}
-                            onChange={(e) => setRecurrenceEndDate(e.target.value)}
-                            className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                          />
-                        </div>
-                      </div>
-
-                      <p className="text-xs text-slate-500">
-                        Les dépenses prévisionnelles seront générées automatiquement chaque mois à partir de la date de début.
-                      </p>
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <span className="text-slate-500">Type:</span>
+                      <span className="ml-2 font-medium text-slate-900">
+                        {recurringExpense.recurrenceType === 'MONTHLY' ? 'Mensuelle' :
+                         recurringExpense.recurrenceType === 'WEEKLY' ? 'Hebdomadaire' :
+                         recurringExpense.recurrenceType === 'QUARTERLY' ? 'Trimestrielle' :
+                         recurringExpense.recurrenceType === 'YEARLY' ? 'Annuelle' : recurringExpense.recurrenceType}
+                      </span>
                     </div>
-                  )}
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {expense.recurringExpenseId && recurringExpense ? (
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <span className="inline-flex px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
-                          Dépense récurrente
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4 text-sm">
-                        <div>
-                          <span className="text-slate-500">Type de récurrence:</span>
-                          <span className="ml-2 font-medium text-slate-900">
-                            {recurringExpense.recurrenceType === 'MONTHLY' ? 'Mensuelle' :
-                             recurringExpense.recurrenceType === 'WEEKLY' ? 'Hebdomadaire' :
-                             recurringExpense.recurrenceType === 'QUARTERLY' ? 'Trimestrielle' :
-                             recurringExpense.recurrenceType === 'YEARLY' ? 'Annuelle' : recurringExpense.recurrenceType}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-slate-500">Jour de paiement:</span>
-                          <span className="ml-2 font-medium text-slate-900">{recurringExpense.paymentDay}</span>
-                        </div>
-                        <div>
-                          <span className="text-slate-500">Date de début:</span>
-                          <span className="ml-2 font-medium text-slate-900">
-                            {recurringExpense.startDate ? formatDate(recurringExpense.startDate) : '-'}
-                          </span>
-                        </div>
-                        {recurringExpense.endDate && (
-                          <div>
-                            <span className="text-slate-500">Date de fin:</span>
-                            <span className="ml-2 font-medium text-slate-900">
-                              {formatDate(recurringExpense.endDate)}
-                            </span>
-                          </div>
-                        )}
-                        <div>
-                          <span className="text-slate-500">Statut:</span>
-                          <span className={`ml-2 font-medium ${
-                            recurringExpense.isActive ? 'text-green-700' : 'text-slate-500'
-                          }`}>
-                            {recurringExpense.isActive ? 'Actif' : 'Inactif'}
-                          </span>
-                        </div>
-                      </div>
+                    <div>
+                      <span className="text-slate-500">Jour de paiement:</span>
+                      <span className="ml-2 font-medium text-slate-900">{recurringExpense.paymentDay}</span>
                     </div>
-                  ) : (
-                    <p className="text-slate-400 text-sm">Cette dépense n'est pas récurrente</p>
-                  )}
+                  </div>
+                  <p className="text-xs text-slate-500 mt-2">
+                    Pour modifier le modèle récurrent, allez dans la page Dépenses → Section "Dépenses récurrentes"
+                  </p>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
 
           {/* Sidebar */}
