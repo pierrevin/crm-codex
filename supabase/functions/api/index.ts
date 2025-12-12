@@ -3327,6 +3327,7 @@ serve(async (req) => {
       
       // Si un Google Doc existe, le mettre à jour automatiquement
       if (deboursNoteData.googleDocId) {
+        console.log('Mise à jour du Google Doc déclenchée pour deboursNote:', deboursNoteData.id, 'googleDocId:', deboursNoteData.googleDocId)
         try {
           // Utiliser la même logique que generate-doc mais pour mettre à jour
           const opportunity = deboursNoteData.opportunity
@@ -3334,6 +3335,7 @@ serve(async (req) => {
           
           const at = await getValidAccessToken(userId)
           if (at && opportunity && company) {
+            console.log('Conditions OK pour mise à jour Google Doc - accessToken:', !!at, 'opportunity:', !!opportunity, 'company:', !!company)
             // Fonction pour formater les dates
             const formatDate = (date: Date | string | null | undefined): string => {
               if (!date) return ''
@@ -3353,7 +3355,12 @@ serve(async (req) => {
             const totalFrais = typeof deboursNoteData.totalAmount === 'string' ? parseFloat(deboursNoteData.totalAmount) : (deboursNoteData.totalAmount || 0)
             const totalGeneral = montantFacture + totalFrais
             
+            // Calculer la nouvelle valeur pour num_facture
+            const newNumFacture = (deboursNoteData.invoiceNumber && deboursNoteData.invoiceNumber.trim() !== '') ? deboursNoteData.invoiceNumber : ((opportunity.tiimeInvoiceIds && opportunity.tiimeInvoiceIds[0]) || 'N/A')
+            console.log('Mapping num_facture - deboursNoteData.invoiceNumber:', deboursNoteData.invoiceNumber, 'opportunity.tiimeInvoiceIds:', opportunity.tiimeInvoiceIds, '-> utiliser:', newNumFacture)
+            
             // Préparer les replacements
+            // Pour les mises à jour, on doit remplacer soit le placeholder (si encore présent), soit les valeurs courantes
             const replacements: Record<string, string> = {
               'Date du jour': formatDate(new Date()),
               'nom_client': company?.name || '',
@@ -3362,11 +3369,7 @@ serve(async (req) => {
               'Ville': company?.addressCity || '',
               'titre_note_debours': deboursNoteData.title,
               'date prestation': formatDate(opportunity.closeDate),
-              'num_facture': (() => {
-                const numFacture = (deboursNoteData.invoiceNumber && deboursNoteData.invoiceNumber.trim() !== '') ? deboursNoteData.invoiceNumber : ((opportunity.tiimeInvoiceIds && opportunity.tiimeInvoiceIds[0]) || 'N/A')
-                console.log('Mapping num_facture - deboursNoteData.invoiceNumber:', deboursNoteData.invoiceNumber, 'opportunity.tiimeInvoiceIds:', opportunity.tiimeInvoiceIds, '-> utiliser:', numFacture)
-                return numFacture
-              })(),
+              'num_facture': newNumFacture,
               'date_facture': formatDate(opportunity.closeDate),
               'montant_facture': formatAmount(opportunity.amount),
               'total_frais': formatAmount(deboursNoteData.totalAmount),
@@ -3425,29 +3428,81 @@ serve(async (req) => {
               const content = docData.body?.content || []
               const textRuns = findTextRuns(content)
               
-              // Remplacer les placeholders
-              for (const [key, value] of Object.entries(replacements)) {
+              // Remplacer les placeholders ou les valeurs existantes
+              // Pour num_facture, on cherche d'abord le placeholder, sinon on cherche les valeurs courantes possibles
+              const processedPlaceholders = new Set<string>()
+              
+              for (const [key, newValue] of Object.entries(replacements)) {
                 const placeholder = `{{${key}}}`
                 
-                for (const textRun of textRuns) {
-                  if (textRun.text.includes(placeholder)) {
+                // Éviter de traiter le même placeholder plusieurs fois
+                if (processedPlaceholders.has(placeholder)) continue
+                
+                // Vérifier si le placeholder existe dans le document
+                const placeholderExists = textRuns.some(textRun => textRun.text.includes(placeholder))
+                
+                if (placeholderExists) {
+                  // Le placeholder existe encore, on le remplace
+                  processedPlaceholders.add(placeholder)
+                  requests.push({
+                    replaceAllText: {
+                      containsText: {
+                        text: placeholder,
+                        matchCase: false
+                      },
+                      replaceText: newValue
+                    }
+                  })
+                  console.log(`Ajout requête de remplacement pour ${placeholder} -> ${newValue}`)
+                } else if (key === 'num_facture') {
+                  // Pour num_facture, si le placeholder n'existe plus, on cherche les valeurs courantes possibles
+                  // et on les remplace par la nouvelle valeur
+                  const possibleOldValues = [
+                    'N/A',
+                    opportunity.tiimeInvoiceIds?.[0] || '',
+                    deboursNoteData.invoiceNumber || ''
+                  ].filter(v => v && v.trim() !== '' && v !== newValue)
+                  
+                  // On cherche aussi dans tout le texte pour trouver la valeur actuelle
+                  // Si on trouve une valeur différente de la nouvelle, on la remplace
+                  for (const oldValue of possibleOldValues) {
+                    const oldValueExists = textRuns.some(textRun => textRun.text.includes(oldValue))
+                    if (oldValueExists && oldValue !== newValue) {
+                      requests.push({
+                        replaceAllText: {
+                          containsText: {
+                            text: oldValue,
+                            matchCase: true
+                          },
+                          replaceText: newValue
+                        }
+                      })
+                      console.log(`Ajout requête de remplacement pour valeur existante "${oldValue}" -> "${newValue}"`)
+                      break // Une seule substitution par mise à jour pour éviter les conflits
+                    }
+                  }
+                  
+                  // Si aucune ancienne valeur trouvée mais qu'on a une nouvelle valeur non vide, 
+                  // on essaie de remplacer "N/A" qui est souvent la valeur par défaut
+                  if (newValue !== 'N/A' && textRuns.some(textRun => textRun.text.includes('N/A'))) {
                     requests.push({
                       replaceAllText: {
                         containsText: {
-                          text: placeholder,
-                          matchCase: false
+                          text: 'N/A',
+                          matchCase: true
                         },
-                        replaceText: value
+                        replaceText: newValue
                       }
                     })
-                    break
+                    console.log(`Ajout requête de remplacement pour "N/A" -> "${newValue}"`)
                   }
                 }
               }
               
               // Appliquer les remplacements
               if (requests.length > 0) {
-                await fetch(`https://docs.googleapis.com/v1/documents/${deboursNoteData.googleDocId}:batchUpdate`, {
+                console.log(`Mise à jour du Google Doc avec ${requests.length} remplacements`)
+                const updateResponse = await fetch(`https://docs.googleapis.com/v1/documents/${deboursNoteData.googleDocId}:batchUpdate`, {
                   method: 'POST',
                   headers: {
                     Authorization: `Bearer ${at}`,
@@ -3455,6 +3510,15 @@ serve(async (req) => {
                   },
                   body: JSON.stringify({ requests })
                 })
+                
+                if (!updateResponse.ok) {
+                  const errorText = await updateResponse.text()
+                  console.error('Erreur lors de la mise à jour du Google Doc:', updateResponse.status, errorText)
+                } else {
+                  console.log('Google Doc mis à jour avec succès')
+                }
+              } else {
+                console.log('Aucune requête de remplacement à appliquer')
               }
             }
           }
