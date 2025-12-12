@@ -18,8 +18,18 @@ export function OpportunityMetrics({
   deboursNotes = []
 }: OpportunityMetricsProps) {
   // Calculer le CA total
-  // CA = montant de l'opportunité (les factures Tiime sont déjà incluses dans le montant)
-  const ca = opportunityAmount || 0;
+  // Par défaut : CA = montant de l'opportunité
+  // + Ajouter le total des notes de débours (qui représentent des encaissements supplémentaires)
+  let ca = opportunityAmount || 0;
+  
+  // Ajouter le montant total des notes de débours au CA
+  if (deboursNotes && deboursNotes.length > 0) {
+    const totalDebours = deboursNotes.reduce((sum, note) => {
+      const amount = note.totalAmount ? parseFloat(note.totalAmount.toString()) : 0;
+      return sum + amount;
+    }, 0);
+    ca += totalDebours;
+  }
 
   // Identifier les dépenses liées aux notes de débours
   // Les notes de débours sont des encaissements qui compensent ces dépenses
