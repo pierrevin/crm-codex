@@ -1,8 +1,13 @@
 -- CreateEnum
-CREATE TYPE "ExpenseStatus" AS ENUM ('PENDING', 'PROCESSED', 'VERIFIED', 'REJECTED');
+DO $$ 
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'ExpenseStatus') THEN
+        CREATE TYPE "ExpenseStatus" AS ENUM ('PENDING', 'PROCESSED', 'VERIFIED', 'REJECTED');
+    END IF;
+END $$;
 
 -- CreateTable
-CREATE TABLE "Expense" (
+CREATE TABLE IF NOT EXISTS "Expense" (
     "id" TEXT NOT NULL,
     "supplierName" TEXT,
     "invoiceNumber" TEXT,
@@ -28,20 +33,41 @@ CREATE TABLE "Expense" (
 );
 
 -- AddForeignKey
-ALTER TABLE "Expense" ADD CONSTRAINT "Expense_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "Company"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+DO $$ 
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint 
+        WHERE conname = 'Expense_companyId_fkey'
+    ) THEN
+        ALTER TABLE "Expense" 
+        ADD CONSTRAINT "Expense_companyId_fkey" 
+        FOREIGN KEY ("companyId") REFERENCES "Company"("id") 
+        ON DELETE SET NULL ON UPDATE CASCADE;
+    END IF;
+END $$;
 
--- AddForeignKey
-ALTER TABLE "Expense" ADD CONSTRAINT "Expense_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+DO $$ 
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint 
+        WHERE conname = 'Expense_userId_fkey'
+    ) THEN
+        ALTER TABLE "Expense" 
+        ADD CONSTRAINT "Expense_userId_fkey" 
+        FOREIGN KEY ("userId") REFERENCES "User"("id") 
+        ON DELETE SET NULL ON UPDATE CASCADE;
+    END IF;
+END $$;
 
 -- CreateIndex
-CREATE INDEX "Expense_companyId_idx" ON "Expense"("companyId");
+CREATE INDEX IF NOT EXISTS "Expense_companyId_idx" ON "Expense"("companyId");
 
 -- CreateIndex
-CREATE INDEX "Expense_userId_idx" ON "Expense"("userId");
+CREATE INDEX IF NOT EXISTS "Expense_userId_idx" ON "Expense"("userId");
 
 -- CreateIndex
-CREATE INDEX "Expense_status_idx" ON "Expense"("status");
+CREATE INDEX IF NOT EXISTS "Expense_status_idx" ON "Expense"("status");
 
 -- CreateIndex
-CREATE INDEX "Expense_invoiceDate_idx" ON "Expense"("invoiceDate");
+CREATE INDEX IF NOT EXISTS "Expense_invoiceDate_idx" ON "Expense"("invoiceDate");
 

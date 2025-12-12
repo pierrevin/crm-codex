@@ -34,6 +34,7 @@ export class DeboursNotesService {
         opportunityId: dto.opportunityId,
         companyId: dto.companyId || opportunity.companyId,
         notes: dto.notes,
+        templateId: dto.templateId,
         expenses: dto.expenseIds ? {
           connect: dto.expenseIds.map(id => ({ id }))
         } : undefined
@@ -164,7 +165,7 @@ export class DeboursNotesService {
   /**
    * Génère un document Google Docs depuis le template pour une note de débours
    */
-  async generateFromGoogleDocs(deboursNoteId: string, userId: string) {
+  async generateFromGoogleDocs(deboursNoteId: string, userId: string, templateId?: string) {
     const deboursNote = await this.findOne(deboursNoteId);
     const opportunity = deboursNote.opportunity;
     const company = deboursNote.company || opportunity.company;
@@ -188,12 +189,12 @@ export class DeboursNotesService {
     // Préparer les données pour le template
     const replacements = this.mapDeboursNoteToTemplate(deboursNote, opportunity, company);
 
-    // Template ID du modèle Google Docs
-    const templateId = '1Zn5P7uqHnIj_-85-Qh6roVHe2WwCt8gBamEdZYMA7CA';
+    // Utiliser le templateId fourni, celui stocké dans la note, ou le template par défaut
+    const finalTemplateId = templateId || deboursNote.templateId || '1Zn5P7uqHnIj_-85-Qh6roVHe2WwCt8gBamEdZYMA7CA';
 
     // Créer le document
     const { id: googleDocId, url: googleDocUrl } = await this.googleDocs.createFromTemplate(
-      templateId,
+      finalTemplateId,
       replacements,
       opportunityFolderId,
       userId

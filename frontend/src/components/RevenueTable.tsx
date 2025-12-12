@@ -7,9 +7,10 @@ import {
   DocumentTextIcon,
   ReceiptRefundIcon,
   BanknotesIcon,
-  PencilIcon
+  PencilIcon,
+  TrashIcon
 } from '@heroicons/react/24/outline';
-import { Payment } from '../services/paymentService';
+import { Payment, paymentService } from '../services/paymentService';
 import { DeboursNote } from '../services/deboursNoteService';
 import { PaymentModal } from './PaymentModal';
 
@@ -47,6 +48,7 @@ interface RevenueTableProps {
   onRefresh: () => void;
   onCreateQuote?: () => void;
   onCreateDeboursNote?: () => void;
+  onEditDeboursNote?: (note: DeboursNote) => void;
 }
 
 export function RevenueTable({
@@ -60,12 +62,14 @@ export function RevenueTable({
   opportunityTaxRate,
   onRefresh,
   onCreateQuote,
-  onCreateDeboursNote
+  onCreateDeboursNote,
+  onEditDeboursNote
 }: RevenueTableProps) {
   const navigate = useNavigate();
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedRevenueItem, setSelectedRevenueItem] = useState<RevenueItem | null>(null);
+  const [selectedPayment, setSelectedPayment] = useState<Payment | null>(null); // Pour édition
 
   // Construire les items de recette
   const buildRevenueItems = (): RevenueItem[] => {
@@ -111,6 +115,7 @@ export function RevenueTable({
         date: note.issueDate,
         status: note.status,
         deboursNoteId: note.id,
+        url: note.googleDocUrl, // Ajouter l'URL du Google Docs
         payments: notePayments
       });
     });
@@ -210,13 +215,36 @@ export function RevenueTable({
 
   const handleAddPayment = (item: RevenueItem) => {
     setSelectedRevenueItem(item);
+    setSelectedPayment(null); // Mode création
     setShowPaymentModal(true);
+  };
+
+  const handleEditPayment = (payment: Payment, item: RevenueItem) => {
+    setSelectedRevenueItem(item);
+    setSelectedPayment(payment); // Mode édition
+    setShowPaymentModal(true);
+  };
+
+  const handleDeletePayment = async (payment: Payment, e: React.MouseEvent) => {
+    e.stopPropagation(); // Empêcher l'ouverture du modal d'édition
+    
+    if (!window.confirm('Êtes-vous sûr de vouloir supprimer ce paiement ?')) {
+      return;
+    }
+
+    try {
+      await paymentService.delete(payment.id);
+      onRefresh();
+    } catch (error: any) {
+      alert(error.response?.data?.message || 'Erreur lors de la suppression du paiement');
+    }
   };
 
   const handlePaymentSuccess = () => {
     onRefresh();
     setShowPaymentModal(false);
     setSelectedRevenueItem(null);
+    setSelectedPayment(null);
   };
 
   return (
@@ -321,9 +349,11 @@ export function RevenueTable({
                             href={item.url}
                             target="_blank"
                             rel="noreferrer"
-                            className="text-xs font-medium text-indigo-600 hover:text-indigo-700"
+                            className="text-xs font-medium text-indigo-600 hover:text-indigo-700 flex items-center gap-1"
                             onClick={(e) => e.stopPropagation()}
+                            title="Ouvrir le document Google Docs"
                           >
+                            <DocumentTextIcon className="h-3.5 w-3.5" />
                             {item.title}
                           </a>
                         ) : (
@@ -346,47 +376,92 @@ export function RevenueTable({
                         {getStatusBadge(item)}
                       </td>
                       <td className="px-2 py-2">
-                        {item.type === 'QUOTE' && item.quoteId ? (
-                          <button
-                            onClick={() => navigate(`/quotes/${item.quoteId}?opportunityId=${opportunityId}`)}
-                            className="flex items-center gap-1 rounded-md bg-indigo-600 px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-indigo-700"
-                          >
-                            <PencilIcon className="h-3 w-3" />
-                            Éditer
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => handleAddPayment(item)}
-                            className="flex items-center gap-1 rounded-md bg-indigo-600 px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-indigo-700"
-                          >
-                            <PlusIcon className="h-3 w-3" />
-                            Paiement
-                          </button>
-                        )}
+                        <div className="flex items-center gap-1">
+                          {item.type === 'QUOTE' && item.quoteId ? (
+                            <button
+                              onClick={() => navigate(`/quotes/${item.quoteId}?opportunityId=${opportunityId}`)}
+                              className="flex items-center gap-1 rounded-md bg-indigo-600 px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-indigo-700"
+                            >
+                              <PencilIcon className="h-3 w-3" />
+                              Éditer
+                            </button>
+                          ) : item.type === 'DEBOURS_NOTE' && item.deboursNoteId ? (
+                            <>
+                              {onEditDeboursNote && (
+                                <button
+                                  onClick={() => {
+                                    const note = deboursNotes.find(n => n.id === item.deboursNoteId);
+                                    if (note) onEditDeboursNote(note);
+                                  }}
+                                  className="flex items-center gap-1 rounded-md bg-indigo-600 px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-indigo-700"
+                                >
+                                  <PencilIcon className="h-3 w-3" />
+                                  Éditer
+                                </button>
+                              )}
+                              <button
+                                onClick={() => handleAddPayment(item)}
+                                className="flex items-center gap-1 rounded-md bg-green-600 px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-green-700"
+                              >
+                                <PlusIcon className="h-3 w-3" />
+                                Paiement
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              onClick={() => handleAddPayment(item)}
+                              className="flex items-center gap-1 rounded-md bg-indigo-600 px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-indigo-700"
+                            >
+                              <PlusIcon className="h-3 w-3" />
+                              Paiement
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                     {/* Lignes de paiements expansibles */}
                     {isExpanded && item.payments.length > 0 && (
                       <>
                         {item.payments.map((payment) => (
-                          <tr key={payment.id} className="bg-slate-50">
+                          <tr 
+                            key={payment.id} 
+                            className="bg-slate-50 hover:bg-slate-100"
+                          >
                             <td></td>
-                            <td colSpan={2} className="px-2 py-1.5 pl-8">
+                            <td 
+                              colSpan={2} 
+                              className="px-2 py-1.5 pl-8 cursor-pointer"
+                              onClick={() => handleEditPayment(payment, item)}
+                            >
                               <div className="flex items-center gap-1.5">
                                 <BanknotesIcon className="h-3.5 w-3.5 text-slate-400" />
                                 <span className="text-xs text-slate-600">Paiement</span>
                               </div>
                             </td>
-                            <td className="px-2 py-1.5 text-xs text-slate-600">
+                            <td 
+                              className="px-2 py-1.5 text-xs text-slate-600 cursor-pointer"
+                              onClick={() => handleEditPayment(payment, item)}
+                            >
                               {formatDate(payment.paymentDate)}
                             </td>
                             <td></td>
-                            <td className="px-2 py-1.5 text-right text-xs font-medium text-slate-900">
+                            <td 
+                              className="px-2 py-1.5 text-right text-xs font-medium text-slate-900 cursor-pointer"
+                              onClick={() => handleEditPayment(payment, item)}
+                            >
                               {formatCurrency(parseFloat(payment.amount.toString()))}
                             </td>
                             <td></td>
                             <td></td>
-                            <td></td>
+                            <td className="px-2 py-1.5">
+                              <button
+                                onClick={(e) => handleDeletePayment(payment, e)}
+                                className="flex items-center gap-1 rounded-md bg-red-600 px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-red-700"
+                                title="Supprimer le paiement"
+                              >
+                                <TrashIcon className="h-3 w-3" />
+                              </button>
+                            </td>
                           </tr>
                         ))}
                       </>
@@ -400,20 +475,22 @@ export function RevenueTable({
       )}
 
       {/* Modal de paiement */}
-      {selectedRevenueItem && showPaymentModal && (
+      {showPaymentModal && (
         <PaymentModal
           isOpen={showPaymentModal}
           onClose={() => {
             setShowPaymentModal(false);
             setSelectedRevenueItem(null);
+            setSelectedPayment(null);
           }}
-          opportunityId={opportunityId}
-          opportunityTitle={opportunityTitle}
-          opportunityAmount={opportunityAmount}
-          opportunityTaxRate={opportunityTaxRate}
-          deboursNoteId={selectedRevenueItem.deboursNoteId}
-          deboursNoteTitle={selectedRevenueItem.deboursNoteId ? selectedRevenueItem.title : undefined}
-          deboursNoteAmount={selectedRevenueItem.deboursNoteId ? selectedRevenueItem.amount : undefined}
+          payment={selectedPayment || undefined}
+          opportunityId={selectedPayment?.opportunityId || (selectedRevenueItem ? opportunityId : undefined)}
+          opportunityTitle={selectedPayment?.opportunity?.title || (selectedRevenueItem ? opportunityTitle : undefined)}
+          opportunityAmount={selectedRevenueItem ? opportunityAmount : undefined}
+          opportunityTaxRate={selectedRevenueItem ? opportunityTaxRate : undefined}
+          deboursNoteId={selectedPayment?.deboursNoteId || selectedRevenueItem?.deboursNoteId}
+          deboursNoteTitle={selectedPayment?.deboursNote?.title || (selectedRevenueItem?.deboursNoteId ? selectedRevenueItem.title : undefined)}
+          deboursNoteAmount={selectedRevenueItem?.deboursNoteId ? selectedRevenueItem.amount : undefined}
           onSuccess={handlePaymentSuccess}
         />
       )}

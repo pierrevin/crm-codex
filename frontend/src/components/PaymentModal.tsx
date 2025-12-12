@@ -1,10 +1,11 @@
 import { useState, FormEvent, useEffect } from 'react';
-import { XMarkIcon } from '@heroicons/react/24/outline';
-import { paymentService, CreatePaymentDto } from '../services/paymentService';
+import { XMarkIcon, TrashIcon } from '@heroicons/react/24/outline';
+import { paymentService, CreatePaymentDto, UpdatePaymentDto, Payment } from '../services/paymentService';
 
 interface PaymentModalProps {
   isOpen: boolean;
   onClose: () => void;
+  payment?: Payment; // Paiement existant pour mode édition
   opportunityId?: string;
   opportunityTitle?: string;
   opportunityAmount?: number;
@@ -18,6 +19,7 @@ interface PaymentModalProps {
 export function PaymentModal({
   isOpen,
   onClose,
+  payment, // Paiement existant pour mode édition
   opportunityId,
   opportunityTitle,
   opportunityAmount,
@@ -27,24 +29,35 @@ export function PaymentModal({
   deboursNoteAmount,
   onSuccess
 }: PaymentModalProps) {
+  const isEditMode = !!payment;
   const [amount, setAmount] = useState<string>('');
   const [paymentDate, setPaymentDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [taxRate, setTaxRate] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
   const [loading, setLoading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
-      const amount = deboursNoteAmount || opportunityAmount;
-      setAmount(amount?.toString() || '');
-      // Notes de débours : pas de taxe (0%), opportunités : taux par défaut ou 27%
-      setTaxRate(deboursNoteId ? '0' : (opportunityTaxRate ? (opportunityTaxRate * 100).toString() : '27'));
-      setPaymentDate(new Date().toISOString().split('T')[0]);
-      setNotes('');
+      if (payment) {
+        // Mode édition : pré-remplir avec les données du paiement existant
+        setAmount(payment.amount.toString());
+        setPaymentDate(new Date(payment.paymentDate).toISOString().split('T')[0]);
+        setTaxRate((payment.taxRate * 100).toString());
+        setNotes(payment.notes || '');
+      } else {
+        // Mode création : valeurs par défaut
+        const amount = deboursNoteAmount || opportunityAmount;
+        setAmount(amount?.toString() || '');
+        // Notes de débours : pas de taxe (0%), opportunités : taux par défaut ou 27%
+        setTaxRate(deboursNoteId ? '0' : (opportunityTaxRate ? (opportunityTaxRate * 100).toString() : '27'));
+        setPaymentDate(new Date().toISOString().split('T')[0]);
+        setNotes('');
+      }
       setError(null);
     }
-  }, [isOpen, opportunityAmount, opportunityTaxRate, deboursNoteId, deboursNoteAmount]);
+  }, [isOpen, payment, opportunityAmount, opportunityTaxRate, deboursNoteId, deboursNoteAmount]);
 
   if (!isOpen) return null;
 
@@ -54,22 +67,54 @@ export function PaymentModal({
     setError(null);
 
     try {
-      const dto: CreatePaymentDto = {
-        opportunityId: opportunityId || undefined,
-        deboursNoteId: deboursNoteId || undefined,
-        amount: parseFloat(amount),
-        paymentDate: paymentDate ? new Date(paymentDate + 'T00:00:00').toISOString() : undefined,
-        taxRate: taxRate ? parseFloat(taxRate) / 100 : undefined,
-        notes: notes || undefined
-      };
-
-      await paymentService.create(dto);
+      if (isEditMode && payment) {
+        // Mode édition
+        const dto: UpdatePaymentDto = {
+          amount: parseFloat(amount),
+          paymentDate: paymentDate ? new Date(paymentDate + 'T00:00:00').toISOString() : undefined,
+          taxRate: taxRate ? parseFloat(taxRate) / 100 : undefined,
+          notes: notes || undefined
+        };
+        await paymentService.update(payment.id, dto);
+      } else {
+        // Mode création
+        const dto: CreatePaymentDto = {
+          opportunityId: opportunityId || undefined,
+          deboursNoteId: deboursNoteId || undefined,
+          amount: parseFloat(amount),
+          paymentDate: paymentDate ? new Date(paymentDate + 'T00:00:00').toISOString() : undefined,
+          taxRate: taxRate ? parseFloat(taxRate) / 100 : undefined,
+          notes: notes || undefined
+        };
+        await paymentService.create(dto);
+      }
       onSuccess();
       onClose();
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Erreur lors de la création du paiement');
+      setError(err.response?.data?.message || `Erreur lors de ${isEditMode ? 'la modification' : 'la création'} du paiement`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!payment) return;
+    
+    if (!window.confirm('Êtes-vous sûr de vouloir supprimer ce paiement ?')) {
+      return;
+    }
+
+    setDeleting(true);
+    setError(null);
+
+    try {
+      await paymentService.delete(payment.id);
+      onSuccess();
+      onClose();
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Erreur lors de la suppression du paiement');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -82,7 +127,7 @@ export function PaymentModal({
       <div className="bg-white rounded-lg shadow-xl w-full max-w-md p-6">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-semibold text-slate-900">
-            Marquer comme payé
+            {isEditMode ? 'Modifier le paiement' : 'Marquer comme payé'}
           </h2>
           <button
             onClick={onClose}
@@ -93,10 +138,10 @@ export function PaymentModal({
         </div>
 
         <p className="text-sm text-slate-600 mb-4">
-          {deboursNoteId ? (
-            <>Note de débours : <span className="font-medium">{deboursNoteTitle}</span></>
+          {payment?.deboursNoteId || deboursNoteId ? (
+            <>Note de débours : <span className="font-medium">{payment?.deboursNote?.title || deboursNoteTitle}</span></>
           ) : (
-            <>Opportunité : <span className="font-medium">{opportunityTitle}</span></>
+            <>Opportunité : <span className="font-medium">{payment?.opportunity?.title || opportunityTitle}</span></>
           )}
         </p>
 
@@ -136,24 +181,26 @@ export function PaymentModal({
             </div>
 
             <div>
-              <div className="flex items-center space-x-2 mb-2">
-                <input
-                  type="checkbox"
-                  id="isDebours"
-                  checked={taxRate === '0' || taxRate === '0.00'}
-                  onChange={(e) => {
-                    if (e.target.checked) {
-                      setTaxRate('0');
-                    } else {
-                      setTaxRate(opportunityTaxRate ? (opportunityTaxRate * 100).toString() : '27');
-                    }
-                  }}
-                  className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                />
-                <label htmlFor="isDebours" className="text-sm text-slate-700">
-                  Note de débours (non soumise à taxe)
-                </label>
-              </div>
+              {!isEditMode && (
+                <div className="flex items-center space-x-2 mb-2">
+                  <input
+                    type="checkbox"
+                    id="isDebours"
+                    checked={taxRate === '0' || taxRate === '0.00'}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setTaxRate('0');
+                      } else {
+                        setTaxRate(opportunityTaxRate ? (opportunityTaxRate * 100).toString() : '27');
+                      }
+                    }}
+                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <label htmlFor="isDebours" className="text-sm text-slate-700">
+                    Note de débours (non soumise à taxe)
+                  </label>
+                </div>
+              )}
               <label className="block text-sm font-medium text-slate-700 mb-1">
                 Taux de taxe (%)
               </label>
@@ -190,21 +237,35 @@ export function PaymentModal({
             </div>
           </div>
 
-          <div className="mt-6 flex justify-end space-x-3">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 rounded-md hover:bg-slate-200"
-            >
-              Annuler
-            </button>
-            <button
-              type="submit"
-              disabled={loading || !amount}
-              className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50"
-            >
-              {loading ? 'Enregistrement...' : 'Enregistrer'}
-            </button>
+          <div className="mt-6 flex justify-between items-center">
+            {isEditMode && (
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={deleting}
+                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-md hover:bg-red-700 disabled:opacity-50 transition-colors"
+              >
+                <TrashIcon className="h-4 w-4" />
+                {deleting ? 'Suppression...' : 'Supprimer'}
+              </button>
+            )}
+            {!isEditMode && <div />}
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 rounded-md hover:bg-slate-200"
+              >
+                Annuler
+              </button>
+              <button
+                type="submit"
+                disabled={loading || !amount}
+                className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {loading ? 'Enregistrement...' : isEditMode ? 'Modifier' : 'Enregistrer'}
+              </button>
+            </div>
           </div>
         </form>
       </div>

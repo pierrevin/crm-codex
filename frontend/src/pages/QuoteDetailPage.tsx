@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { TrashIcon } from '@heroicons/react/24/outline';
 import api from '../services/apiClient';
 import { QuoteForm } from '../components/QuoteForm';
 
@@ -36,6 +37,7 @@ export function QuoteDetailPage() {
   const [loading, setLoading] = useState(!isNew);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const opportunityId = searchParams.get('opportunityId');
   const companyId = searchParams.get('companyId');
@@ -193,6 +195,30 @@ export function QuoteDetailPage() {
     }
   };
 
+  const handleDelete = async () => {
+    if (!id || isNew) return;
+    
+    if (!window.confirm('Êtes-vous sûr de vouloir supprimer ce devis ? Cette action est irréversible.')) {
+      return;
+    }
+
+    setDeleting(true);
+    setError(null);
+
+    try {
+      await api.delete(`/api/quotes/${id}`);
+      // Rediriger vers l'opportunité si on venait d'une opportunité
+      if (opportunityId) {
+        navigate(`/opportunites/${opportunityId}`);
+      } else {
+        navigate('/opportunites');
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Erreur lors de la suppression du devis');
+      setDeleting(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-50 p-6">
@@ -222,10 +248,20 @@ export function QuoteDetailPage() {
           </nav>
         )}
         
-        <div className="mb-6">
+        <div className="mb-6 flex items-center justify-between">
           <h1 className="text-2xl font-bold text-slate-900">
             {isNew ? 'Créer un devis' : 'Modifier le devis'}
           </h1>
+          {!isNew && id && (
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-md hover:bg-red-700 disabled:opacity-50 transition-colors"
+            >
+              <TrashIcon className="h-4 w-4" />
+              {deleting ? 'Suppression...' : 'Supprimer le devis'}
+            </button>
+          )}
         </div>
 
         {error && (

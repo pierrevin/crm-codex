@@ -34,6 +34,14 @@ export interface TreasuryForecast {
     expectedPaymentDate: string | null;
     opportunityId: string;
   }>;
+  deboursNotesForecast?: Array<{
+    id: string;
+    totalAmount: number;
+    issueDate: string;
+    expectedPaymentDate: string;
+    opportunityId: string;
+    totalFrais: number; // Montant calculé depuis les dépenses (frais uniquement)
+  }>;
   finalizedExpenses?: Array<{
     amountTTC: number | null;
     amountHT: number | null;

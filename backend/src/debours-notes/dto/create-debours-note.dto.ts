@@ -45,5 +45,10 @@ export class CreateDeboursNoteDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  templateId?: string;
 }
 

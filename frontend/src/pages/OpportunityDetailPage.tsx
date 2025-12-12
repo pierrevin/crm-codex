@@ -65,6 +65,7 @@ export function OpportunityDetailPage() {
   const [taxRate, setTaxRate] = useState<number | undefined>(undefined);
   const [deboursNotes, setDeboursNotes] = useState<DeboursNote[]>([]);
   const [showDeboursNoteModal, setShowDeboursNoteModal] = useState(false);
+  const [editingDeboursNote, setEditingDeboursNote] = useState<DeboursNote | undefined>(undefined);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [showExpenseModal, setShowExpenseModal] = useState(false);
   const [isGeneralInfoCollapsed, setIsGeneralInfoCollapsed] = useState(true);
@@ -644,7 +645,14 @@ export function OpportunityDetailPage() {
             opportunityTaxRate={taxRate}
             onRefresh={refreshAllData}
             onCreateQuote={() => navigate(`/quotes/new?opportunityId=${id}`)}
-            onCreateDeboursNote={() => setShowDeboursNoteModal(true)}
+            onCreateDeboursNote={() => {
+              setEditingDeboursNote(undefined);
+              setShowDeboursNoteModal(true);
+            }}
+            onEditDeboursNote={(note) => {
+              setEditingDeboursNote(note);
+              setShowDeboursNoteModal(true);
+            }}
           />
 
           {/* Section Dépenses */}
@@ -718,12 +726,17 @@ export function OpportunityDetailPage() {
       {showDeboursNoteModal && id && (
         <DeboursNoteModal
           isOpen={showDeboursNoteModal}
-          onClose={() => setShowDeboursNoteModal(false)}
+          onClose={() => {
+            setShowDeboursNoteModal(false);
+            setEditingDeboursNote(undefined);
+          }}
           opportunityId={id}
           opportunityTitle={opportunity.title}
+          deboursNote={editingDeboursNote}
           onSuccess={async () => {
             await loadDeboursNotes(id);
             setShowDeboursNoteModal(false);
+            setEditingDeboursNote(undefined);
             await refreshAllData();
           }}
         />

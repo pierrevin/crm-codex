@@ -1,8 +1,13 @@
 -- CreateEnum
-CREATE TYPE "QuoteStatus" AS ENUM ('DRAFT', 'SENT', 'ACCEPTED', 'REJECTED', 'EXPIRED');
+DO $$ 
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'QuoteStatus') THEN
+        CREATE TYPE "QuoteStatus" AS ENUM ('DRAFT', 'SENT', 'ACCEPTED', 'REJECTED', 'EXPIRED');
+    END IF;
+END $$;
 
 -- CreateTable
-CREATE TABLE "Quote" (
+CREATE TABLE IF NOT EXISTS "Quote" (
     "id" TEXT NOT NULL,
     "label" TEXT NOT NULL,
     "quoteNumber" TEXT,
@@ -23,7 +28,7 @@ CREATE TABLE "Quote" (
 );
 
 -- CreateTable
-CREATE TABLE "QuoteItem" (
+CREATE TABLE IF NOT EXISTS "QuoteItem" (
     "id" TEXT NOT NULL,
     "label" TEXT NOT NULL,
     "description" TEXT,
@@ -43,20 +48,51 @@ CREATE TABLE "QuoteItem" (
 );
 
 -- AddForeignKey
-ALTER TABLE "Quote" ADD CONSTRAINT "Quote_opportunityId_fkey" FOREIGN KEY ("opportunityId") REFERENCES "Opportunity"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+DO $$ 
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint 
+        WHERE conname = 'Quote_opportunityId_fkey'
+    ) THEN
+        ALTER TABLE "Quote" 
+        ADD CONSTRAINT "Quote_opportunityId_fkey" 
+        FOREIGN KEY ("opportunityId") REFERENCES "Opportunity"("id") 
+        ON DELETE SET NULL ON UPDATE CASCADE;
+    END IF;
+END $$;
 
--- AddForeignKey
-ALTER TABLE "Quote" ADD CONSTRAINT "Quote_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "Company"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+DO $$ 
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint 
+        WHERE conname = 'Quote_companyId_fkey'
+    ) THEN
+        ALTER TABLE "Quote" 
+        ADD CONSTRAINT "Quote_companyId_fkey" 
+        FOREIGN KEY ("companyId") REFERENCES "Company"("id") 
+        ON DELETE SET NULL ON UPDATE CASCADE;
+    END IF;
+END $$;
 
--- AddForeignKey
-ALTER TABLE "QuoteItem" ADD CONSTRAINT "QuoteItem_quoteId_fkey" FOREIGN KEY ("quoteId") REFERENCES "Quote"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ 
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint 
+        WHERE conname = 'QuoteItem_quoteId_fkey'
+    ) THEN
+        ALTER TABLE "QuoteItem" 
+        ADD CONSTRAINT "QuoteItem_quoteId_fkey" 
+        FOREIGN KEY ("quoteId") REFERENCES "Quote"("id") 
+        ON DELETE CASCADE ON UPDATE CASCADE;
+    END IF;
+END $$;
 
 -- CreateIndex
-CREATE INDEX "Quote_opportunityId_idx" ON "Quote"("opportunityId");
+CREATE INDEX IF NOT EXISTS "Quote_opportunityId_idx" ON "Quote"("opportunityId");
 
 -- CreateIndex
-CREATE INDEX "Quote_companyId_idx" ON "Quote"("companyId");
+CREATE INDEX IF NOT EXISTS "Quote_companyId_idx" ON "Quote"("companyId");
 
 -- CreateIndex
-CREATE INDEX "QuoteItem_quoteId_idx" ON "QuoteItem"("quoteId");
+CREATE INDEX IF NOT EXISTS "QuoteItem_quoteId_idx" ON "QuoteItem"("quoteId");
 

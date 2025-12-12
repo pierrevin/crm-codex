@@ -115,3 +115,4 @@
 - Bouton "Supprimer" : Supprime le modèle (les dépenses prévisionnelles restent)
 
 **Note** : Modifier un modèle ne modifie PAS les dépenses prévisionnelles déjà générées. Seules les nouvelles générations utiliseront les nouvelles valeurs.
+

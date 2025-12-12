@@ -134,6 +134,19 @@ export function TreasuryMonthlyView({
       }
     });
 
+    // Traiter les notes de débours en prévisionnel (comme les opportunités)
+    // Utiliser le montant totalFrais (calculé depuis les dépenses) et non totalAmount
+    (forecast?.deboursNotesForecast || []).forEach(debours => {
+      if (!debours.expectedPaymentDate || !debours.totalFrais) return;
+      
+      const paymentDate = new Date(debours.expectedPaymentDate);
+      const monthKey = `${paymentDate.getFullYear()}-${String(paymentDate.getMonth() + 1).padStart(2, '0')}`;
+      if (data[monthKey]) {
+        // Utiliser totalFrais (montant des dépenses) et non totalAmount
+        data[monthKey].encaissementsPrevisionnels += debours.totalFrais;
+      }
+    });
+
     // Traiter les encaissements réels (paiements)
     payments.forEach(payment => {
       const paymentDate = new Date(payment.paymentDate);

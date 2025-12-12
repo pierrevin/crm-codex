@@ -178,3 +178,4 @@ export function RecurringExpenseEditForm({ recurring, onSave, onCancel }: Recurr
     </form>
   );
 }
+

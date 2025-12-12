@@ -30,6 +30,7 @@ export interface CreateDeboursNoteDto {
   companyId?: string;
   expenseIds?: string[];
   notes?: string;
+  templateId?: string;
 }
 
 export interface UpdateDeboursNoteDto extends Partial<CreateDeboursNoteDto> {}
@@ -68,8 +69,8 @@ export const deboursNoteService = {
     return data;
   },
 
-  async generateDoc(id: string): Promise<DeboursNote> {
-    const { data } = await api.post<DeboursNote>(`/api/debours-notes/${id}/generate-doc`);
+  async generateDoc(id: string, templateId?: string): Promise<DeboursNote> {
+    const { data } = await api.post<DeboursNote>(`/api/debours-notes/${id}/generate-doc`, { templateId });
     return data;
   }
 };

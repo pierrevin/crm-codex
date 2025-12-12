@@ -1,9 +1,15 @@
 -- Migration pour ajouter les notes de débours et relations Expense -> Opportunity
+-- À exécuter dans Supabase SQL Editor
 
 -- Créer l'enum DeboursNoteStatus
-CREATE TYPE "DeboursNoteStatus" AS ENUM ('DRAFT', 'SENT', 'PAID');
+DO $$ 
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'DeboursNoteStatus') THEN
+        CREATE TYPE "DeboursNoteStatus" AS ENUM ('DRAFT', 'SENT', 'PAID');
+    END IF;
+END $$;
 
--- Ajouter la colonne opportunityId à Expense
+-- Ajouter la colonne opportunityId à Expense si elle n'existe pas
 ALTER TABLE "Expense" ADD COLUMN IF NOT EXISTS "opportunityId" TEXT;
 
 -- Ajouter la foreign key pour Expense -> Opportunity
@@ -112,8 +118,27 @@ CREATE UNIQUE INDEX IF NOT EXISTS "_DeboursNoteToExpense_AB_unique" ON "_Debours
 CREATE INDEX IF NOT EXISTS "_DeboursNoteToExpense_B_index" ON "_DeboursNoteToExpense"("B");
 
 -- Modifier Payment pour supporter DeboursNote
-ALTER TABLE "Payment" ALTER COLUMN "opportunityId" DROP NOT NULL;
-ALTER TABLE "Payment" ADD COLUMN IF NOT EXISTS "deboursNoteId" TEXT;
+DO $$ 
+BEGIN
+    -- Rendre opportunityId nullable si ce n'est pas déjà fait
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'Payment' 
+        AND column_name = 'opportunityId' 
+        AND is_nullable = 'NO'
+    ) THEN
+        ALTER TABLE "Payment" ALTER COLUMN "opportunityId" DROP NOT NULL;
+    END IF;
+    
+    -- Ajouter deboursNoteId si elle n'existe pas
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'Payment' 
+        AND column_name = 'deboursNoteId'
+    ) THEN
+        ALTER TABLE "Payment" ADD COLUMN "deboursNoteId" TEXT;
+    END IF;
+END $$;
 
 -- Ajouter la foreign key pour Payment -> DeboursNote
 DO $$ 

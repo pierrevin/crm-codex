@@ -354,6 +354,7 @@ model DeboursNote {
   status              DeboursNoteStatus @default(DRAFT) // Statut : Brouillon, Envoyée, Payée
   googleDocId         String?           // ID du document Google Docs créé
   googleDocUrl        String?           // URL du document Google Docs
+  templateId         String?           // ID du modèle Google Docs utilisé
   notes               String?           // Notes additionnelles
   // Relations
   opportunity         Opportunity       @relation(fields: [opportunityId], references: [id], onDelete: Cascade)

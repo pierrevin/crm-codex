@@ -13,6 +13,7 @@ interface DeboursNoteModalProps {
   opportunityId: string;
   opportunityTitle: string;
   onSuccess: () => void;
+  deboursNote?: DeboursNote; // Pour l'édition
 }
 
 export function DeboursNoteModal({
@@ -20,13 +21,16 @@ export function DeboursNoteModal({
   onClose,
   opportunityId,
   opportunityTitle,
-  onSuccess
+  onSuccess,
+  deboursNote
 }: DeboursNoteModalProps) {
+  const isEditMode = !!deboursNote;
   const [title, setTitle] = useState<string>('');
   const [issueDate, setIssueDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [expectedPaymentDate, setExpectedPaymentDate] = useState<string>('');
   const [totalAmount, setTotalAmount] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [availableExpenses, setAvailableExpenses] = useState<Expense[]>([]);
@@ -48,12 +52,25 @@ export function DeboursNoteModal({
 
   useEffect(() => {
     if (isOpen) {
-      setTitle(`Note de débours - ${opportunityTitle}`);
-      setIssueDate(new Date().toISOString().split('T')[0]);
-      setExpectedPaymentDate('');
-      setTotalAmount('');
-      setNotes('');
-      setSelectedExpenseIds([]);
+      if (deboursNote) {
+        // Mode édition
+        setTitle(deboursNote.title);
+        setIssueDate(deboursNote.issueDate ? new Date(deboursNote.issueDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
+        setExpectedPaymentDate(deboursNote.expectedPaymentDate ? new Date(deboursNote.expectedPaymentDate).toISOString().split('T')[0] : '');
+        setTotalAmount(deboursNote.totalAmount?.toString() || '');
+        setNotes(deboursNote.notes || '');
+        setSelectedTemplateId(deboursNote.templateId || '');
+        setSelectedExpenseIds(deboursNote.expenses?.map(e => e.id) || []);
+      } else {
+        // Mode création
+        setTitle(`Note de débours - ${opportunityTitle}`);
+        setIssueDate(new Date().toISOString().split('T')[0]);
+        setExpectedPaymentDate('');
+        setTotalAmount('');
+        setNotes('');
+        setSelectedTemplateId('');
+        setSelectedExpenseIds([]);
+      }
       setError(null);
       setShowCreateExpense(false);
       setSelectedSupplierId('');
@@ -69,7 +86,7 @@ export function DeboursNoteModal({
       });
       void loadAvailableExpenses();
     }
-  }, [isOpen, opportunityId, opportunityTitle]);
+  }, [isOpen, opportunityId, opportunityTitle, deboursNote]);
 
   const loadAvailableExpenses = async () => {
     try {
@@ -100,34 +117,52 @@ export function DeboursNoteModal({
     setError(null);
 
     try {
-      const dto: CreateDeboursNoteDto = {
-        title,
-        issueDate: issueDate ? new Date(issueDate + 'T00:00:00').toISOString() : undefined,
-        expectedPaymentDate: expectedPaymentDate ? new Date(expectedPaymentDate + 'T00:00:00').toISOString() : undefined,
-        totalAmount: parseFloat(totalAmount),
-        opportunityId,
-        expenseIds: selectedExpenseIds.length > 0 ? selectedExpenseIds : undefined,
-        notes: notes || undefined,
-        status: 'DRAFT'
-      };
+      if (isEditMode && deboursNote) {
+        // Mode édition
+        const updateDto = {
+          title,
+          issueDate: issueDate ? new Date(issueDate + 'T00:00:00').toISOString() : undefined,
+          expectedPaymentDate: expectedPaymentDate ? new Date(expectedPaymentDate + 'T00:00:00').toISOString() : undefined,
+          totalAmount: parseFloat(totalAmount),
+          expenseIds: selectedExpenseIds.length > 0 ? selectedExpenseIds : undefined,
+          notes: notes || undefined,
+          templateId: selectedTemplateId || undefined,
+        };
 
-      const created = await deboursNoteService.create(dto);
-      
-      // Générer automatiquement le document Google Docs
-      setGeneratingDoc(true);
-      try {
-        await deboursNoteService.generateDoc(created.id);
-      } catch (docError: any) {
-        console.error('Erreur génération document:', docError);
-        // Ne pas bloquer si la génération échoue
-        setError('Note créée mais erreur lors de la génération du document Google Docs. Vous pourrez le générer manuellement.');
+        await deboursNoteService.update(deboursNote.id, updateDto);
+        // Le Google Docs sera mis à jour automatiquement par l'API si googleDocId existe
+      } else {
+        // Mode création
+        const dto: CreateDeboursNoteDto = {
+          title,
+          issueDate: issueDate ? new Date(issueDate + 'T00:00:00').toISOString() : undefined,
+          expectedPaymentDate: expectedPaymentDate ? new Date(expectedPaymentDate + 'T00:00:00').toISOString() : undefined,
+          totalAmount: parseFloat(totalAmount),
+          opportunityId,
+          expenseIds: selectedExpenseIds.length > 0 ? selectedExpenseIds : undefined,
+          notes: notes || undefined,
+          templateId: selectedTemplateId || undefined,
+          status: 'DRAFT'
+        };
+
+        const created = await deboursNoteService.create(dto);
+        
+        // Générer automatiquement le document Google Docs
+        setGeneratingDoc(true);
+        try {
+          await deboursNoteService.generateDoc(created.id, selectedTemplateId || undefined);
+        } catch (docError: any) {
+          console.error('Erreur génération document:', docError);
+          // Ne pas bloquer si la génération échoue
+          setError('Note créée mais erreur lors de la génération du document Google Docs. Vous pourrez le générer manuellement.');
+        }
+        setGeneratingDoc(false);
       }
-      setGeneratingDoc(false);
 
       onSuccess();
       onClose();
     } catch (err: any) {
-      setError(err.response?.data?.message || err.message || 'Erreur lors de la création de la note de débours');
+      setError(err.response?.data?.message || err.message || `Erreur lors de la ${isEditMode ? 'modification' : 'création'} de la note de débours`);
       setGeneratingDoc(false);
     } finally {
       setLoading(false);
@@ -170,6 +205,11 @@ export function DeboursNoteModal({
 
   const handleCreateExpense = async (e: FormEvent) => {
     e.preventDefault();
+    e.stopPropagation(); // Empêcher la propagation au formulaire parent
+    // Empêcher aussi la propagation de l'événement au formulaire parent
+    if (e.nativeEvent) {
+      e.nativeEvent.stopImmediatePropagation();
+    }
     setCreatingExpense(true);
     setError(null);
 
@@ -235,7 +275,7 @@ export function DeboursNoteModal({
       <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-semibold text-slate-900">
-            Créer une note de débours
+            {isEditMode ? 'Modifier la note de débours' : 'Créer une note de débours'}
           </h2>
           <button
             onClick={onClose}
@@ -255,7 +295,12 @@ export function DeboursNoteModal({
           </div>
         )}
 
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} onClick={(e) => {
+          // Si on clique sur le formulaire de création de dépense, ne pas déclencher le submit du formulaire parent
+          if ((e.target as HTMLElement).closest('form[class*="space-y-3"]')) {
+            e.stopPropagation();
+          }
+        }}>
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">
@@ -357,7 +402,16 @@ export function DeboursNoteModal({
                       <XMarkIcon className="h-5 w-5" />
                     </button>
                   </div>
-                  <form onSubmit={handleCreateExpense} className="space-y-3">
+                  <form 
+                    onSubmit={handleCreateExpense} 
+                    className="space-y-3" 
+                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && e.target instanceof HTMLInputElement && e.target.type !== 'textarea') {
+                        e.stopPropagation();
+                      }
+                    }}
+                  >
                     <div>
                       <label className="block text-xs font-medium text-slate-700 mb-1">
                         Fournisseur *
@@ -514,6 +568,7 @@ export function DeboursNoteModal({
                         type="submit"
                         disabled={creatingExpense || !newExpense.amountTTC || !newExpense.supplierName || !newExpense.accountCode}
                         className="px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50"
+                        onClick={(e) => e.stopPropagation()}
                       >
                         {creatingExpense ? 'Création...' : 'Créer'}
                       </button>
@@ -567,6 +622,22 @@ export function DeboursNoteModal({
 
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">
+                Modèle de document (optionnel)
+              </label>
+              <input
+                type="text"
+                value={selectedTemplateId}
+                onChange={(e) => setSelectedTemplateId(e.target.value)}
+                placeholder="ID du modèle Google Docs (ex: 1Zn5P7uqHnIj_-85-Qh6roVHe2WwCt8gBamEdZYMA7CA)"
+                className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+              />
+              <p className="mt-1 text-xs text-slate-500">
+                Laissez vide pour utiliser le modèle par défaut. L'ID se trouve dans l'URL du document Google Docs.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
                 Notes (optionnel)
               </label>
               <textarea
@@ -591,7 +662,7 @@ export function DeboursNoteModal({
               disabled={loading || generatingDoc || !totalAmount || !title}
               className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50"
             >
-              {generatingDoc ? 'Génération du document...' : loading ? 'Création...' : 'Créer et générer le document'}
+              {generatingDoc ? 'Génération du document...' : loading ? (isEditMode ? 'Modification...' : 'Création...') : (isEditMode ? 'Enregistrer les modifications' : 'Créer et générer le document')}
             </button>
           </div>
         </form>

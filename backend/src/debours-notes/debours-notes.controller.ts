@@ -46,9 +46,9 @@ export class DeboursNotesController {
   }
 
   @Post(':id/generate-doc')
-  generateDoc(@Param('id') id: string, @Req() req: Request) {
+  generateDoc(@Param('id') id: string, @Body() body: { templateId?: string }, @Req() req: Request) {
     const userId = (req as any).user?.id || (req as any).user?.sub;
-    return this.deboursNotesService.generateFromGoogleDocs(id, userId);
+    return this.deboursNotesService.generateFromGoogleDocs(id, userId, body.templateId);
   }
 }
 

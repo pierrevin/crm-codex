@@ -2977,7 +2977,7 @@ serve(async (req) => {
       
       let query = supabase
         .from('DeboursNote')
-        .select('*, opportunity:Opportunity(*, company:Company(*)), company:Company(*), expenses:Expense(*), payments:Payment(*)')
+        .select('*, opportunity:Opportunity(*, company:Company(*)), company:Company(*)')
         .order('createdAt', { ascending: false })
       
       if (opportunityId) {
@@ -2987,55 +2987,127 @@ serve(async (req) => {
         query = query.eq('companyId', companyId)
       }
       
-      const { data, error } = await query
+      const { data: deboursNotes, error } = await query
       if (error) throw error
+      
+      // Charger les expenses et payments pour chaque note
+      if (deboursNotes && deboursNotes.length > 0) {
+        const noteIds = deboursNotes.map(n => n.id)
+        
+        // Charger toutes les relations expenses
+        const { data: allRelations, error: relationError } = await supabase
+          .from('_DeboursNoteToExpense')
+          .select('A, B')
+          .in('A', noteIds)
+        
+        // Charger toutes les expenses
+        let allExpenses: any[] = []
+        if (!relationError && allRelations && allRelations.length > 0) {
+          const expenseIds = [...new Set(allRelations.map(r => r.B))]
+          const { data: expenseData, error: expenseError } = await supabase
+            .from('Expense')
+            .select('*')
+            .in('id', expenseIds)
+          
+          if (!expenseError && expenseData) {
+            allExpenses = expenseData
+          }
+        }
+        
+        // Charger tous les payments
+        const { data: allPayments, error: paymentError } = await supabase
+          .from('Payment')
+          .select('*')
+          .in('deboursNoteId', noteIds)
+        
+        // Associer les expenses et payments à chaque note
+        const notesWithRelations = deboursNotes.map(note => {
+          const noteExpenses = allRelations
+            ?.filter(r => r.A === note.id)
+            .map(r => allExpenses.find(e => e.id === r.B))
+            .filter(Boolean) || []
+          
+          const notePayments = (allPayments || []).filter(p => p.deboursNoteId === note.id)
+          
+          return {
+            ...note,
+            expenses: noteExpenses,
+            payments: notePayments
+          }
+        })
+        
+        return new Response(
+          JSON.stringify(notesWithRelations),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
       return new Response(
-        JSON.stringify(data),
+        JSON.stringify(deboursNotes || []),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
     if (path === 'debours-notes' && method === 'POST') {
-      const body = await req.json()
-      const { title, issueDate, expectedPaymentDate, totalAmount, status, opportunityId, companyId, expenseIds, notes } = body
-      
-      // Vérifier que l'opportunité existe
-      const { data: opportunity, error: oppError } = await supabase
-        .from('Opportunity')
-        .select('id, companyId')
-        .eq('id', opportunityId)
-        .single()
-      
-      if (oppError || !opportunity) {
-        return new Response(
-          JSON.stringify({ message: 'Opportunity not found' }),
-          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
-      
-      const now = new Date().toISOString()
-      const deboursNoteId = crypto.randomUUID()
-      
-      // Créer la note de débours
-      const { data: deboursNote, error: createError } = await supabase
-        .from('DeboursNote')
-        .insert({
-          id: deboursNoteId,
-          title,
-          issueDate: issueDate ? new Date(issueDate).toISOString() : now,
-          expectedPaymentDate: expectedPaymentDate ? new Date(expectedPaymentDate).toISOString() : null,
-          totalAmount,
-          status: status || 'DRAFT',
-          opportunityId,
-          companyId: companyId || opportunity.companyId,
-          notes: notes || null,
-          createdAt: now,
-          updatedAt: now
-        })
-        .select('*, opportunity:Opportunity(*, company:Company(*)), company:Company(*)')
-        .single()
-      
-      if (createError) throw createError
+      try {
+        const body = await req.json()
+        const { title, issueDate, expectedPaymentDate, totalAmount, status, opportunityId, companyId, expenseIds, notes, templateId } = body
+        
+        // Validation
+        if (!title || !opportunityId || totalAmount === undefined) {
+          return new Response(
+            JSON.stringify({ message: 'Missing required fields: title, opportunityId, totalAmount' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+        
+        // Vérifier que l'opportunité existe
+        const { data: opportunity, error: oppError } = await supabase
+          .from('Opportunity')
+          .select('id, companyId')
+          .eq('id', opportunityId)
+          .single()
+        
+        if (oppError || !opportunity) {
+          return new Response(
+            JSON.stringify({ message: 'Opportunity not found', error: oppError?.message }),
+            { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+        
+        const now = new Date().toISOString()
+        const deboursNoteId = crypto.randomUUID()
+        
+        // Convertir totalAmount en string pour Decimal
+        const totalAmountStr = typeof totalAmount === 'number' ? totalAmount.toString() : totalAmount
+        
+        // Créer la note de débours
+        const { data: deboursNote, error: createError } = await supabase
+          .from('DeboursNote')
+          .insert({
+            id: deboursNoteId,
+            title,
+            issueDate: issueDate ? new Date(issueDate).toISOString() : now,
+            expectedPaymentDate: expectedPaymentDate ? new Date(expectedPaymentDate).toISOString() : null,
+            totalAmount: totalAmountStr,
+            status: status || 'DRAFT',
+            opportunityId,
+            companyId: companyId || opportunity.companyId,
+            notes: notes || null,
+            templateId: templateId || null,
+            createdAt: now,
+            updatedAt: now
+          })
+          .select('*, opportunity:Opportunity(*, company:Company(*)), company:Company(*)')
+          .single()
+        
+        if (createError) {
+          console.error('Error creating DeboursNote:', createError)
+          return new Response(
+            JSON.stringify({ message: 'Failed to create DeboursNote', error: createError.message, details: createError }),
+            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
       
       // Lier les dépenses si fournies
       if (expenseIds && Array.isArray(expenseIds) && expenseIds.length > 0) {
@@ -3056,30 +3128,97 @@ serve(async (req) => {
       }
       
       // Recharger avec les relations
-      const { data: fullDeboursNote, error: fetchError } = await supabase
+      const { data: deboursNoteData, error: fetchError } = await supabase
         .from('DeboursNote')
-        .select('*, opportunity:Opportunity(*, company:Company(*)), company:Company(*), expenses:Expense(*), payments:Payment(*)')
+        .select('*, opportunity:Opportunity(*, company:Company(*)), company:Company(*)')
         .eq('id', deboursNoteId)
         .single()
       
       if (fetchError) throw fetchError
       
-      return new Response(
-        JSON.stringify(fullDeboursNote),
-        { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      // Charger les expenses via la table de liaison
+      let expenses: any[] = []
+      if (expenseIds && expenseIds.length > 0) {
+        const { data: expenseData, error: expenseError } = await supabase
+          .from('Expense')
+          .select('*')
+          .in('id', expenseIds)
+        
+        if (!expenseError && expenseData) {
+          expenses = expenseData
+        }
+      }
+      
+      // Charger les payments
+      const { data: payments, error: paymentError } = await supabase
+        .from('Payment')
+        .select('*')
+        .eq('deboursNoteId', deboursNoteId)
+      
+      const fullDeboursNote = {
+        ...deboursNoteData,
+        expenses: expenses,
+        payments: payments || []
+      }
+      
+        return new Response(
+          JSON.stringify(fullDeboursNote),
+          { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      } catch (error) {
+        console.error('Error in POST /debours-notes:', error)
+        return new Response(
+          JSON.stringify({ 
+            message: 'Internal server error',
+            error: error instanceof Error ? error.message : String(error)
+          }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
     }
 
     if (path.startsWith('debours-notes/') && method === 'GET') {
       const id = path.split('/')[1]
-      const { data, error } = await supabase
+      const { data: deboursNoteData, error } = await supabase
         .from('DeboursNote')
-        .select('*, opportunity:Opportunity(*, company:Company(*)), company:Company(*), expenses:Expense(*), payments:Payment(*)')
+        .select('*, opportunity:Opportunity(*, company:Company(*)), company:Company(*)')
         .eq('id', id)
         .single()
       if (error) throw error
+      
+      // Charger les expenses via la table de liaison
+      const { data: relationData, error: relationError } = await supabase
+        .from('_DeboursNoteToExpense')
+        .select('B')
+        .eq('A', id)
+      
+      let expenses: any[] = []
+      if (!relationError && relationData && relationData.length > 0) {
+        const expenseIds = relationData.map(r => r.B)
+        const { data: expenseData, error: expenseError } = await supabase
+          .from('Expense')
+          .select('*')
+          .in('id', expenseIds)
+        
+        if (!expenseError && expenseData) {
+          expenses = expenseData
+        }
+      }
+      
+      // Charger les payments
+      const { data: payments, error: paymentError } = await supabase
+        .from('Payment')
+        .select('*')
+        .eq('deboursNoteId', id)
+      
+      const fullData = {
+        ...deboursNoteData,
+        expenses: expenses,
+        payments: payments || []
+      }
+      
       return new Response(
-        JSON.stringify(data),
+        JSON.stringify(fullData),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -3099,11 +3238,11 @@ serve(async (req) => {
       if (status !== undefined) updateData.status = status
       if (notes !== undefined) updateData.notes = notes
       
-      const { data, error } = await supabase
+      const { data: deboursNoteData, error } = await supabase
         .from('DeboursNote')
         .update(updateData)
         .eq('id', id)
-        .select('*, opportunity:Opportunity(*, company:Company(*)), company:Company(*), expenses:Expense(*), payments:Payment(*)')
+        .select('*, opportunity:Opportunity(*, company:Company(*)), company:Company(*)')
         .single()
       
       if (error) throw error
@@ -3116,7 +3255,7 @@ serve(async (req) => {
           .delete()
           .eq('A', id)
         
-        // Créer les nouvelles relations
+        // Créer les nouvelles relations (même si le tableau est vide, on a déjà supprimé les anciennes)
         if (Array.isArray(expenseIds) && expenseIds.length > 0) {
           const relations = expenseIds.map((expenseId: string) => ({
             A: id,
@@ -3127,23 +3266,177 @@ serve(async (req) => {
             .from('_DeboursNoteToExpense')
             .insert(relations)
         }
+        // Si expenseIds est un tableau vide, on a déjà supprimé toutes les relations ci-dessus
+      }
+      
+      // Charger les expenses via la table de liaison
+      const { data: relationData, error: relationError } = await supabase
+        .from('_DeboursNoteToExpense')
+        .select('B')
+        .eq('A', id)
+      
+      let expenses: any[] = []
+      if (!relationError && relationData && relationData.length > 0) {
+        const expenseIds = relationData.map(r => r.B)
+        const { data: expenseData, error: expenseError } = await supabase
+          .from('Expense')
+          .select('*')
+          .in('id', expenseIds)
         
-        // Recharger avec les relations mises à jour
-        const { data: updated, error: fetchError } = await supabase
-          .from('DeboursNote')
-          .select('*, opportunity:Opportunity(*, company:Company(*)), company:Company(*), expenses:Expense(*), payments:Payment(*)')
-          .eq('id', id)
-          .single()
-        
-        if (fetchError) throw fetchError
-        return new Response(
-          JSON.stringify(updated),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
+        if (!expenseError && expenseData) {
+          expenses = expenseData
+        }
+      }
+      
+      // Charger les payments
+      const { data: payments, error: paymentError } = await supabase
+        .from('Payment')
+        .select('*')
+        .eq('deboursNoteId', id)
+      
+      const fullData = {
+        ...deboursNoteData,
+        expenses: expenses,
+        payments: payments || []
+      }
+      
+      // Si un Google Doc existe, le mettre à jour automatiquement
+      if (deboursNoteData.googleDocId) {
+        try {
+          // Utiliser la même logique que generate-doc mais pour mettre à jour
+          const opportunity = deboursNoteData.opportunity
+          const company = deboursNoteData.company || opportunity?.company
+          
+          const at = await getValidAccessToken(userId)
+          if (at && opportunity && company) {
+            // Fonction pour formater les dates
+            const formatDate = (date: Date | string | null | undefined): string => {
+              if (!date) return ''
+              const d = typeof date === 'string' ? new Date(date) : date
+              return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+            }
+            
+            // Fonction pour formater les montants
+            const formatAmount = (amount: string | number | null | undefined): string => {
+              if (!amount) return '0,00'
+              const num = typeof amount === 'string' ? parseFloat(amount) : amount
+              return num.toFixed(2).replace('.', ',')
+            }
+            
+            // Calculer les montants pour le total général
+            const montantFacture = typeof opportunity.amount === 'string' ? parseFloat(opportunity.amount) : (opportunity.amount || 0)
+            const totalFrais = typeof deboursNoteData.totalAmount === 'string' ? parseFloat(deboursNoteData.totalAmount) : (deboursNoteData.totalAmount || 0)
+            const totalGeneral = montantFacture + totalFrais
+            
+            // Préparer les replacements
+            const replacements: Record<string, string> = {
+              'Date du jour': formatDate(new Date()),
+              'nom_client': company?.name || '',
+              'adresse-client': company?.addressStreet || '',
+              'code-postal': company?.addressZip || '',
+              'Ville': company?.addressCity || '',
+              'titre_note_debours': deboursNoteData.title,
+              'date prestation': formatDate(opportunity.closeDate),
+              'num_facture': (opportunity.tiimeInvoiceIds && opportunity.tiimeInvoiceIds[0]) || 'N/A',
+              'date_facture': formatDate(opportunity.closeDate),
+              'montant_facture': formatAmount(opportunity.amount),
+              'total_frais': formatAmount(deboursNoteData.totalAmount),
+              'total_general': formatAmount(totalGeneral)
+            }
+            
+            // Ajouter les expenses
+            if (expenses && expenses.length > 0) {
+              expenses.forEach((expense: any, index: number) => {
+                const num = index + 1
+                replacements[`date_frais_${num}`] = formatDate(expense.invoiceDate)
+                replacements[`intitulé_frais_${num}`] = expense.supplierName || expense.notes || 'Frais'
+                replacements[`montant_frais_${num}`] = formatAmount(expense.amountTTC || expense.amountHT)
+              })
+            }
+            
+            // Récupérer le contenu du document
+            const docRes = await fetch(`https://docs.googleapis.com/v1/documents/${deboursNoteData.googleDocId}`, {
+              headers: { Authorization: `Bearer ${at}` }
+            })
+            
+            if (docRes.ok) {
+              const docData = await docRes.json()
+              const requests: any[] = []
+              
+              // Fonction récursive pour trouver tous les textes
+              const findTextRuns = (elements: any[]): Array<{ startIndex: number; endIndex: number; text: string }> => {
+                const textRuns: Array<{ startIndex: number; endIndex: number; text: string }> = []
+                
+                for (const element of elements) {
+                  if (element.paragraph) {
+                    for (const paraElement of element.paragraph.elements || []) {
+                      if (paraElement.textRun) {
+                        textRuns.push({
+                          startIndex: paraElement.startIndex || 0,
+                          endIndex: paraElement.endIndex || 0,
+                          text: paraElement.textRun.content || ''
+                        })
+                      }
+                    }
+                  }
+                  if (element.table) {
+                    for (const row of element.table.tableRows || []) {
+                      for (const cell of row.tableCells || []) {
+                        if (cell.content) {
+                          textRuns.push(...findTextRuns(cell.content))
+                        }
+                      }
+                    }
+                  }
+                }
+                
+                return textRuns
+              }
+              
+              const content = docData.body?.content || []
+              const textRuns = findTextRuns(content)
+              
+              // Remplacer les placeholders
+              for (const [key, value] of Object.entries(replacements)) {
+                const placeholder = `{{${key}}}`
+                
+                for (const textRun of textRuns) {
+                  if (textRun.text.includes(placeholder)) {
+                    requests.push({
+                      replaceAllText: {
+                        containsText: {
+                          text: placeholder,
+                          matchCase: false
+                        },
+                        replaceText: value
+                      }
+                    })
+                    break
+                  }
+                }
+              }
+              
+              // Appliquer les remplacements
+              if (requests.length > 0) {
+                await fetch(`https://docs.googleapis.com/v1/documents/${deboursNoteData.googleDocId}:batchUpdate`, {
+                  method: 'POST',
+                  headers: {
+                    Authorization: `Bearer ${at}`,
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({ requests })
+                })
+              }
+            }
+          }
+        } catch (updateDocError) {
+          console.error('Error updating Google Doc:', updateDocError)
+          // Ne pas bloquer la mise à jour de la note si la mise à jour du doc échoue
+        }
       }
       
       return new Response(
-        JSON.stringify(data),
+        JSON.stringify(fullData),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -3208,12 +3501,296 @@ serve(async (req) => {
     }
 
     if (path.startsWith('debours-notes/') && path.includes('/generate-doc') && method === 'POST') {
-      // Cette route sera gérée par le backend NestJS qui a accès à Google Docs API
-      // Pour l'instant, retourner une erreur indiquant que c'est géré par le backend
-      return new Response(
-        JSON.stringify({ message: 'Document generation is handled by the NestJS backend. Please use the backend API endpoint.' }),
-        { status: 501, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      const deboursNoteId = path.split('/')[1]
+      const body = await req.json()
+      const { templateId } = body
+      
+      // Récupérer la note de débours
+      const { data: deboursNote, error: noteError } = await supabase
+        .from('DeboursNote')
+        .select('*, opportunity:Opportunity(*, company:Company(*)), company:Company(*)')
+        .eq('id', deboursNoteId)
+        .single()
+      
+      if (noteError || !deboursNote) {
+        return new Response(
+          JSON.stringify({ message: 'DeboursNote not found' }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      const opportunity = deboursNote.opportunity
+      const company = deboursNote.company || opportunity.company
+      
+      // Vérifier que l'utilisateur a un token Google
+      const at = await getValidAccessToken(userId)
+      if (!at) {
+        return new Response(
+          JSON.stringify({ message: 'User has not authorized Google access. Please connect your Google account.' }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      // S'assurer que le dossier de l'opportunité existe
+      let opportunityFolderId = opportunity.googleDriveFolderId
+      if (!opportunityFolderId) {
+        const rootId = Deno.env.get('GOOGLE_DRIVE_ROOT_FOLDER_ID') ?? ''
+        if (!rootId) {
+          return new Response(
+            JSON.stringify({ message: 'GOOGLE_DRIVE_ROOT_FOLDER_ID not configured' }),
+            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+        
+        // Créer le dossier de l'entreprise si nécessaire
+        let companyFolderId = company?.googleDriveFolderId
+        if (!companyFolderId) {
+          const safeCompanyName = sanitizeName(company?.name || 'Entreprise')
+          const foundCompanyFolder = await findFolderByName(at, safeCompanyName, rootId)
+          if (foundCompanyFolder) {
+            companyFolderId = foundCompanyFolder.id
+          } else {
+            const createdCompanyFolder = await createFolder(at, safeCompanyName, rootId)
+            companyFolderId = createdCompanyFolder.id
+          }
+          await supabase.from('Company').update({ googleDriveFolderId: companyFolderId }).eq('id', company.id)
+        }
+        
+        // Créer le dossier de l'opportunité
+        const safeOppName = sanitizeName(opportunity.title || opportunity.id)
+        const foundOppFolder = await findFolderByName(at, safeOppName, companyFolderId)
+        if (foundOppFolder) {
+          opportunityFolderId = foundOppFolder.id
+        } else {
+          const createdOppFolder = await createFolder(at, safeOppName, companyFolderId)
+          opportunityFolderId = createdOppFolder.id
+        }
+        await supabase.from('Opportunity').update({ googleDriveFolderId: opportunityFolderId }).eq('id', opportunity.id)
+      }
+      
+      // Utiliser le templateId fourni, celui stocké dans la note, ou le template par défaut
+      const finalTemplateId = templateId || deboursNote.templateId || '1Zn5P7uqHnIj_-85-Qh6roVHe2WwCt8gBamEdZYMA7CA'
+      
+      // Fonction pour formater les dates
+      const formatDate = (date: Date | string | null | undefined): string => {
+        if (!date) return ''
+        const d = typeof date === 'string' ? new Date(date) : date
+        return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+      }
+      
+      // Fonction pour formater les montants
+      const formatAmount = (amount: string | number | null | undefined): string => {
+        if (!amount) return '0,00'
+        const num = typeof amount === 'string' ? parseFloat(amount) : amount
+        return num.toFixed(2).replace('.', ',')
+      }
+      
+      // Calculer les montants pour le total général
+      const montantFacture = typeof opportunity.amount === 'string' ? parseFloat(opportunity.amount) : (opportunity.amount || 0)
+      const totalFrais = typeof deboursNote.totalAmount === 'string' ? parseFloat(deboursNote.totalAmount) : (deboursNote.totalAmount || 0)
+      const totalGeneral = montantFacture + totalFrais
+      
+      // Préparer les replacements
+      const replacements: Record<string, string> = {
+        'Date du jour': formatDate(new Date()),
+        'nom_client': company?.name || '',
+        'adresse-client': company?.addressStreet || '',
+        'code-postal': company?.addressZip || '',
+        'Ville': company?.addressCity || '',
+        'titre_note_debours': deboursNote.title,
+        'date prestation': formatDate(opportunity.closeDate),
+        'num_facture': (opportunity.tiimeInvoiceIds && opportunity.tiimeInvoiceIds[0]) || 'N/A',
+        'date_facture': formatDate(opportunity.closeDate),
+        'montant_facture': formatAmount(opportunity.amount),
+        'total_frais': formatAmount(deboursNote.totalAmount),
+        'total_general': formatAmount(totalGeneral)
+      }
+      
+      // Charger les expenses si elles existent
+      const { data: relationData } = await supabase
+        .from('_DeboursNoteToExpense')
+        .select('B')
+        .eq('A', deboursNoteId)
+      
+      if (relationData && relationData.length > 0) {
+        const expenseIds = relationData.map(r => r.B)
+        const { data: expenses } = await supabase
+          .from('Expense')
+          .select('*')
+          .in('id', expenseIds)
+        
+        if (expenses && expenses.length > 0) {
+          expenses.forEach((expense: any, index: number) => {
+            const num = index + 1
+            replacements[`date_frais_${num}`] = formatDate(expense.invoiceDate)
+            replacements[`intitulé_frais_${num}`] = expense.supplierName || expense.notes || 'Frais'
+            replacements[`montant_frais_${num}`] = formatAmount(expense.amountTTC || expense.amountHT)
+          })
+        }
+      }
+      
+      try {
+        // 1. Copier le template
+        const copyRes = await fetch(`https://www.googleapis.com/drive/v3/files/${finalTemplateId}/copy`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${at}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            name: deboursNote.title || 'Note de débours',
+            parents: opportunityFolderId ? [opportunityFolderId] : undefined
+          })
+        })
+        
+        if (!copyRes.ok) {
+          const errorText = await copyRes.text()
+          throw new Error(`Failed to copy template: ${copyRes.status} ${errorText}`)
+        }
+        
+        const copyData = await copyRes.json()
+        const newDocId = copyData.id
+        
+        if (!newDocId) {
+          throw new Error('Failed to get new document ID')
+        }
+        
+        // 2. Récupérer le contenu du document pour trouver les placeholders
+        const docRes = await fetch(`https://docs.googleapis.com/v1/documents/${newDocId}`, {
+          headers: { Authorization: `Bearer ${at}` }
+        })
+        
+        if (!docRes.ok) {
+          throw new Error(`Failed to get document content: ${docRes.status}`)
+        }
+        
+        const docData = await docRes.json()
+        
+        // 3. Construire les requêtes de remplacement
+        const requests: any[] = []
+        
+        // Fonction récursive pour trouver tous les textes
+        const findTextRuns = (elements: any[]): Array<{ startIndex: number; endIndex: number; text: string }> => {
+          const textRuns: Array<{ startIndex: number; endIndex: number; text: string }> = []
+          
+          for (const element of elements) {
+            if (element.paragraph) {
+              for (const paraElement of element.paragraph.elements || []) {
+                if (paraElement.textRun) {
+                  textRuns.push({
+                    startIndex: paraElement.startIndex || 0,
+                    endIndex: paraElement.endIndex || 0,
+                    text: paraElement.textRun.content || ''
+                  })
+                }
+              }
+            }
+            if (element.table) {
+              for (const row of element.table.tableRows || []) {
+                for (const cell of row.tableCells || []) {
+                  if (cell.content) {
+                    textRuns.push(...findTextRuns(cell.content))
+                  }
+                }
+              }
+            }
+          }
+          
+          return textRuns
+        }
+        
+        const content = docData.body?.content || []
+        const textRuns = findTextRuns(content)
+        
+        // 4. Remplacer les placeholders
+        for (const [key, value] of Object.entries(replacements)) {
+          const placeholder = `{{${key}}}`
+          
+          for (const textRun of textRuns) {
+            if (textRun.text.includes(placeholder)) {
+              requests.push({
+                replaceAllText: {
+                  containsText: {
+                    text: placeholder,
+                    matchCase: false
+                  },
+                  replaceText: value
+                }
+              })
+              break // Un seul remplacement par placeholder
+            }
+          }
+        }
+        
+        // 5. Appliquer les remplacements
+        if (requests.length > 0) {
+          const updateRes = await fetch(`https://docs.googleapis.com/v1/documents/${newDocId}:batchUpdate`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${at}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ requests })
+          })
+          
+          if (!updateRes.ok) {
+            const errorText = await updateRes.text()
+            console.error('Failed to update document:', errorText)
+            // Ne pas échouer, le document est créé même si les remplacements échouent
+          }
+        }
+        
+        // 6. Mettre à jour la note avec les infos du document
+        const googleDocUrl = `https://docs.google.com/document/d/${newDocId}`
+        
+        const { data: updatedNote, error: updateError } = await supabase
+          .from('DeboursNote')
+          .update({
+            googleDocId: newDocId,
+            googleDocUrl: googleDocUrl,
+            templateId: finalTemplateId,
+            updatedAt: new Date().toISOString()
+          })
+          .eq('id', deboursNoteId)
+          .select('*, opportunity:Opportunity(*, company:Company(*)), company:Company(*)')
+          .single()
+        
+        if (updateError) {
+          console.error('Error updating debours note:', updateError)
+        }
+        
+        // Charger les expenses pour la réponse
+        let expenses: any[] = []
+        if (relationData && relationData.length > 0) {
+          const expenseIds = relationData.map(r => r.B)
+          const { data: expenseData } = await supabase
+            .from('Expense')
+            .select('*')
+            .in('id', expenseIds)
+          if (expenseData) expenses = expenseData
+        }
+        
+        const fullNote = {
+          ...updatedNote,
+          expenses: expenses,
+          payments: []
+        }
+        
+        return new Response(
+          JSON.stringify(fullNote),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+        
+      } catch (error) {
+        console.error('Error generating Google Doc:', error)
+        return new Response(
+          JSON.stringify({ 
+            message: 'Failed to generate Google Docs document',
+            error: error instanceof Error ? error.message : String(error)
+          }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
     }
 
     // ===== TREASURY ROUTES =====
@@ -3359,7 +3936,15 @@ serve(async (req) => {
         .gte('invoiceDate', start.toISOString())
         .lte('invoiceDate', end.toISOString())
       
-      // Récupérer les notes de débours pour les opportunités finalisées
+      // Récupérer les notes de débours avec expectedPaymentDate pour le prévisionnel (comme les opportunités)
+      const { data: deboursNotesForecast } = await supabase
+        .from('DeboursNote')
+        .select('id, totalAmount, issueDate, expectedPaymentDate, opportunityId')
+        .not('expectedPaymentDate', 'is', null)
+        .gte('expectedPaymentDate', start.toISOString())
+        .lte('expectedPaymentDate', end.toISOString())
+      
+      // Récupérer les notes de débours pour les opportunités finalisées (par issueDate)
       const { data: deboursNotes } = await supabase
         .from('DeboursNote')
         .select('id, totalAmount, issueDate, expectedPaymentDate, opportunityId')
@@ -3385,6 +3970,48 @@ serve(async (req) => {
         .in('opportunityId', finalizedOppIds)
         : { data: [] }
       
+      // Pour les notes de débours en prévisionnel, récupérer les dépenses liées pour calculer le montant réel (frais uniquement)
+      let deboursNotesWithExpenses: any[] = []
+      if (deboursNotesForecast && deboursNotesForecast.length > 0) {
+        const deboursNoteIds = deboursNotesForecast.map(n => n.id)
+        
+        // Récupérer les relations
+        const { data: relations } = await supabase
+          .from('_DeboursNoteToExpense')
+          .select('A, B')
+          .in('A', deboursNoteIds)
+        
+        if (relations && relations.length > 0) {
+          const expenseIds = relations.map(r => r.B)
+          const { data: expenses } = await supabase
+            .from('Expense')
+            .select('id, amountTTC, amountHT')
+            .in('id', expenseIds)
+          
+          // Calculer le montant total des frais pour chaque note
+          deboursNotesWithExpenses = deboursNotesForecast.map(note => {
+            const noteExpenseIds = relations.filter(r => r.A === note.id).map(r => r.B)
+            const noteExpenses = expenses?.filter(e => noteExpenseIds.includes(e.id)) || []
+            // Utiliser les montants des dépenses (frais) et non le totalAmount
+            const totalFrais = noteExpenses.reduce((sum, exp) => {
+              const amount = parseFloat(exp.amountTTC?.toString() || exp.amountHT?.toString() || '0')
+              return sum + amount
+            }, 0)
+            
+            return {
+              ...note,
+              totalFrais: totalFrais // Montant calculé depuis les dépenses
+            }
+          })
+        } else {
+          // Si pas de dépenses liées, utiliser 0
+          deboursNotesWithExpenses = deboursNotesForecast.map(note => ({
+            ...note,
+            totalFrais: 0
+          }))
+        }
+      }
+      
       // Calculer les taxes à payer (mois +1, au 30)
       const taxPayments: Record<string, number> = {}
       payments?.forEach(payment => {
@@ -3401,6 +4028,7 @@ serve(async (req) => {
           payments: payments || [],
           expenses: expenses || [],
           deboursNotes: deboursNotes || [],
+          deboursNotesForecast: deboursNotesWithExpenses || [], // Notes de débours en prévisionnel avec montants calculés depuis les dépenses
           finalizedExpenses: finalizedExpenses || [],
           finalizedDeboursNotes: finalizedDeboursNotes || [],
           taxPayments
@@ -3877,7 +4505,7 @@ serve(async (req) => {
           JSON.stringify({ results: enrichedResults }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
-      } catch (error: any) {
+      } catch (error) {
         console.error('Erreur appel API Sirene:', error)
         return new Response(
           JSON.stringify({ message: error.message || 'Erreur lors de la recherche' }),
@@ -4140,7 +4768,7 @@ serve(async (req) => {
           JSON.stringify(updatedCompany),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
-      } catch (error: any) {
+      } catch (error) {
         console.error('Erreur complétion fiche:', error)
         console.error('Error stack:', error.stack)
         console.error('Error details:', JSON.stringify(error, Object.getOwnPropertyNames(error)))
@@ -4454,47 +5082,95 @@ serve(async (req) => {
     console.log('[EXPENSES DEBUG] path:', path, 'method:', method, 'path === expenses:', path === 'expenses')
     
     if (path === 'expenses' && method === 'GET') {
-      const userId = url.searchParams.get('userId')
-      const status = url.searchParams.get('status')
-      const companyId = url.searchParams.get('companyId')
-      const opportunityId = url.searchParams.get('opportunityId')
-      const startDate = url.searchParams.get('startDate')
-      const endDate = url.searchParams.get('endDate')
+      try {
+        const userId = url.searchParams.get('userId')
+        const status = url.searchParams.get('status')
+        const companyId = url.searchParams.get('companyId')
+        const opportunityId = url.searchParams.get('opportunityId')
+        const startDate = url.searchParams.get('startDate')
+        const endDate = url.searchParams.get('endDate')
 
-      let query = supabase
-        .from('Expense')
-        .select('*, company:Company(*), opportunity:Opportunity(*), user:User(id, email)')
-        .order('createdAt', { ascending: false })
+        // Sélectionner les relations de manière sécurisée
+        let selectQuery = '*, company:Company(*)'
+        // Ajouter opportunity seulement si la colonne existe
+        selectQuery += ', opportunity:Opportunity(*)'
+        // Ajouter user seulement si la colonne existe
+        selectQuery += ', user:User(id, email)'
 
-      if (userId) {
-        query = query.eq('userId', userId)
-      }
-      if (status) {
-        query = query.eq('status', status)
-      }
-      if (companyId) {
-        query = query.eq('companyId', companyId)
-      }
-      if (opportunityId) {
-        query = query.eq('opportunityId', opportunityId)
-      }
-      if (startDate) {
-        query = query.gte('invoiceDate', startDate)
-      }
-      if (endDate) {
-        query = query.lte('invoiceDate', endDate)
-      }
+        let query = supabase
+          .from('Expense')
+          .select(selectQuery)
+          .order('createdAt', { ascending: false })
 
-      const { data, error } = await query
-      if (error) {
-        console.error('[EXPENSES GET] Error:', error)
-        throw error
+        if (userId) {
+          query = query.eq('userId', userId)
+        }
+        if (status) {
+          query = query.eq('status', status)
+        }
+        if (companyId) {
+          query = query.eq('companyId', companyId)
+        }
+        if (opportunityId) {
+          query = query.eq('opportunityId', opportunityId)
+        }
+        if (startDate) {
+          query = query.gte('invoiceDate', startDate)
+        }
+        if (endDate) {
+          query = query.lte('invoiceDate', endDate)
+        }
+
+        const { data, error } = await query
+        if (error) {
+          console.error('[EXPENSES GET] Error:', error)
+          // Si l'erreur est liée aux relations, essayer sans les relations
+          if (error.message && (error.message.includes('relation') || error.message.includes('foreign'))) {
+            console.log('[EXPENSES GET] Retrying without relations...')
+            let simpleQuery = supabase
+              .from('Expense')
+              .select('*')
+              .order('createdAt', { ascending: false })
+            
+            if (userId) simpleQuery = simpleQuery.eq('userId', userId)
+            if (status) simpleQuery = simpleQuery.eq('status', status)
+            if (companyId) simpleQuery = simpleQuery.eq('companyId', companyId)
+            if (opportunityId) simpleQuery = simpleQuery.eq('opportunityId', opportunityId)
+            if (startDate) simpleQuery = simpleQuery.gte('invoiceDate', startDate)
+            if (endDate) simpleQuery = simpleQuery.lte('invoiceDate', endDate)
+            
+            const { data: simpleData, error: simpleError } = await simpleQuery
+            if (simpleError) {
+              return new Response(
+                JSON.stringify({ message: 'Failed to fetch expenses', error: simpleError.message }),
+                { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+              )
+            }
+            return new Response(
+              JSON.stringify(simpleData || []),
+              { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            )
+          }
+          return new Response(
+            JSON.stringify({ message: 'Failed to fetch expenses', error: error.message }),
+            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+        console.log('[EXPENSES GET] Found', data?.length || 0, 'expenses with filters:', { userId, status, companyId, opportunityId, startDate, endDate })
+        return new Response(
+          JSON.stringify(data || []),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      } catch (error) {
+        console.error('[EXPENSES GET] Unexpected error:', error)
+        return new Response(
+          JSON.stringify({ 
+            message: 'Internal server error',
+            error: error instanceof Error ? error.message : String(error)
+          }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
       }
-      console.log('[EXPENSES GET] Found', data?.length || 0, 'expenses with filters:', { userId, status, companyId, opportunityId, startDate, endDate })
-      return new Response(
-        JSON.stringify(data),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
     }
 
     // Interface et fonction de sérialisation pour les dépenses (identique à expenses/index.ts)
@@ -4538,7 +5214,7 @@ serve(async (req) => {
 
     if (path === 'expenses' && method === 'POST') {
       try {
-      let body
+        let body
       try {
         body = await req.json()
       } catch (e) {
@@ -4721,7 +5397,7 @@ serve(async (req) => {
         JSON.stringify(data),
         { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
-      } catch (expenseError: any) {
+      } catch (expenseError) {
         console.error('[EXPENSES POST] Unexpected error in expense creation:', expenseError)
         console.error('[EXPENSES POST] Error stack:', expenseError?.stack)
         console.error('[EXPENSES POST] Error details:', JSON.stringify(expenseError, Object.getOwnPropertyNames(expenseError || {})))
@@ -4919,7 +5595,6 @@ serve(async (req) => {
       )
     }
 
-
     } // Fin du bloc if (!isPublicRoute)
 
     // Route not found
@@ -4927,8 +5602,7 @@ serve(async (req) => {
       JSON.stringify({ message: 'Not found' }),
       { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
-
-  } catch (error: any) {
+  } catch (error) {
     console.error('[API ERROR] Unhandled error:', error)
     console.error('[API ERROR] Error stack:', error?.stack)
     console.error('[API ERROR] Error details:', JSON.stringify(error, Object.getOwnPropertyNames(error || {})))
