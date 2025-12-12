@@ -1593,7 +1593,7 @@ serve(async (req) => {
       
       let query = supabase
         .from('Quote')
-        .select('*, items:QuoteItem(*), opportunity:Opportunity(id, title), company:Company(id, name)')
+        .select('*, items:QuoteItem(*), opportunity:Opportunity(id, title, company:Company(id, name)), company:Company(id, name)')
         .order('createdAt', { ascending: false })
       
       if (opportunityId) {
@@ -1702,7 +1702,7 @@ serve(async (req) => {
       // Récupérer le devis complet avec ses lignes
       const { data: fullQuote, error: fetchError } = await supabase
         .from('Quote')
-        .select('*, items:QuoteItem(*), opportunity:Opportunity(id, title), company:Company(id, name)')
+        .select('*, items:QuoteItem(*), opportunity:Opportunity(id, title, company:Company(id, name)), company:Company(id, name)')
         .eq('id', quoteId)
         .single()
       
@@ -1775,7 +1775,7 @@ serve(async (req) => {
         .from('Quote')
         .update(updateData)
         .eq('id', id)
-        .select('*, items:QuoteItem(*), opportunity:Opportunity(id, title), company:Company(id, name)')
+        .select('*, items:QuoteItem(*), opportunity:Opportunity(id, title, company:Company(id, name)), company:Company(id, name)')
         .single()
 
       if (error) throw error

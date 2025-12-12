@@ -6,6 +6,7 @@ import { SupplierSearchSelect } from './SupplierSearchSelect';
 import { AccountCodeSelector } from './AccountCodeSelector';
 import { supplierPreferencesService } from '../services/supplierPreferences';
 import api from '../services/apiClient';
+import { Breadcrumb, BreadcrumbItem } from './Breadcrumb';
 
 interface DeboursNoteModalProps {
   isOpen: boolean;
@@ -50,6 +51,7 @@ export function DeboursNoteModal({
     accountCode: '',
     accountLabel: ''
   });
+  const [companyInfo, setCompanyInfo] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -95,12 +97,36 @@ export function DeboursNoteModal({
           accountLabel: ''
         });
         void loadAvailableExpenses();
+        void loadOpportunityAndCompany();
       } catch (error) {
         console.error('Erreur lors de l\'initialisation du modal:', error);
         setError('Erreur lors du chargement de la note de débours');
       }
     }
   }, [isOpen, opportunityId, opportunityTitle, deboursNote]);
+
+  const loadOpportunityAndCompany = async () => {
+    if (!opportunityId) return;
+    
+    try {
+      const { data: opportunity } = await api.get(`/api/opportunities/${opportunityId}`);
+      if (opportunity.company?.id || opportunity.companyId) {
+        const companyId = opportunity.company?.id || opportunity.companyId;
+        if (opportunity.company?.name) {
+          setCompanyInfo({ id: companyId, name: opportunity.company.name });
+        } else if (companyId) {
+          try {
+            const { data: companyData } = await api.get(`/api/companies/${companyId}`);
+            setCompanyInfo({ id: companyId, name: companyData.name });
+          } catch (err) {
+            console.error('Erreur chargement entreprise:', err);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Erreur chargement opportunité:', err);
+    }
+  };
 
   const loadAvailableExpenses = async () => {
     try {
@@ -311,6 +337,31 @@ export function DeboursNoteModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
       <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto">
+        {/* Fil d'Ariane */}
+        {(companyInfo || opportunityId) && (
+          <div className="mb-4">
+            <Breadcrumb
+              items={[
+                ...(companyInfo
+                  ? [
+                      {
+                        label: companyInfo.name,
+                        href: `/entreprises/${companyInfo.id}`
+                      }
+                    ]
+                  : []),
+                {
+                  label: opportunityTitle,
+                  href: `/opportunites/${opportunityId}`
+                },
+                {
+                  label: isEditMode ? (deboursNote?.title || 'Note de débours') : 'Note de débours'
+                }
+              ]}
+            />
+          </div>
+        )}
+        
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-semibold text-slate-900">
             {isEditMode ? 'Modifier la note de débours' : 'Créer une note de débours'}

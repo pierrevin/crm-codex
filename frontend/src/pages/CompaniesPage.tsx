@@ -44,7 +44,7 @@ export function CompaniesPage() {
   const [supplierFilter, setSupplierFilter] = useState<SupplierFilter>('no');
   const [prospectFilter, setProspectFilter] = useState<ProspectFilter>('both');
   const [clientFilter, setClientFilter] = useState<ClientFilter>({
-    active: true, // Moins de 1 an par défaut
+    active: false, // Désactivé par défaut pour ne pas cacher toutes les entreprises
     '1year': false,
     '2years': false,
     '3years': false
@@ -60,31 +60,38 @@ export function CompaniesPage() {
 
   const loadCompanies = async () => {
     try {
-      // Charger les entreprises avec leurs opportunités
-      const { data } = await api.get('/api/companies');
-      const companiesList = Array.isArray(data) ? data : (data.items || data.data || []);
+      // Charger toutes les opportunités en une seule requête
+      const [companiesRes, opportunitiesRes] = await Promise.all([
+        api.get('/api/companies'),
+        api.get('/api/opportunities?limit=10000')
+      ]);
       
-      // Charger les opportunités pour chaque entreprise
-      const companiesWithOpportunities = await Promise.all(
-        companiesList.map(async (company: any) => {
-          try {
-            const { data: oppsData } = await api.get(`/api/opportunities?companyId=${company.id}`);
-            const opportunities = Array.isArray(oppsData) ? oppsData : (oppsData.items || oppsData.data || []);
-            return {
-              ...company,
-              opportunities: opportunities.map((opp: any) => ({
-                id: opp.id,
-                stage: opp.stage,
-                closeDate: opp.closeDate,
-                createdAt: opp.createdAt
-              }))
-            };
-          } catch (error) {
-            console.error(`Erreur chargement opportunités pour ${company.id}:`, error);
-            return { ...company, opportunities: [] };
+      const companiesList = Array.isArray(companiesRes.data) ? companiesRes.data : (companiesRes.data.items || companiesRes.data.data || []);
+      const allOpportunities = Array.isArray(opportunitiesRes.data) 
+        ? opportunitiesRes.data 
+        : (opportunitiesRes.data.items || opportunitiesRes.data.data || []);
+      
+      // Grouper les opportunités par companyId
+      const opportunitiesByCompany = allOpportunities.reduce((acc: any, opp: any) => {
+        if (opp.companyId) {
+          if (!acc[opp.companyId]) {
+            acc[opp.companyId] = [];
           }
-        })
-      );
+          acc[opp.companyId].push({
+            id: opp.id,
+            stage: opp.stage,
+            closeDate: opp.closeDate,
+            createdAt: opp.createdAt
+          });
+        }
+        return acc;
+      }, {});
+      
+      // Combiner les entreprises avec leurs opportunités
+      const companiesWithOpportunities = companiesList.map((company: any) => ({
+        ...company,
+        opportunities: opportunitiesByCompany[company.id] || []
+      }));
       
       setCompanies(companiesWithOpportunities);
     } catch (error) {

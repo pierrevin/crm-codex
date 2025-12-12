@@ -1,12 +1,18 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
-import { PencilIcon, PlusIcon, TrashIcon, ArrowRightIcon } from '@heroicons/react/24/outline';
+import { PencilIcon, PlusIcon, TrashIcon, ArrowRightIcon, DocumentDuplicateIcon } from '@heroicons/react/24/outline';
 
 import api from '../services/apiClient';
 import { CompanySearchSelect } from '../components/CompanySearchSelect';
 import { recentStorage } from '../services/localStorage';
 import { formatSiret, normalizeSiret } from '../utils/formatSiret';
 import { searchSirene, fillCompanyFromSirene, type SireneResult } from '../services/sireneApi';
+import { CompanyMetrics } from '../components/CompanyMetrics';
+import { CompanyDocumentsTable } from '../components/CompanyDocumentsTable';
+import { Expense } from '../services/expensesService';
+import { DeboursNote } from '../services/deboursNoteService';
+import { Payment } from '../services/paymentService';
+import { DeboursNoteModal } from '../components/DeboursNoteModal';
 
 const STAGES = {
   QUALIFICATION: { label: 'Qualification', color: 'bg-blue-100 text-blue-700' },
@@ -59,6 +65,8 @@ export function CompanyDetailPage() {
   const [editSalesNav, setEditSalesNav] = useState('');
   const [editNotes, setEditNotes] = useState('');
   const [editTags, setEditTags] = useState('');
+  const [editGoogleDriveFolderId, setEditGoogleDriveFolderId] = useState('');
+  const [showDriveFolderModal, setShowDriveFolderModal] = useState(false);
   const [loading, setLoading] = useState(!isNew);
   const [showMergeModal, setShowMergeModal] = useState(false);
   const [mergeCompanyId, setMergeCompanyId] = useState<string | undefined>(undefined);
@@ -69,6 +77,16 @@ export function CompanyDetailPage() {
   const [sireneResults, setSireneResults] = useState<SireneResult[]>([]);
   const [showSireneResults, setShowSireneResults] = useState(false);
   const [isFillingFromSirene, setIsFillingFromSirene] = useState(false);
+  
+  // Nouvelles données pour la refonte
+  const [allQuotes, setAllQuotes] = useState<any[]>([]);
+  const [allDeboursNotes, setAllDeboursNotes] = useState<DeboursNote[]>([]);
+  const [allExpenses, setAllExpenses] = useState<Expense[]>([]);
+  const [allPayments, setAllPayments] = useState<Payment[]>([]);
+  const [allInvoiceUrls, setAllInvoiceUrls] = useState<Array<{ url: string; opportunityId?: string; opportunity?: { id: string; title: string } }>>([]);
+  const [showDeboursNoteModal, setShowDeboursNoteModal] = useState(false);
+  const [editingDeboursNote, setEditingDeboursNote] = useState<DeboursNote | undefined>(undefined);
+  const [selectedOpportunityForDebours, setSelectedOpportunityForDebours] = useState<{ id: string; title: string } | null>(null);
 
   useEffect(() => {
     if (id && !isNew) {
@@ -76,6 +94,13 @@ export function CompanyDetailPage() {
       void loadAllCompanies();
     }
   }, [id, isNew]);
+
+  // Charger toutes les données nécessaires pour la refonte
+  useEffect(() => {
+    if (id && !isNew && company?.opportunities) {
+      void loadAllCompanyData(id);
+    }
+  }, [id, isNew, company?.opportunities?.length]);
 
   const loadAllCompanies = async () => {
     try {
@@ -86,6 +111,63 @@ export function CompanyDetailPage() {
       setAllCompanies(filtered);
     } catch (error) {
       console.error('Erreur chargement companies:', error);
+    }
+  };
+
+  const loadAllCompanyData = async (companyId: string) => {
+    if (!company?.opportunities || company.opportunities.length === 0) return;
+
+    const opportunityIds = company.opportunities.map((opp: any) => opp.id);
+
+    try {
+      // Charger tous les quotes pour toutes les opportunités
+      const quotesPromises = opportunityIds.map((oppId: string) =>
+        api.get(`/api/quotes?opportunityId=${oppId}`).catch(() => ({ data: [] }))
+      );
+      const quotesResults = await Promise.all(quotesPromises);
+      const allQuotesData = quotesResults.flatMap(res => res.data || []);
+      setAllQuotes(allQuotesData);
+
+      // Charger toutes les notes de débours
+      const deboursPromises = opportunityIds.map((oppId: string) =>
+        api.get(`/api/debours-notes?opportunityId=${oppId}`).catch(() => ({ data: [] }))
+      );
+      const deboursResults = await Promise.all(deboursPromises);
+      const allDeboursData = deboursResults.flatMap(res => res.data || []);
+      setAllDeboursNotes(allDeboursData);
+
+      // Charger toutes les dépenses
+      const expensesPromises = opportunityIds.map((oppId: string) =>
+        api.get(`/api/expenses?opportunityId=${oppId}`).catch(() => ({ data: [] }))
+      );
+      const expensesResults = await Promise.all(expensesPromises);
+      const allExpensesData = expensesResults.flatMap(res => res.data || []);
+      setAllExpenses(allExpensesData);
+
+      // Charger tous les paiements pour les opportunités
+      const paymentsPromises = opportunityIds.map((oppId: string) =>
+        api.get(`/api/payments?opportunityId=${oppId}`).catch(() => ({ data: [] }))
+      );
+      const paymentsResults = await Promise.all(paymentsPromises);
+      const allPaymentsData = paymentsResults.flatMap(res => res.data || []);
+      setAllPayments(allPaymentsData);
+
+      // Construire la liste des factures depuis les opportunités
+      const invoiceUrlsData: Array<{ url: string; opportunityId?: string; opportunity?: { id: string; title: string; amount?: number } }> = [];
+      company.opportunities.forEach((opp: any) => {
+        if (opp.invoiceUrls && Array.isArray(opp.invoiceUrls)) {
+          opp.invoiceUrls.forEach((url: string) => {
+            invoiceUrlsData.push({
+              url,
+              opportunityId: opp.id,
+              opportunity: { id: opp.id, title: opp.title, amount: opp.amount }
+            });
+          });
+        }
+      });
+      setAllInvoiceUrls(invoiceUrlsData);
+    } catch (error) {
+      console.error('Erreur chargement données entreprise:', error);
     }
   };
 
@@ -128,6 +210,11 @@ export function CompanyDetailPage() {
         opportunities: allOpportunities
       });
       console.log('Company loaded:', { googleDriveFolderId: companyData.googleDriveFolderId, name: companyData.name });
+      
+      // Déclencher le chargement des données supplémentaires
+      if (allOpportunities.length > 0) {
+        void loadAllCompanyData(companyId);
+      }
       setEditName(companyData.name);
       setEditDomain(companyData.domain || '');
       setEditIsIndividual(!!companyData.isIndividual);
@@ -143,6 +230,7 @@ export function CompanyDetailPage() {
       setEditSalesNav(companyData.salesNavigatorUrl || '');
       setEditNotes(companyData.notes || '');
       setEditTags((companyData.tags || []).join(', '));
+      setEditGoogleDriveFolderId(companyData.googleDriveFolderId || '');
     } catch (error: any) {
       console.error('Erreur chargement entreprise:', error);
       // Si l'entreprise n'est pas trouvée (404), définir company à null
@@ -160,6 +248,9 @@ export function CompanyDetailPage() {
   const handleSave = async () => {
     if (!id) return;
     try {
+      // Normaliser le SIRET avant l'envoi (supprimer les espaces)
+      const normalizedSiret = editSiret ? normalizeSiret(editSiret) : undefined;
+      
       await api.patch(`/api/companies/${id}`, {
         name: editName,
         domain: editDomain || undefined,
@@ -168,13 +259,14 @@ export function CompanyDetailPage() {
         addressZip: editAddressZip || undefined,
         addressCity: editAddressCity || undefined,
         addressCountry: editAddressCountry || undefined,
-        siret: editSiret || undefined,
+        siret: normalizedSiret || null, // Envoyer null plutôt que undefined pour permettre de vider le champ
         codeNAF: editCodeNAF || undefined,
         libelleNAF: editLibelleNAF || undefined,
         vatNumber: editVat || undefined,
         linkedinUrl: editLinkedin || undefined,
         salesNavigatorUrl: editSalesNav || undefined,
         notes: editNotes || undefined,
+        googleDriveFolderId: editGoogleDriveFolderId || undefined,
         tags: editTags
           .split(',')
           .map((t) => t.trim())
@@ -182,9 +274,9 @@ export function CompanyDetailPage() {
       });
       setIsEditing(false);
       await loadCompany(id);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erreur sauvegarde:', error);
-      alert('Erreur lors de la sauvegarde');
+      alert(error.response?.data?.message || 'Erreur lors de la sauvegarde');
     }
   };
 
@@ -748,121 +840,193 @@ export function CompanyDetailPage() {
     return <div className="p-8 text-center text-slate-500">Entreprise non trouvée</div>;
   }
 
-  const totalRevenue = company.opportunities?.reduce((sum, opp) => sum + (Number(opp.amount) || 0), 0) || 0;
-  const wonRevenue = company.opportunities
-    ?.filter(o => o.stage === 'CLOSED_WON')
-    .reduce((sum, opp) => sum + (Number(opp.amount) || 0), 0) || 0;
+  const handleDeleteDeboursNote = async (noteId: string) => {
+    try {
+      await api.delete(`/api/debours-notes/${noteId}`);
+      if (id) {
+        await loadAllCompanyData(id);
+      }
+    } catch (error: any) {
+      alert(error.response?.data?.message || 'Erreur lors de la suppression de la note de débours');
+    }
+  };
+
+  const refreshAllData = async () => {
+    if (id) {
+      await loadCompany(id);
+      await loadAllCompanyData(id);
+    }
+  };
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-7xl space-y-6">
       {/* En-tête avec infos éditables */}
       <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex items-start justify-between mb-4">
-          <div className="flex-1">
-            {!isEditing ? (
-              <>
-                <h1 className="text-2xl font-semibold text-slate-900">{company.name}</h1>
-                {company.domain && (
-                  <p className="text-sm text-slate-500 mt-1">🌐 {company.domain}</p>
-                )}
-                {(company.addressCity || company.addressZip) && (
-                  <p className="text-sm text-slate-500 mt-1">{company.addressStreet ? `${company.addressStreet}, ` : ''}{company.addressZip} {company.addressCity} {company.addressCountry || ''}</p>
-                )}
-                {(company.siret || company.vatNumber || company.codeNAF) && (
-                  <p className="text-xs text-slate-400 mt-1">
-                    {company.siret ? `SIRET: ${formatSiret(company.siret)}` : ''}
-                    {company.siret && company.vatNumber ? ' • ' : ''}
-                    {company.vatNumber ? `TVA: ${company.vatNumber}` : ''}
-                    {company.codeNAF && `${company.siret || company.vatNumber ? ' • ' : ''}NAF: ${company.codeNAF}${company.libelleNAF ? ` - ${company.libelleNAF}` : ''}`}
-                  </p>
-                )}
-                {(company.linkedinUrl || company.salesNavigatorUrl) && (
-                  <p className="text-xs text-slate-400 mt-1">
-                    {company.linkedinUrl && <a href={company.linkedinUrl} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">LinkedIn</a>}
-                    {company.linkedinUrl && company.salesNavigatorUrl ? ' • ' : ''}
-                    {company.salesNavigatorUrl && <a href={company.salesNavigatorUrl} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">Sales Navigator</a>}
-                  </p>
-                )}
-                {company.tags && company.tags.length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    {company.tags.map((t) => (
-                      <span key={t} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{t}</span>
-                    ))}
-                  </div>
-                )}
-              </>
+        {!isEditing ? (
+          <div className="flex items-start justify-between">
+            <div className="flex-1">
+              <h1 className="text-2xl font-semibold text-slate-900">{company.name}</h1>
+              {company.domain && (
+                <p className="text-sm text-slate-500 mt-1">🌐 {company.domain}</p>
+              )}
+              {(company.addressCity || company.addressZip) && (
+                <p className="text-sm text-slate-500 mt-1">{company.addressStreet ? `${company.addressStreet}, ` : ''}{company.addressZip} {company.addressCity} {company.addressCountry || ''}</p>
+              )}
+              {(company.siret || company.vatNumber || company.codeNAF) && (
+                <p className="text-xs text-slate-400 mt-1">
+                  {company.siret ? `SIRET: ${formatSiret(company.siret)}` : ''}
+                  {company.siret && company.vatNumber ? ' • ' : ''}
+                  {company.vatNumber ? `TVA: ${company.vatNumber}` : ''}
+                  {company.codeNAF && `${company.siret || company.vatNumber ? ' • ' : ''}NAF: ${company.codeNAF}${company.libelleNAF ? ` - ${company.libelleNAF}` : ''}`}
+                </p>
+              )}
+              {(company.linkedinUrl || company.salesNavigatorUrl) && (
+                <p className="text-xs text-slate-400 mt-1">
+                  {company.linkedinUrl && <a href={company.linkedinUrl} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">LinkedIn</a>}
+                  {company.linkedinUrl && company.salesNavigatorUrl ? ' • ' : ''}
+                  {company.salesNavigatorUrl && <a href={company.salesNavigatorUrl} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">Sales Navigator</a>}
+                </p>
+              )}
+              {company.tags && company.tags.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {company.tags.map((t) => (
+                    <span key={t} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{t}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="flex gap-2 flex-shrink-0 ml-4">
+            {/* Lien Drive avec possibilité de créer/associer */}
+            {company.googleDriveFolderId ? (
+              <a
+                href={`https://drive.google.com/drive/folders/${company.googleDriveFolderId}`}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-2 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm font-medium text-green-700 hover:bg-green-100"
+              >
+                <span>📂</span>
+                Dossier Drive
+              </a>
             ) : (
-              <div className="space-y-3">
-                <input
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  className="text-2xl font-semibold border-b-2 border-indigo-500 focus:outline-none"
-                />
-                <input
-                  value={editDomain}
-                  onChange={(e) => setEditDomain(e.target.value)}
-                  placeholder="exemple.com"
-                  className="text-sm text-slate-500 border-b border-slate-300 focus:outline-none focus:border-indigo-500"
-                />
+              <button
+                onClick={() => setShowDriveFolderModal(true)}
+                className="flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                <span>📂</span>
+                Associer dossier Drive
+              </button>
+            )}
+            <button
+              onClick={() => setIsEditing(true)}
+              className="flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50"
+            >
+              <PencilIcon className="h-4 w-4" />
+              Modifier
+            </button>
+            <button
+              onClick={() => setShowMergeModal(true)}
+              className="flex items-center gap-2 rounded-md border border-amber-200 px-3 py-2 text-sm text-amber-600 hover:bg-amber-50"
+            >
+              <ArrowRightIcon className="h-4 w-4" />
+              Fusionner
+            </button>
+            <button
+              onClick={handleDelete}
+              className="flex items-center gap-2 rounded-md border border-rose-200 px-3 py-2 text-sm text-rose-600 hover:bg-rose-50"
+            >
+              <TrashIcon className="h-4 w-4" />
+              Supprimer
+            </button>
+          </div>
+        </div>
+        ) : (
+          <div className="max-w-4xl mx-auto space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Nom de l'entreprise</label>
+                  <input
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-xl font-semibold focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Site web</label>
+                  <input
+                    value={editDomain}
+                    onChange={(e) => setEditDomain(e.target.value)}
+                    placeholder="exemple.com"
+                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
                 <label className="flex items-center gap-2 text-sm text-slate-700">
                   <input type="checkbox" checked={editIsIndividual} onChange={(e) => setEditIsIndividual(e.target.checked)} />
                   Particulier
                 </label>
-                <div className="grid grid-cols-2 gap-3">
-                  <input
-                    value={editAddressStreet}
-                    onChange={(e) => setEditAddressStreet(e.target.value)}
-                    placeholder="Adresse"
-                    className="text-sm border-b border-slate-300 focus:outline-none focus:border-indigo-500"
-                  />
-                  <input
-                    value={editAddressZip}
-                    onChange={(e) => setEditAddressZip(e.target.value)}
-                    placeholder="Code postal"
-                    className="text-sm border-b border-slate-300 focus:outline-none focus:border-indigo-500"
-                  />
-                  <input
-                    value={editAddressCity}
-                    onChange={(e) => setEditAddressCity(e.target.value)}
-                    placeholder="Ville"
-                    className="text-sm border-b border-slate-300 focus:outline-none focus:border-indigo-500"
-                  />
-                  <input
-                    value={editAddressCountry}
-                    onChange={(e) => setEditAddressCountry(e.target.value)}
-                    placeholder="Pays"
-                    className="text-sm border-b border-slate-300 focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="relative">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Adresse</label>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <input
-                      value={formatSiret(editSiret)}
-                      onChange={(e) => {
-                        // Normaliser à la saisie (supprimer les espaces)
-                        const normalized = normalizeSiret(e.target.value);
-                        setEditSiret(normalized);
-                      }}
-                      placeholder="SIRET"
-                      maxLength={17} // 14 chiffres + 3 espaces
-                      className="w-full text-sm border-b border-slate-300 focus:outline-none focus:border-indigo-500 pr-10"
+                      value={editAddressStreet}
+                      onChange={(e) => setEditAddressStreet(e.target.value)}
+                      placeholder="Numéro et rue"
+                      className="rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
                     />
-                    <button
-                      type="button"
-                      onClick={() => handleSearchSirene()}
-                      disabled={isSearchingSirene || (!editSiret && !editName)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-xs bg-indigo-50 text-indigo-600 px-2 py-1 rounded hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                      title="Rechercher dans Sirene"
-                    >
-                      {isSearchingSirene ? '...' : '🔍'}
-                    </button>
+                    <input
+                      value={editAddressZip}
+                      onChange={(e) => setEditAddressZip(e.target.value)}
+                      placeholder="Code postal"
+                      className="rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+                    />
+                    <input
+                      value={editAddressCity}
+                      onChange={(e) => setEditAddressCity(e.target.value)}
+                      placeholder="Ville"
+                      className="rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+                    />
+                    <input
+                      value={editAddressCountry}
+                      onChange={(e) => setEditAddressCountry(e.target.value)}
+                      placeholder="Pays"
+                      className="rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+                    />
                   </div>
-                  <input
-                    value={editVat}
-                    onChange={(e) => setEditVat(e.target.value)}
-                    placeholder="TVA intracommunautaire"
-                    className="text-sm border-b border-slate-300 focus:outline-none focus:border-indigo-500"
-                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Informations légales</label>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="relative">
+                      <label className="block text-xs text-slate-500 mb-1">SIRET</label>
+                      <input
+                        value={formatSiret(editSiret)}
+                        onChange={(e) => {
+                          // Normaliser à la saisie (supprimer les espaces)
+                          const normalized = normalizeSiret(e.target.value);
+                          setEditSiret(normalized);
+                        }}
+                        placeholder="14 chiffres"
+                        maxLength={17} // 14 chiffres + 3 espaces
+                        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none pr-10"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleSearchSirene()}
+                        disabled={isSearchingSirene || (!editSiret && !editName)}
+                        className="absolute right-2 bottom-2 text-xs bg-indigo-50 text-indigo-600 px-2 py-1 rounded hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Rechercher dans Sirene"
+                      >
+                        {isSearchingSirene ? '...' : '🔍'}
+                      </button>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-500 mb-1">TVA intracommunautaire</label>
+                      <input
+                        value={editVat}
+                        onChange={(e) => setEditVat(e.target.value)}
+                        placeholder="FR..."
+                        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
                 </div>
                 
                 {/* Résultats recherche Sirene - Formulaire d'édition */}
@@ -947,251 +1111,374 @@ export function CompanyDetailPage() {
                     </div>
                   </div>
                 )}
-                <div className="grid grid-cols-2 gap-3">
-                  <input
-                    value={editLinkedin}
-                    onChange={(e) => setEditLinkedin(e.target.value)}
-                    placeholder="URL LinkedIn"
-                    className="text-sm border-b border-slate-300 focus:outline-none focus:border-indigo-500"
-                  />
-                  <input
-                    value={editSalesNav}
-                    onChange={(e) => setEditSalesNav(e.target.value)}
-                    placeholder="URL Sales Navigator"
-                    className="text-sm border-b border-slate-300 focus:outline-none focus:border-indigo-500"
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Réseaux sociaux</label>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <input
+                      value={editLinkedin}
+                      onChange={(e) => setEditLinkedin(e.target.value)}
+                      placeholder="URL LinkedIn"
+                      className="rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+                    />
+                    <input
+                      value={editSalesNav}
+                      onChange={(e) => setEditSalesNav(e.target.value)}
+                      placeholder="URL Sales Navigator"
+                      className="rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Notes</label>
+                  <textarea
+                    value={editNotes}
+                    onChange={(e) => setEditNotes(e.target.value)}
+                    placeholder="Notes internes..."
+                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+                    rows={4}
                   />
                 </div>
-                <textarea
-                  value={editNotes}
-                  onChange={(e) => setEditNotes(e.target.value)}
-                  placeholder="Notes"
-                  className="w-full text-sm border border-slate-300 rounded-md p-2 focus:outline-none focus:border-indigo-500"
-                  rows={3}
-                />
-                <input
-                  value={editTags}
-                  onChange={(e) => setEditTags(e.target.value)}
-                  placeholder="Tags (séparés par des virgules)"
-                  className="text-sm border-b border-slate-300 focus:outline-none focus:border-indigo-500"
-                />
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Tags</label>
+                  <input
+                    value={editTags}
+                    onChange={(e) => setEditTags(e.target.value)}
+                    placeholder="Tags (séparés par des virgules)"
+                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Dossier Google Drive</label>
+                  <div className="flex gap-2">
+                    <input
+                      value={editGoogleDriveFolderId}
+                      onChange={(e) => setEditGoogleDriveFolderId(e.target.value)}
+                      placeholder="ID du dossier Drive (optionnel)"
+                      className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+                    />
+                    {editGoogleDriveFolderId && (
+                      <a
+                        href={`https://drive.google.com/drive/folders/${editGoogleDriveFolderId}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center gap-1 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                      >
+                        Ouvrir
+                      </a>
+                    )}
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Laissez vide pour qu'il soit créé automatiquement lors de la première opportunité
+                  </p>
+                </div>
+                <div className="flex gap-2 justify-end pt-4 border-t border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => handleSearchSirene()}
+                    disabled={isFillingFromSirene || (!editSiret && !editName)}
+                    className="flex items-center gap-2 rounded-md border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <>🔍 Rechercher dans Sirene</>
+                  </button>
+                  <button
+                    onClick={() => { setIsEditing(false); setEditName(company.name); setEditDomain(company.domain || ''); }}
+                    className="rounded-md border border-slate-200 px-3 py-2 text-sm"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    onClick={handleSave}
+                    className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-500"
+                  >
+                    Enregistrer
+                  </button>
+                </div>
+          </div>
+        )}
+      </div>
+
+      {/* Layout 2 colonnes - seulement si pas en mode édition */}
+      {!isEditing && (
+      <div className="grid grid-cols-1 lg:grid-cols-7 gap-6">
+        {/* Colonne gauche (2/7) */}
+        <div className="lg:col-span-2 space-y-6">
+          {/* Métriques compactes */}
+          <CompanyMetrics
+            opportunities={company.opportunities || []}
+            expenses={allExpenses}
+          />
+
+          {/* Section Contacts */}
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-900">Contacts</h3>
+              <Link
+                to={`/contacts/new?companyId=${id}`}
+                className="flex items-center gap-1 rounded-md bg-indigo-600 px-2 py-1 text-xs font-medium text-white hover:bg-indigo-700 transition-colors"
+              >
+                <PlusIcon className="h-3 w-3" />
+                Ajouter
+              </Link>
+            </div>
+            <div className="space-y-2">
+              {company.contacts && company.contacts.length > 0 ? (
+                company.contacts.map((contact: any) => (
+                  <Link
+                    key={contact.id}
+                    to={`/contacts/${contact.id}`}
+                    className="block rounded-lg border border-slate-200 p-2 hover:bg-slate-50 transition-colors"
+                  >
+                    <p className="text-xs font-medium text-slate-900">
+                      {contact.firstName} {contact.lastName || ''}
+                    </p>
+                    {contact.email && (
+                      <p className="text-xs text-slate-500 mt-0.5">{contact.email}</p>
+                    )}
+                  </Link>
+                ))
+              ) : (
+                <p className="text-xs text-slate-500 text-center py-2">Aucun contact</p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Colonne droite (5/7) */}
+        <div className="lg:col-span-5 space-y-6">
+          {/* Opportunités */}
+          <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-slate-900">Opportunités</h2>
+              <button
+                onClick={() => navigate(`/opportunites/new?companyId=${id}`)}
+                className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 transition-colors"
+              >
+                <PlusIcon className="h-3.5 w-3.5" />
+                Ajouter
+              </button>
+            </div>
+            {company.opportunities && company.opportunities.length > 0 ? (
+              <div className="space-y-2">
+                {company.opportunities.map((opp: any) => (
+                  <Link
+                    key={opp.id}
+                    to={`/opportunites/${opp.id}`}
+                    className="flex items-center justify-between rounded-lg border border-slate-200 p-3 hover:bg-slate-50 transition-colors"
+                  >
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-slate-900">{opp.title}</p>
+                      {opp.contact && (
+                        <p className="text-xs text-slate-500 mt-1">
+                          {opp.contact.firstName} {opp.contact.lastName || ''}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className={`rounded-full px-2 py-1 text-xs font-semibold ${STAGES[opp.stage as keyof typeof STAGES]?.color || 'bg-slate-100 text-slate-700'}`}>
+                        {STAGES[opp.stage as keyof typeof STAGES]?.label || opp.stage}
+                      </span>
+                      {opp.amount && (
+                        <span className="text-sm font-semibold text-indigo-600">
+                          {Number(opp.amount).toFixed(2)} €
+                        </span>
+                      )}
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <p className="text-sm text-slate-500">Aucune opportunité</p>
               </div>
             )}
           </div>
-          <div className="flex gap-2">
-            {/* Lien Drive toujours visible (même en mode édition) */}
-            {company.googleDriveFolderId ? (
-              <a
-                href={`https://drive.google.com/drive/folders/${company.googleDriveFolderId}`}
-                target="_blank"
-                rel="noreferrer"
-                className="flex items-center gap-2 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm font-medium text-green-700 hover:bg-green-100"
-              >
-                <span>📂</span>
-                Dossier Drive
-              </a>
-            ) : (
-              <span className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
-                <span>📂</span>
-                Dossier Drive (créé lors de la première opportunité)
-              </span>
-            )}
-            {!isEditing ? (
-              <>
-                <button
-                  onClick={() => setIsEditing(true)}
-                  className="flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50"
-                >
-                  <PencilIcon className="h-4 w-4" />
-                  Modifier
-                </button>
-                <button
-                  onClick={() => setShowMergeModal(true)}
-                  className="flex items-center gap-2 rounded-md border border-amber-200 px-3 py-2 text-sm text-amber-600 hover:bg-amber-50"
-                >
-                  <ArrowRightIcon className="h-4 w-4" />
-                  Fusionner
-                </button>
-                <button
-                  onClick={handleDelete}
-                  className="flex items-center gap-2 rounded-md border border-rose-200 px-3 py-2 text-sm text-rose-600 hover:bg-rose-50"
-                >
-                  <TrashIcon className="h-4 w-4" />
-                  Supprimer
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  onClick={() => handleSearchSirene()}
-                  disabled={isFillingFromSirene || (!editSiret && !editName)}
-                  className="flex items-center gap-2 rounded-md border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  <>🔍 Rechercher dans Sirene</>
-                </button>
-                <button
-                  onClick={() => { setIsEditing(false); setEditName(company.name); setEditDomain(company.domain || ''); }}
-                  className="rounded-md border border-slate-200 px-3 py-2 text-sm"
-                >
-                  Annuler
-                </button>
-                <button
-                  onClick={handleSave}
-                  className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-500"
-                >
-                  Enregistrer
-                </button>
-              </>
-            )}
-          </div>
-        </div>
 
-        {/* Statistiques */}
-        <div className="grid grid-cols-3 gap-4 mt-6 pt-6 border-t border-slate-200">
-          <div>
-            <p className="text-xs text-slate-500 uppercase">Contacts</p>
-            <p className="text-2xl font-semibold text-slate-900">{company.contacts?.length || 0}</p>
-          </div>
-          <div>
-            <p className="text-xs text-slate-500 uppercase">Opportunités</p>
-            <p className="text-2xl font-semibold text-slate-900">{company.opportunities?.length || 0}</p>
-          </div>
-          <div>
-            <p className="text-xs text-slate-500 uppercase">CA Total</p>
-            <p className="text-2xl font-semibold text-emerald-600">{totalRevenue.toFixed(0)} €</p>
-            <p className="text-xs text-slate-500 mt-1">Gagné : {wonRevenue.toFixed(0)} €</p>
-          </div>
-        </div>
-      </div>
+          {/* Tableau documents unifié */}
+          <CompanyDocumentsTable
+            quotes={allQuotes}
+            invoiceUrls={allInvoiceUrls}
+            deboursNotes={allDeboursNotes}
+            payments={allPayments}
+            opportunities={company.opportunities || []}
+            onEditDeboursNote={(note) => {
+              setEditingDeboursNote(note);
+              const opp = company?.opportunities?.find((o: any) => o.id === note.opportunityId);
+              if (opp) {
+                setSelectedOpportunityForDebours({ id: opp.id, title: opp.title });
+              }
+              setShowDeboursNoteModal(true);
+            }}
+            onDeleteDeboursNote={handleDeleteDeboursNote}
+            onCreateDeboursNote={(opportunityId) => {
+              const opp = company?.opportunities?.find((o: any) => o.id === opportunityId);
+              if (opp) {
+                setSelectedOpportunityForDebours({ id: opp.id, title: opp.title });
+              }
+              setEditingDeboursNote(undefined);
+              setShowDeboursNoteModal(true);
+            }}
+          />
 
-      {/* Contacts de l'entreprise */}
-      <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-200 bg-slate-50 px-6 py-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-900">Contacts ({company.contacts?.length || 0})</h2>
-          <Link
-            to={`/contacts/new`}
-            className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-500"
-          >
-            <PlusIcon className="h-3 w-3" />
-            Ajouter
-          </Link>
-        </div>
-        <div className="divide-y divide-slate-100">
-          {company.contacts && company.contacts.length > 0 ? (
-            company.contacts.map((contact: any) => (
-              <Link
-                key={contact.id}
-                to={`/contacts/${contact.id}`}
-                className="block px-6 py-3 hover:bg-slate-50"
-              >
-                <p className="text-sm font-medium text-slate-900">
-                  👤 {contact.firstName} {contact.lastName || ''}
-                </p>
-                {contact.email && (
-                  <p className="text-xs text-slate-500 mt-1">{contact.email}</p>
-                )}
-              </Link>
-            ))
-          ) : (
-            <p className="px-6 py-4 text-sm text-slate-500">Aucun contact pour cette entreprise</p>
-          )}
-        </div>
-      </div>
-
-      {/* Opportunités de l'entreprise */}
-      <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-200 bg-slate-50 px-6 py-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-900">Opportunités ({company.opportunities?.length || 0})</h2>
-          <button
-            onClick={() => navigate(`/opportunites/new?companyId=${id}`)}
-            className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-500"
-          >
-            <PlusIcon className="h-3 w-3" />
-            Ajouter
-          </button>
-        </div>
-        <div className="divide-y divide-slate-100">
-          {company.opportunities && company.opportunities.length > 0 ? (
-            company.opportunities.map((opp: any) => (
-              <Link
-                key={opp.id}
-                to={`/opportunites/${opp.id}`}
-                className="block px-6 py-3 hover:bg-slate-50"
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-slate-900">{opp.title}</p>
-                    {opp.contact && (
-                      <p className="text-xs text-slate-500 mt-1">
-                        Contact : {opp.contact.firstName} {opp.contact.lastName || ''}
-                      </p>
-                    )}
-                  </div>
-                  <div className="text-right">
-                    <span className={`inline-block rounded-full px-2 py-1 text-xs font-semibold ${STAGES[opp.stage as keyof typeof STAGES]?.color || 'bg-slate-100 text-slate-700'}`}>
-                      {STAGES[opp.stage as keyof typeof STAGES]?.label || opp.stage}
-                    </span>
-                    {opp.amount && (
-                      <p className="text-sm font-semibold text-indigo-600 mt-1">
-                        {Number(opp.amount).toFixed(2)} €
-                      </p>
-                    )}
-                    {opp.closeDate && (
-                      <p className="text-xs text-slate-400 mt-1">
-                        📅 {new Date(opp.closeDate).toLocaleDateString('fr-FR')}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </Link>
-            ))
-          ) : (
-            <p className="px-6 py-4 text-sm text-slate-500">Aucune opportunité pour cette entreprise</p>
-          )}
-        </div>
-      </div>
-
-      {/* Résumé facturation */}
-      {company.opportunities && company.opportunities.length > 0 && (
-        <div className="rounded-lg border border-slate-200 bg-gradient-to-br from-indigo-50 to-purple-50 p-6">
-          <h2 className="text-sm font-semibold text-slate-900 mb-4">📊 Résumé Facturation</h2>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="rounded-lg bg-white p-4">
-              <p className="text-xs text-slate-500 uppercase mb-1">Pipeline total</p>
-              <p className="text-xl font-bold text-slate-900">{totalRevenue.toFixed(2)} €</p>
+          {/* Section Dépenses */}
+          <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-slate-900">Dépenses</h2>
             </div>
-            <div className="rounded-lg bg-white p-4">
-              <p className="text-xs text-slate-500 uppercase mb-1">CA Réalisé</p>
-              <p className="text-xl font-bold text-emerald-600">{wonRevenue.toFixed(2)} €</p>
-            </div>
-            {company.opportunities.filter(o => o.closeDate && o.stage !== 'CLOSED_WON' && o.stage !== 'CLOSED_LOST').length > 0 && (
-              <div className="col-span-2 rounded-lg bg-white p-4">
-                <p className="text-xs text-slate-500 uppercase mb-2">Prochaines facturations</p>
-                <div className="space-y-2">
-                  {company.opportunities
-                    .filter(o => o.closeDate && o.stage !== 'CLOSED_WON' && o.stage !== 'CLOSED_LOST')
-                    .sort((a, b) => new Date(a.closeDate).getTime() - new Date(b.closeDate).getTime())
-                    .slice(0, 3)
-                    .map((opp: any) => (
-                      <div key={opp.id} className="flex items-center justify-between text-sm">
-                        <span className="text-slate-700">{opp.title}</span>
-                        <div className="text-right">
-                          <span className="font-semibold text-indigo-600">{Number(opp.amount).toFixed(2)} €</span>
-                          <span className="text-xs text-slate-400 ml-2">
-                            {new Date(opp.closeDate).toLocaleDateString('fr-FR')}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                </div>
+            {allExpenses.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Fournisseur</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Opportunité</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Date</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase">Montant TTC</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Statut</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {allExpenses.map((expense) => {
+                      const relatedOpp = company?.opportunities?.find((o: any) => o.id === expense.opportunityId);
+                      return (
+                        <tr 
+                          key={expense.id} 
+                          className="hover:bg-slate-50 cursor-pointer"
+                          onClick={() => navigate(`/depenses/${expense.id}`)}
+                        >
+                          <td className="px-4 py-3 text-sm font-medium text-slate-900">{expense.supplierName || '-'}</td>
+                          <td className="px-4 py-3 text-sm text-slate-600">
+                            {relatedOpp ? (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  navigate(`/opportunites/${relatedOpp.id}`);
+                                }}
+                                className="text-indigo-600 hover:text-indigo-700"
+                              >
+                                {relatedOpp.title}
+                              </button>
+                            ) : (
+                              '-'
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-slate-600">
+                            {expense.invoiceDate ? new Date(expense.invoiceDate).toLocaleDateString('fr-FR') : '-'}
+                          </td>
+                          <td className="px-4 py-3 text-right text-sm font-semibold text-slate-900">
+                            {expense.amountTTC ? new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(parseFloat(expense.amountTTC.toString())) : '-'}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                              expense.status === 'PENDING' ? 'bg-yellow-100 text-yellow-700' :
+                              expense.status === 'PROCESSED' ? 'bg-blue-100 text-blue-700' :
+                              expense.status === 'VERIFIED' ? 'bg-green-100 text-green-700' :
+                              'bg-red-100 text-red-700'
+                            }`}>
+                              {expense.status === 'PENDING' ? 'En attente' :
+                               expense.status === 'PROCESSED' ? 'Traité' :
+                               expense.status === 'VERIFIED' ? 'Vérifié' :
+                               'Rejeté'}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <DocumentDuplicateIcon className="mx-auto h-12 w-12 text-slate-400" />
+                <p className="mt-4 text-sm text-slate-500">Aucune dépense</p>
               </div>
             )}
+          </div>
+        </div>
+      </div>
+      )}
+
+      {/* Modals */}
+      {/* Modal note de débours */}
+      {showDeboursNoteModal && selectedOpportunityForDebours && (
+        <DeboursNoteModal
+          isOpen={showDeboursNoteModal}
+          onClose={() => {
+            setShowDeboursNoteModal(false);
+            setEditingDeboursNote(undefined);
+            setSelectedOpportunityForDebours(null);
+          }}
+          opportunityId={selectedOpportunityForDebours.id}
+          opportunityTitle={selectedOpportunityForDebours.title}
+          deboursNote={editingDeboursNote}
+          onSuccess={async () => {
+            if (id) {
+              await loadAllCompanyData(id);
+            }
+            setShowDeboursNoteModal(false);
+            setEditingDeboursNote(undefined);
+            setSelectedOpportunityForDebours(null);
+          }}
+        />
+      )}
+
+      {/* Modal dossier Drive */}
+      {showDriveFolderModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+            <h2 className="mb-4 text-xl font-semibold text-slate-900">Gérer le dossier Drive</h2>
+            <p className="mb-4 text-sm text-slate-600">
+              Vous pouvez associer un dossier Google Drive existant ou laisser vide pour qu'il soit créé automatiquement lors de la prochaine opportunité.
+            </p>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-slate-700 mb-2">
+                ID du dossier Drive
+              </label>
+              <input
+                type="text"
+                value={editGoogleDriveFolderId}
+                onChange={(e) => setEditGoogleDriveFolderId(e.target.value)}
+                placeholder="Ex: 1ABC..."
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+              />
+              <p className="mt-1 text-xs text-slate-500">
+                L'ID se trouve dans l'URL du dossier : drive.google.com/drive/folders/<strong>1ABC...</strong>
+              </p>
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  setShowDriveFolderModal(false);
+                  setEditGoogleDriveFolderId(company?.googleDriveFolderId || '');
+                }}
+                className="rounded-md border border-slate-200 px-4 py-2 text-sm hover:bg-slate-50"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    if (id) {
+                      await api.patch(`/api/companies/${id}`, {
+                        googleDriveFolderId: editGoogleDriveFolderId || null
+                      });
+                      await loadCompany(id);
+                      setShowDriveFolderModal(false);
+                    }
+                  } catch (error: any) {
+                    alert(error.response?.data?.message || 'Erreur lors de la mise à jour du dossier Drive');
+                  }
+                }}
+                className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+              >
+                Enregistrer
+              </button>
+            </div>
           </div>
         </div>
       )}
 
       {/* Modal de fusion */}
-      {showMergeModal && (
+      {showMergeModal && id && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
           <div className="w-full max-w-2xl rounded-lg bg-white p-6 shadow-xl">
             <h2 className="mb-4 text-xl font-semibold text-slate-900">Fusionner des entreprises</h2>

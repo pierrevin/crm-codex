@@ -14,6 +14,7 @@ import { ExpenseUploadModal } from '../components/ExpenseUploadModal';
 import { OpportunityMetrics } from '../components/OpportunityMetrics';
 import { DocumentSection } from '../components/DocumentSection';
 import { RevenueTable } from '../components/RevenueTable';
+import { Breadcrumb } from '../components/Breadcrumb';
 
 const STAGES = {
   QUALIFICATION: { label: 'Qualification', color: 'bg-blue-100 text-blue-700' },
@@ -69,6 +70,7 @@ export function OpportunityDetailPage() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [showExpenseModal, setShowExpenseModal] = useState(false);
   const [isGeneralInfoCollapsed, setIsGeneralInfoCollapsed] = useState(true);
+  const [companyInfo, setCompanyInfo] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
     void loadContacts();
@@ -160,18 +162,32 @@ export function OpportunityDetailPage() {
     setLoading(true);
     setError(null);
     try {
-    const { data } = await api.get<OpportunityResponse>(`/api/opportunities/${opportunityId}`);
-    setOpportunity({
-      title: data.title,
-      stage: data.stage,
-      amount: data.amount,
-      closeDate: data.closeDate,
-      expectedPaymentDate: data.expectedPaymentDate,
-      taxRate: data.taxRate ? Number(data.taxRate) : undefined,
-      contactId: data.contact?.id,
-      companyId: data.company?.id
-    });
-    setTaxRate(data.taxRate ? Number(data.taxRate) : undefined);
+      const { data } = await api.get<OpportunityResponse>(`/api/opportunities/${opportunityId}`);
+      
+      // Stocker les infos de l'entreprise pour le fil d'Ariane
+      if (data.company) {
+        setCompanyInfo({ id: data.company.id, name: data.company.name });
+      } else if (data.companyId) {
+        // Si l'entreprise n'est pas incluse, la charger
+        try {
+          const { data: companyData } = await api.get(`/api/companies/${data.companyId}`);
+          setCompanyInfo({ id: data.companyId, name: companyData.name });
+        } catch (err) {
+          console.error('Erreur chargement entreprise:', err);
+        }
+      }
+      
+      setOpportunity({
+        title: data.title,
+        stage: data.stage,
+        amount: data.amount,
+        closeDate: data.closeDate,
+        expectedPaymentDate: data.expectedPaymentDate,
+        taxRate: data.taxRate ? Number(data.taxRate) : undefined,
+        contactId: data.contact?.id,
+        companyId: data.company?.id
+      });
+      setTaxRate(data.taxRate ? Number(data.taxRate) : undefined);
       setDriveFolderId(data.googleDriveFolderId);
       setQuoteUrl(data.quoteUrl);
       setInvoiceUrls(data.invoiceUrls || []);
@@ -403,6 +419,21 @@ export function OpportunityDetailPage() {
   // Page de détail refondue - Version 2025
   return (
     <div className="mx-auto max-w-7xl space-y-6">
+      {/* Fil d'Ariane */}
+      {companyInfo && (
+        <Breadcrumb
+          items={[
+            {
+              label: companyInfo.name,
+              href: `/entreprises/${companyInfo.id}`
+            },
+            {
+              label: opportunity.title
+            }
+          ]}
+        />
+      )}
+
       {error && (
         <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 shadow-sm">
           <p className="text-sm text-rose-700">Erreur : {error}</p>

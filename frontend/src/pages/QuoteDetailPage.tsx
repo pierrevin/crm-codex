@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { TrashIcon } from '@heroicons/react/24/outline';
 import api from '../services/apiClient';
 import { QuoteForm } from '../components/QuoteForm';
+import { Breadcrumb, BreadcrumbItem } from '../components/Breadcrumb';
 
 type Quote = {
   id?: string;
@@ -38,6 +39,8 @@ export function QuoteDetailPage() {
   const [quote, setQuote] = useState<Quote | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [opportunityInfo, setOpportunityInfo] = useState<{ id: string; title: string; companyId?: string; companyName?: string } | null>(null);
+  const [companyInfo, setCompanyInfo] = useState<{ id: string; name: string } | null>(null);
 
   const opportunityId = searchParams.get('opportunityId');
   const companyId = searchParams.get('companyId');
@@ -74,6 +77,28 @@ export function QuoteDetailPage() {
       console.log('[QuoteDetailPage] Chargement opportunité pour pré-remplissage:', oppId);
       const { data: opportunity } = await api.get(`/api/opportunities/${oppId}`);
       console.log('[QuoteDetailPage] Opportunité chargée:', opportunity);
+      
+      // Stocker les infos pour le fil d'Ariane
+      setOpportunityInfo({
+        id: oppId,
+        title: opportunity.title,
+        companyId: opportunity.company?.id || opportunity.companyId,
+        companyName: opportunity.company?.name
+      });
+      
+      if (opportunity.company?.id || opportunity.companyId) {
+        const compId = opportunity.company?.id || opportunity.companyId;
+        if (opportunity.company?.name) {
+          setCompanyInfo({ id: compId, name: opportunity.company.name });
+        } else if (compId) {
+          try {
+            const { data: companyData } = await api.get(`/api/companies/${compId}`);
+            setCompanyInfo({ id: compId, name: companyData.name });
+          } catch (err) {
+            console.error('Erreur chargement entreprise:', err);
+          }
+        }
+      }
       
       // Calculer la date de validité (30 jours par défaut)
       const validityDate = new Date();
@@ -146,6 +171,48 @@ export function QuoteDetailPage() {
       };
       
       setQuote(quoteData);
+      
+      // Charger les informations d'opportunité et d'entreprise pour le fil d'Ariane
+      if (data.opportunityId || data.opportunity?.id) {
+        const oppId = data.opportunityId || data.opportunity?.id;
+        if (oppId) {
+          try {
+            const { data: oppData } = await api.get(`/api/opportunities/${oppId}`);
+            setOpportunityInfo({
+              id: oppId,
+              title: oppData.title,
+              companyId: oppData.company?.id || oppData.companyId,
+              companyName: oppData.company?.name
+            });
+            
+            // Charger l'entreprise si on a l'ID mais pas le nom
+            const companyIdToLoad = oppData.company?.id || oppData.companyId || data.companyId;
+            if (companyIdToLoad && !oppData.company?.name) {
+              try {
+                const { data: companyData } = await api.get(`/api/companies/${companyIdToLoad}`);
+                setCompanyInfo({ id: companyIdToLoad, name: companyData.name });
+              } catch (err) {
+                console.error('Erreur chargement entreprise:', err);
+              }
+            } else if (oppData.company?.name) {
+              setCompanyInfo({ id: companyIdToLoad, name: oppData.company.name });
+            }
+          } catch (err) {
+            console.error('Erreur chargement opportunité:', err);
+          }
+        }
+      } else if (data.companyId || data.company?.id) {
+        // Si pas d'opportunité mais une entreprise
+        const compId = data.companyId || data.company?.id;
+        if (compId) {
+          try {
+            const { data: companyData } = await api.get(`/api/companies/${compId}`);
+            setCompanyInfo({ id: compId, name: companyData.name });
+          } catch (err) {
+            console.error('Erreur chargement entreprise:', err);
+          }
+        }
+      }
     } catch (err: any) {
       console.error('Erreur chargement devis:', err);
       setError(err.response?.data?.message || 'Erreur lors du chargement du devis');
@@ -229,23 +296,47 @@ export function QuoteDetailPage() {
     );
   }
 
+  // Construire le fil d'Ariane
+  const buildBreadcrumbItems = (): BreadcrumbItem[] => {
+    const items: BreadcrumbItem[] = [];
+    
+    const currentOpportunityId = opportunityId || opportunityInfo?.id;
+    const currentCompanyId = companyId || opportunityInfo?.companyId || quote?.companyId;
+    const currentCompanyName = companyInfo?.name || opportunityInfo?.companyName;
+    const currentOpportunityTitle = opportunityInfo?.title;
+    
+    // Entreprise
+    if (currentCompanyId && currentCompanyName) {
+      items.push({
+        label: currentCompanyName,
+        href: `/entreprises/${currentCompanyId}`
+      });
+    }
+    
+    // Opportunité
+    if (currentOpportunityId && currentOpportunityTitle) {
+      items.push({
+        label: currentOpportunityTitle,
+        href: `/opportunites/${currentOpportunityId}`
+      });
+    }
+    
+    // Devis (page courante)
+    items.push({
+      label: isNew ? 'Créer un devis' : (quote?.label || 'Modifier le devis')
+    });
+    
+    return items;
+  };
+
+  const breadcrumbItems = buildBreadcrumbItems();
+
   return (
     <div className="min-h-screen bg-slate-50 p-6">
       <div className="max-w-6xl mx-auto">
-        {/* Fil d'Ariane si on vient d'une opportunité */}
-        {opportunityId && (
-          <nav className="mb-4 flex items-center gap-2 text-sm text-slate-600">
-            <button
-              onClick={() => navigate(`/opportunites/${opportunityId}`)}
-              className="hover:text-indigo-600 transition-colors"
-            >
-              Opportunité
-            </button>
-            <span>/</span>
-            <span className="text-slate-900 font-medium">
-              {isNew ? 'Créer un devis' : 'Modifier le devis'}
-            </span>
-          </nav>
+        {/* Fil d'Ariane */}
+        {breadcrumbItems.length > 1 && (
+          <Breadcrumb items={breadcrumbItems} className="mb-4" />
         )}
         
         <div className="mb-6 flex items-center justify-between">

@@ -145,8 +145,7 @@ export function TreasuryPage() {
           return { startDate: start, endDate: end };
         }
       }
-      // Si les dates ne sont pas encore complètes, utiliser les valeurs par défaut temporairement
-      // pour éviter les rechargements pendant la saisie
+      // Si les dates ne sont pas encore complètes, utiliser les dates par défaut (6 mois)
       const start = new Date();
       start.setDate(1);
       start.setHours(0, 0, 0, 0);
@@ -181,20 +180,44 @@ export function TreasuryPage() {
     return { startDate: start, endDate: end };
   }, [period, customStartDate, customEndDate]);
 
-  // Charger les données initiales
+  // Charger les données au montage initial
   useEffect(() => {
     void loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Seulement au montage du composant
+  }, []);
+
+  // Charger les données quand la période change
+  useEffect(() => {
+    if (period !== 'custom') {
+      void loadData();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [period]);
+  
+  // Charger les données quand les dates personnalisées sont complètes (avec debounce)
+  useEffect(() => {
+    if (period === 'custom') {
+      if (!customStartDate || !customEndDate || customStartDate.length !== 10 || customEndDate.length !== 10) {
+        return; // Ne pas recharger pendant la saisie
+      }
+      
+      const timer = setTimeout(() => {
+        void loadData();
+      }, 500); // Debounce de 500ms
+      
+      return () => clearTimeout(timer);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [period, customStartDate, customEndDate]);
 
   const loadData = async () => {
     setLoading(true);
     try {
-      // Calculer la date de début pour récupérer les paiements du mois précédent
-      // (pour inclure les taxes qui tombent dans la période)
-      const prevMonthStart = new Date(startDate);
-      prevMonthStart.setMonth(prevMonthStart.getMonth() - 1);
-      prevMonthStart.setDate(1);
+      // Calculer la date de début pour récupérer les paiements AVANT la période
+      // (pour inclure les taxes qui tombent dans la période et calculer le solde initial)
+      const beforePeriodStart = new Date(startDate);
+      beforePeriodStart.setMonth(beforePeriodStart.getMonth() - 12); // Récupérer les 12 derniers mois
+      beforePeriodStart.setDate(1);
       
       const [balanceRes, forecastRes, paymentsRes, expensesRes, opportunitiesRes, prevMonthPaymentsRes] = await Promise.all([
         treasuryService.getBalance().catch(() => ({ balance: 0, isManual: false, date: new Date().toISOString(), notes: null })),
@@ -217,17 +240,51 @@ export function TreasuryPage() {
         api.get('/api/opportunities', {
           params: { limit: 1000 }
         }).catch(() => ({ data: { items: [], data: [] } })),
-        // Récupérer les paiements du mois précédent pour calculer les taxes qui tombent dans la période
+        // Récupérer les paiements AVANT la période pour calculer le solde initial et les taxes
         paymentService.getAll({
-          startDate: prevMonthStart.toISOString(),
+          startDate: beforePeriodStart.toISOString(),
           endDate: startDate.toISOString()
         }).catch(() => [])
       ]);
 
-      // Combiner les paiements de la période et du mois précédent
+      // Combiner les paiements de la période et avant la période
       const allPayments = [...(prevMonthPaymentsRes || []), ...(paymentsRes || [])];
       
-      setCurrentBalance(balanceRes?.balance || 0);
+      // Calculer le solde initial : toujours partir du solde de référence actuel et remonter jusqu'à startDate
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const balanceToday = balanceRes?.balance || 0;
+      
+      // Le solde initial pour la période est le solde qu'on aurait eu à startDate
+      // On calcule ça en "remontant le temps" depuis aujourd'hui (le solde de référence)
+      let calculatedInitialBalance = balanceToday;
+      
+      if (startDate < today) {
+        // Date de début passée : il faut soustraire les mouvements entre startDate et aujourd'hui
+        // pour retrouver le solde qu'on avait à startDate
+        const pastPaymentsRes = await paymentService.getAll({
+          startDate: startDate.toISOString(),
+          endDate: today.toISOString()
+        }).catch(() => []);
+        
+        const pastExpensesRes = await expensesService.getAll({
+          startDate: startDate.toISOString().split('T')[0],
+          endDate: today.toISOString().split('T')[0]
+        }).then(expenses => expenses.filter((e: any) => e.status === 'VERIFIED')).catch(() => []);
+        
+        // Pour remonter dans le temps : on soustrait les encaissements (qui augmentent le solde)
+        // et on ajoute les décaissements (qui diminuent le solde)
+        const pastEncaissements = pastPaymentsRes.reduce((sum: number, p: Payment) => sum + parseFloat(p.amount.toString()), 0);
+        const pastDecaissements = pastExpensesRes.reduce((sum: number, e: any) => sum + parseFloat((e.amountTTC || e.amountHT || 0).toString()), 0);
+        
+        // Remonter dans le temps : solde à startDate = solde aujourd'hui - encaissements depuis startDate + décaissements depuis startDate
+        calculatedInitialBalance = balanceToday - pastEncaissements + pastDecaissements;
+      } else if (startDate >= today) {
+        // Date de début aujourd'hui ou future : le solde initial est le solde d'aujourd'hui
+        calculatedInitialBalance = balanceToday;
+      }
+      
+      setCurrentBalance(calculatedInitialBalance);
       setBalanceIsManual(balanceRes?.isManual || false);
       setForecast(forecastRes || { opportunities: [], payments: [], expenses: [], taxPayments: {} });
       setPayments(allPayments);
@@ -235,7 +292,11 @@ export function TreasuryPage() {
       setOpportunities(opportunitiesRes?.data?.items || opportunitiesRes?.data?.data || []);
       
       console.log('TreasuryPage - Données chargées:', {
-        balance: balanceRes.balance,
+        balanceToday: balanceRes.balance,
+        calculatedInitialBalance,
+        startDate: startDate.toISOString().split('T')[0],
+        endDate: endDate.toISOString().split('T')[0],
+        period,
         forecastOpportunities: forecastRes?.opportunities?.length || 0,
         forecastPayments: forecastRes?.payments?.length || 0,
         payments: paymentsRes?.length || 0,
@@ -269,11 +330,9 @@ export function TreasuryPage() {
     return diffDays > 90; // Plus de 3 mois
   }, [startDate, endDate]);
 
-  // Ajuster automatiquement la granularité si nécessaire
-  useEffect(() => {
-    if (viewGranularity === 'day' && exceedsThreeMonths) {
-      setViewGranularity('month');
-    }
+  // Avertir si la vue jour dépasse 90 jours (mais permettre l'affichage)
+  const showDayViewWarning = useMemo(() => {
+    return viewGranularity === 'day' && exceedsThreeMonths;
   }, [viewGranularity, exceedsThreeMonths]);
 
   // Fonction pour construire les données journalières
@@ -758,12 +817,7 @@ export function TreasuryPage() {
                   if (customEndDate && e.target.value > customEndDate) {
                     setCustomEndDate(e.target.value);
                   }
-                }}
-                onBlur={() => {
-                  // Recharger les données seulement quand on sort du champ
-                  if (customStartDate && customEndDate && customStartDate.length === 10 && customEndDate.length === 10) {
-                    void loadData();
-                  }
+                  // Ne pas recharger pendant la saisie - le useEffect s'en chargera quand les dates seront complètes
                 }}
                 className="px-3 py-1 border border-slate-300 rounded text-sm"
               />
@@ -777,12 +831,7 @@ export function TreasuryPage() {
                   if (customStartDate && e.target.value < customStartDate) {
                     setCustomStartDate(e.target.value);
                   }
-                }}
-                onBlur={() => {
-                  // Recharger les données seulement quand on sort du champ
-                  if (customStartDate && customEndDate && customStartDate.length === 10 && customEndDate.length === 10) {
-                    void loadData();
-                  }
+                  // Ne pas recharger pendant la saisie - le useEffect s'en chargera quand les dates seront complètes
                 }}
                 className="px-3 py-1 border border-slate-300 rounded text-sm"
               />
@@ -805,18 +854,15 @@ export function TreasuryPage() {
             </button>
             <button
               onClick={() => {
-                if (!exceedsThreeMonths) {
-                  setViewGranularity('day');
-                }
+                setViewGranularity('day');
               }}
-              className={`px-3 py-1 rounded text-sm ${viewGranularity === 'day' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-700'} ${exceedsThreeMonths ? 'opacity-50 cursor-not-allowed' : ''}`}
-              disabled={exceedsThreeMonths}
-              title={exceedsThreeMonths ? 'Vue journalière limitée à 3 mois maximum' : ''}
+              className={`px-3 py-1 rounded text-sm ${viewGranularity === 'day' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-700'}`}
+              title="Vue journalière (limite: 90 jours pour les performances)"
             >
               Journalière
             </button>
-            {viewGranularity === 'day' && exceedsThreeMonths && (
-              <span className="text-xs text-orange-600">Limite: 3 mois max</span>
+            {showDayViewWarning && (
+              <span className="text-xs text-orange-600">Période longue - chargement plus lent</span>
             )}
           </div>
         </div>
