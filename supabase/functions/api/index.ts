@@ -3064,7 +3064,7 @@ serve(async (req) => {
     if (path === 'debours-notes' && method === 'POST') {
       try {
         const body = await req.json()
-        const { title, issueDate, expectedPaymentDate, totalAmount, status, opportunityId, companyId, expenseIds, notes, templateId } = body
+        const { title, issueDate, expectedPaymentDate, totalAmount, status, opportunityId, companyId, expenseIds, invoiceNumber, notes, templateId } = body
         
         // Validation
         if (!title || !opportunityId || totalAmount === undefined) {
@@ -3106,6 +3106,7 @@ serve(async (req) => {
             status: status || 'DRAFT',
             opportunityId,
             companyId: companyId || opportunity.companyId,
+            invoiceNumber: invoiceNumber || null,
             notes: notes || null,
             templateId: templateId || null,
             createdAt: now,
@@ -3239,7 +3240,9 @@ serve(async (req) => {
     if (path.startsWith('debours-notes/') && method === 'PATCH') {
       const id = path.split('/')[1]
       const body = await req.json()
-      const { title, issueDate, expectedPaymentDate, totalAmount, status, expenseIds, notes } = body
+      const { title, issueDate, expectedPaymentDate, totalAmount, status, expenseIds, invoiceNumber, notes, templateId } = body
+      
+      console.log('PATCH debours-note - body.invoiceNumber reçu:', invoiceNumber, 'type:', typeof invoiceNumber)
       
       const updateData: any = {
         updatedAt: new Date().toISOString()
@@ -3249,7 +3252,13 @@ serve(async (req) => {
       if (expectedPaymentDate !== undefined) updateData.expectedPaymentDate = expectedPaymentDate ? new Date(expectedPaymentDate).toISOString() : null
       if (totalAmount !== undefined) updateData.totalAmount = totalAmount
       if (status !== undefined) updateData.status = status
-      if (notes !== undefined) updateData.notes = notes
+      if (invoiceNumber !== undefined) {
+        // Permettre de définir explicitement à null pour vider le champ
+        updateData.invoiceNumber = invoiceNumber === null || invoiceNumber === '' ? null : invoiceNumber
+        console.log('invoiceNumber sera mis à jour vers:', updateData.invoiceNumber)
+      }
+      if (notes !== undefined) updateData.notes = notes || null
+      if (templateId !== undefined) updateData.templateId = templateId || null
       
       const { data: deboursNoteData, error } = await supabase
         .from('DeboursNote')
@@ -3259,6 +3268,9 @@ serve(async (req) => {
         .single()
       
       if (error) throw error
+      
+      // Log pour debug
+      console.log('DeboursNote updated - invoiceNumber dans DB:', deboursNoteData?.invoiceNumber)
       
       // Mettre à jour les relations avec les dépenses si fournies
       if (expenseIds !== undefined) {
@@ -3350,7 +3362,11 @@ serve(async (req) => {
               'Ville': company?.addressCity || '',
               'titre_note_debours': deboursNoteData.title,
               'date prestation': formatDate(opportunity.closeDate),
-              'num_facture': (opportunity.tiimeInvoiceIds && opportunity.tiimeInvoiceIds[0]) || 'N/A',
+              'num_facture': (() => {
+                const numFacture = (deboursNoteData.invoiceNumber && deboursNoteData.invoiceNumber.trim() !== '') ? deboursNoteData.invoiceNumber : ((opportunity.tiimeInvoiceIds && opportunity.tiimeInvoiceIds[0]) || 'N/A')
+                console.log('Mapping num_facture - deboursNoteData.invoiceNumber:', deboursNoteData.invoiceNumber, 'opportunity.tiimeInvoiceIds:', opportunity.tiimeInvoiceIds, '-> utiliser:', numFacture)
+                return numFacture
+              })(),
               'date_facture': formatDate(opportunity.closeDate),
               'montant_facture': formatAmount(opportunity.amount),
               'total_frais': formatAmount(deboursNoteData.totalAmount),
@@ -3654,7 +3670,7 @@ serve(async (req) => {
         'Ville': company?.addressCity || '',
         'titre_note_debours': deboursNote.title,
         'date prestation': formatDate(opportunity.closeDate),
-        'num_facture': (opportunity.tiimeInvoiceIds && opportunity.tiimeInvoiceIds[0]) || 'N/A',
+        'num_facture': (deboursNote.invoiceNumber && deboursNote.invoiceNumber.trim() !== '') ? deboursNote.invoiceNumber : ((opportunity.tiimeInvoiceIds && opportunity.tiimeInvoiceIds[0]) || 'N/A'),
         'date_facture': formatDate(opportunity.closeDate),
         'montant_facture': formatAmount(opportunity.amount),
         'total_frais': formatAmount(deboursNote.totalAmount),
@@ -3850,18 +3866,42 @@ serve(async (req) => {
 
     // ===== TREASURY ROUTES =====
     if (path === 'treasury/balance' && method === 'GET') {
-      // Calculer le solde actuel automatiquement
       const now = new Date()
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0)
       
-      // Récupérer le dernier solde manuel
+      // Récupérer le dernier solde manuel (pour aujourd'hui ou date récente)
       const { data: lastManualBalance } = await supabase
         .from('TreasuryBalance')
         .select('*')
         .eq('isManual', true)
+        .lte('date', now.toISOString())
         .order('date', { ascending: false })
         .limit(1)
-        .single()
+        .maybeSingle()
       
+      // Si un solde manuel existe pour aujourd'hui ou une date récente, le retourner tel quel
+      // (on considère "récent" comme étant dans les 7 derniers jours pour éviter d'avoir un solde trop ancien)
+      if (lastManualBalance) {
+        const manualDate = new Date(lastManualBalance.date)
+        const daysDiff = Math.floor((now.getTime() - manualDate.getTime()) / (1000 * 60 * 60 * 24))
+        
+        // Si le solde manuel est d'aujourd'hui, le retourner tel quel
+        // Si c'est une date récente (≤ 7 jours), le retourner aussi
+        if (daysDiff <= 7) {
+          return new Response(
+            JSON.stringify({
+              balance: Number(lastManualBalance.balance),
+              isManual: true,
+              date: lastManualBalance.date,
+              notes: lastManualBalance.notes || null
+            }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+      }
+      
+      // Sinon, calculer le solde automatiquement
+      // Utiliser le dernier solde manuel comme base, ou 0 si aucun
       let baseBalance = 0
       let baseDate = new Date(0)
       
@@ -3979,7 +4019,7 @@ serve(async (req) => {
       // Récupérer les paiements réels
       const { data: payments } = await supabase
         .from('Payment')
-        .select('amount, taxAmount, paymentDate, opportunityId')
+        .select('amount, taxAmount, paymentDate, opportunityId, deboursNoteId')
         .gte('paymentDate', start.toISOString())
         .lte('paymentDate', end.toISOString())
       

@@ -33,6 +33,7 @@ export class DeboursNotesService {
         status: dto.status || 'DRAFT',
         opportunityId: dto.opportunityId,
         companyId: dto.companyId || opportunity.companyId,
+        invoiceNumber: dto.invoiceNumber,
         notes: dto.notes,
         templateId: dto.templateId,
         expenses: dto.expenseIds ? {
@@ -103,7 +104,8 @@ export class DeboursNotesService {
       ...dto,
       issueDate: dto.issueDate ? new Date(dto.issueDate) : undefined,
       expectedPaymentDate: dto.expectedPaymentDate ? new Date(dto.expectedPaymentDate) : undefined,
-      totalAmount: dto.totalAmount ? dto.totalAmount.toString() : undefined
+      totalAmount: dto.totalAmount ? dto.totalAmount.toString() : undefined,
+      invoiceNumber: dto.invoiceNumber !== undefined ? dto.invoiceNumber : undefined
     };
 
     // Gérer la mise à jour des expenses
@@ -245,7 +247,7 @@ export class DeboursNotesService {
       'Ville': company?.addressCity || '',
       'titre_note_debours': deboursNote.title,
       'date prestation': formatDate(opportunity.closeDate),
-      'num_facture': opportunity.tiimeInvoiceIds?.[0] || 'N/A',
+      'num_facture': (deboursNote.invoiceNumber && deboursNote.invoiceNumber.trim() !== '') ? deboursNote.invoiceNumber : (opportunity.tiimeInvoiceIds?.[0] || 'N/A'),
       'date_facture': formatDate(opportunity.closeDate),
       'montant_facture': formatAmount(opportunity.amount),
       'total_frais': formatAmount(deboursNote.totalAmount)

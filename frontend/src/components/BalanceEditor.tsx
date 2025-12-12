@@ -38,11 +38,12 @@ export function BalanceEditor({
     setError(null);
 
     try {
-      await treasuryService.setBalance({
+      const result = await treasuryService.setBalance({
         balance: parseFloat(balance),
         date: date ? new Date(date + 'T00:00:00').toISOString() : undefined,
         notes: notes || undefined
       });
+      // Le solde sera rechargé par onSuccess, mais on peut déjà confirmer
       onSuccess();
       onClose();
     } catch (err: any) {
@@ -67,10 +68,17 @@ export function BalanceEditor({
           </button>
         </div>
 
-        <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded text-blue-700 text-sm">
-          <p className="font-medium mb-1">Solde calculé automatiquement :</p>
-          <p className="text-lg font-bold">{currentBalance.toFixed(2)} €</p>
-          <p className="mt-2 text-xs">Vous pouvez corriger cette valeur manuellement.</p>
+        <div className="mb-4 p-4 bg-slate-50 border border-slate-200 rounded">
+          <p className="font-medium text-slate-900 mb-2">Solde actuel :</p>
+          <p className="text-2xl font-bold text-slate-900 mb-2">{currentBalance.toFixed(2)} €</p>
+          <p className="text-xs text-slate-600 mb-3">
+            Entrez le solde réel de votre trésorerie pour ajuster les graphiques. 
+            Ce solde manuel ne sera pas recalculé automatiquement.
+          </p>
+          <div className="bg-white border border-slate-300 rounded p-2 text-xs text-slate-700">
+            <p className="font-medium mb-1">💡 Astuce :</p>
+            <p>Utilisez cette fonctionnalité pour corriger le solde si des dépenses ou recettes ne sont pas encore saisies dans le système.</p>
+          </div>
         </div>
 
         {error && (

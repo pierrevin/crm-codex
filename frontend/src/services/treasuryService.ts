@@ -4,6 +4,7 @@ export interface TreasuryBalance {
   balance: number;
   isManual: boolean;
   date: string;
+  notes?: string | null;
 }
 
 export interface TreasuryForecast {

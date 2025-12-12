@@ -4,7 +4,7 @@ import {
   CurrencyEuroIcon,
   ChartBarIcon
 } from '@heroicons/react/24/outline';
-import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, TooltipProps } from 'recharts';
 import api from '../services/apiClient';
 import { treasuryService, TreasuryForecast } from '../services/treasuryService';
 import { paymentService, Payment } from '../services/paymentService';
@@ -12,6 +12,97 @@ import { expensesService } from '../services/expensesService';
 import { TreasuryMonthlyView } from '../components/TreasuryMonthlyView';
 import { PaymentModal } from '../components/PaymentModal';
 import { BalanceEditor } from '../components/BalanceEditor';
+
+const formatCurrency = (value: number) => {
+  return new Intl.NumberFormat('fr-FR', {
+    style: 'currency',
+    currency: 'EUR',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0
+  }).format(value);
+};
+
+// Composant Tooltip personnalisé pour afficher les détails
+const CustomTooltip = ({ active, payload, label }: TooltipProps<number, string>) => {
+  if (!active || !payload || !payload.length) {
+    return null;
+  }
+
+  const data = payload[0]?.payload;
+  if (!data) return null;
+
+  const encaissementsPrevisionnels = data.encaissementsPrevisionnelOpportunites || 0;
+  const encaissementsPrevisionnelDebours = data.encaissementsPrevisionnelDebours || 0;
+  const encaissementsReels = data.encaissementsReels || 0;
+  const totalEncaissements = encaissementsPrevisionnels + encaissementsPrevisionnelDebours + encaissementsReels;
+
+  const decaissementsDepenses = data.decaissementsDepenses || 0;
+  const taxes = data.taxes || 0;
+  const totalDecaissements = decaissementsDepenses + taxes;
+
+  const solde = data.solde || 0;
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-lg shadow-lg p-4">
+      <p className="font-semibold text-slate-900 mb-3">{label}</p>
+      
+      <div className="space-y-3">
+        <div>
+          <p className="font-medium text-green-700 mb-1">
+            Encaissements {formatCurrency(totalEncaissements)}
+          </p>
+          <div className="pl-3 text-sm space-y-0.5">
+            {encaissementsPrevisionnels > 0 && (
+              <p className="text-slate-600">
+                &nbsp;&nbsp;Prévisionnel : {formatCurrency(encaissementsPrevisionnels)}
+              </p>
+            )}
+            {encaissementsPrevisionnelDebours > 0 && (
+              <p className="text-slate-600">
+                &nbsp;&nbsp;Note de débours : {formatCurrency(encaissementsPrevisionnelDebours)}
+              </p>
+            )}
+            {encaissementsReels > 0 && (
+              <p className="text-slate-600">
+                &nbsp;&nbsp;Réel : {formatCurrency(encaissementsReels)}
+              </p>
+            )}
+            {totalEncaissements === 0 && (
+              <p className="text-slate-400 italic">Aucun encaissement</p>
+            )}
+          </div>
+        </div>
+
+        <div>
+          <p className="font-medium text-red-700 mb-1">
+            Décaissements {formatCurrency(totalDecaissements)}
+          </p>
+          <div className="pl-3 text-sm space-y-0.5">
+            {decaissementsDepenses > 0 && (
+              <p className="text-slate-600">
+                &nbsp;&nbsp;Dépenses : {formatCurrency(decaissementsDepenses)}
+              </p>
+            )}
+            {taxes > 0 && (
+              <p className="text-slate-600">
+                &nbsp;&nbsp;Taxes m-1 : {formatCurrency(taxes)}
+              </p>
+            )}
+            {totalDecaissements === 0 && (
+              <p className="text-slate-400 italic">Aucun décaissement</p>
+            )}
+          </div>
+        </div>
+
+        <div className="pt-2 border-t border-slate-200">
+          <p className="font-semibold text-slate-900">
+            Solde : {formatCurrency(solde)}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 type Opportunity = {
   id: string;
@@ -28,7 +119,9 @@ export function TreasuryPage() {
   const [period, setPeriod] = useState<3 | 6 | 12 | 'custom'>(6);
   const [customStartDate, setCustomStartDate] = useState<string>('');
   const [customEndDate, setCustomEndDate] = useState<string>('');
+  const [viewGranularity, setViewGranularity] = useState<'month' | 'day'>('month');
   const [currentBalance, setCurrentBalance] = useState<number>(0);
+  const [balanceIsManual, setBalanceIsManual] = useState<boolean>(false);
   const [forecast, setForecast] = useState<TreasuryForecast | null>(null);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
@@ -104,7 +197,7 @@ export function TreasuryPage() {
       prevMonthStart.setDate(1);
       
       const [balanceRes, forecastRes, paymentsRes, expensesRes, opportunitiesRes, prevMonthPaymentsRes] = await Promise.all([
-        treasuryService.getBalance().catch(() => ({ balance: 0, isManual: false, date: new Date().toISOString() })),
+        treasuryService.getBalance().catch(() => ({ balance: 0, isManual: false, date: new Date().toISOString(), notes: null })),
         treasuryService.getForecast(
           startDate.toISOString(),
           endDate.toISOString()
@@ -135,6 +228,7 @@ export function TreasuryPage() {
       const allPayments = [...(prevMonthPaymentsRes || []), ...(paymentsRes || [])];
       
       setCurrentBalance(balanceRes?.balance || 0);
+      setBalanceIsManual(balanceRes?.isManual || false);
       setForecast(forecastRes || { opportunities: [], payments: [], expenses: [], taxPayments: {} });
       setPayments(allPayments);
       setExpenses(expensesRes || []);
@@ -168,8 +262,152 @@ export function TreasuryPage() {
     setShowPaymentModal(true);
   };
 
-  // Préparer les données pour le graphique
+  // Calculer si la période dépasse 3 mois (pour limiter la vue journalière)
+  const exceedsThreeMonths = useMemo(() => {
+    const diffTime = Math.abs(endDate.getTime() - startDate.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays > 90; // Plus de 3 mois
+  }, [startDate, endDate]);
+
+  // Ajuster automatiquement la granularité si nécessaire
+  useEffect(() => {
+    if (viewGranularity === 'day' && exceedsThreeMonths) {
+      setViewGranularity('month');
+    }
+  }, [viewGranularity, exceedsThreeMonths]);
+
+  // Fonction pour construire les données journalières
+  const buildDailyData = useMemo(() => {
+    if (!forecast || viewGranularity !== 'day') return [];
+
+    const dailyData: Record<string, any> = {};
+    const current = new Date(startDate);
+    current.setHours(0, 0, 0, 0);
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+
+    while (current <= end) {
+      const dayKey = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(current.getDate()).padStart(2, '0')}`;
+      dailyData[dayKey] = {
+        day: current.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }),
+        dayKey: dayKey,
+        date: new Date(current),
+        solde: 0,
+        encaissementsPrevisionnels: 0,
+        encaissementsPrevisionnelOpportunites: 0,
+        encaissementsPrevisionnelDebours: 0,
+        encaissementsReels: 0,
+        decaissements: 0,
+        decaissementsDepenses: 0,
+        taxes: 0
+      };
+      current.setDate(current.getDate() + 1);
+    }
+
+    const paymentsByOpportunity = new Map<string, Payment>();
+    (payments || []).forEach(payment => {
+      if (payment.opportunityId) {
+        paymentsByOpportunity.set(payment.opportunityId, payment);
+      }
+    });
+
+    // Opportunités prévisionnelles
+    (forecast?.opportunities || []).forEach(opp => {
+      if (!opp.expectedPaymentDate || !opp.amount || opp.stage === 'FINALIZED') return;
+      if (paymentsByOpportunity.has(opp.id)) return;
+
+      try {
+        const paymentDate = new Date(opp.expectedPaymentDate);
+        paymentDate.setHours(0, 0, 0, 0);
+        const dayKey = `${paymentDate.getFullYear()}-${String(paymentDate.getMonth() + 1).padStart(2, '0')}-${String(paymentDate.getDate()).padStart(2, '0')}`;
+        if (dailyData[dayKey]) {
+          const montant = Number(opp.amount) || 0;
+          dailyData[dayKey].encaissementsPrevisionnels += montant;
+          dailyData[dayKey].encaissementsPrevisionnelOpportunites += montant;
+        }
+      } catch (error) {
+        console.error('Erreur traitement opportunité prévisionnelle jour:', opp.id, error);
+      }
+    });
+
+    // Notes de débours prévisionnelles
+    (forecast?.deboursNotesForecast || []).forEach(debours => {
+      if (!debours.expectedPaymentDate || !debours.totalFrais) return;
+      if (payments.find(p => p.deboursNoteId === debours.id)) return;
+
+      try {
+        const paymentDate = new Date(debours.expectedPaymentDate);
+        paymentDate.setHours(0, 0, 0, 0);
+        const dayKey = `${paymentDate.getFullYear()}-${String(paymentDate.getMonth() + 1).padStart(2, '0')}-${String(paymentDate.getDate()).padStart(2, '0')}`;
+        if (dailyData[dayKey]) {
+          const montant = Number(debours.totalFrais) || 0;
+          dailyData[dayKey].encaissementsPrevisionnels += montant;
+          dailyData[dayKey].encaissementsPrevisionnelDebours += montant;
+        }
+      } catch (error) {
+        console.error('Erreur traitement note de débours jour:', debours.id, error);
+      }
+    });
+
+    // Encaissements réels
+    (payments || []).forEach(payment => {
+      const paymentDate = new Date(payment.paymentDate);
+      paymentDate.setHours(0, 0, 0, 0);
+      const dayKey = `${paymentDate.getFullYear()}-${String(paymentDate.getMonth() + 1).padStart(2, '0')}-${String(paymentDate.getDate()).padStart(2, '0')}`;
+      if (dailyData[dayKey]) {
+        dailyData[dayKey].encaissementsReels += payment.amount;
+      }
+    });
+
+    // Décaissements (dépenses)
+    (expenses || []).forEach(expense => {
+      if (!expense.invoiceDate) return;
+      const expenseDate = new Date(expense.invoiceDate);
+      expenseDate.setHours(0, 0, 0, 0);
+      const dayKey = `${expenseDate.getFullYear()}-${String(expenseDate.getMonth() + 1).padStart(2, '0')}-${String(expenseDate.getDate()).padStart(2, '0')}`;
+      if (dailyData[dayKey]) {
+        const amount = expense.amountTTC || expense.amountHT || 0;
+        dailyData[dayKey].decaissements += amount;
+        dailyData[dayKey].decaissementsDepenses += amount;
+      }
+    });
+
+    // Taxes (mois +1, au 30)
+    (payments || []).forEach(payment => {
+      const paymentDate = new Date(payment.paymentDate);
+      const taxDate = new Date(paymentDate.getFullYear(), paymentDate.getMonth() + 1, 30);
+      taxDate.setHours(0, 0, 0, 0);
+      const dayKey = `${taxDate.getFullYear()}-${String(taxDate.getMonth() + 1).padStart(2, '0')}-${String(taxDate.getDate()).padStart(2, '0')}`;
+      if (dailyData[dayKey]) {
+        dailyData[dayKey].taxes += payment.taxAmount;
+      }
+    });
+
+    // Calculer les soldes
+    const sortedDays = Object.values(dailyData).sort((a, b) => a.dayKey.localeCompare(b.dayKey));
+    return sortedDays.map((day, index, array) => {
+      const totalEncaissements = day.encaissementsPrevisionnels + day.encaissementsReels;
+      const totalDecaissements = day.decaissements + day.taxes;
+
+      if (index === 0) {
+        day.soldeInitial = currentBalance;
+        day.solde = currentBalance + totalEncaissements - totalDecaissements;
+      } else {
+        day.soldeInitial = array[index - 1].solde;
+        day.solde = array[index - 1].solde + totalEncaissements - totalDecaissements;
+      }
+      return day;
+    });
+  }, [forecast, payments, expenses, currentBalance, startDate, endDate, viewGranularity]);
+
+  // Préparer les données pour le graphique (mensuel)
   const chartData = useMemo(() => {
+    // Si vue jour, utiliser buildDailyData
+    if (viewGranularity === 'day') {
+      return buildDailyData;
+    }
+
+    // Sinon, construire les données mensuelles
     if (!forecast) {
       console.log('TreasuryPage: forecast is null');
       return [];
@@ -200,8 +438,11 @@ export function TreasuryPage() {
         monthKey: monthKey,
         solde: 0, // Sera calculé plus tard
         encaissementsPrevisionnels: 0,
+        encaissementsPrevisionnelOpportunites: 0, // Détail pour tooltip
+        encaissementsPrevisionnelDebours: 0, // Détail pour tooltip
         encaissementsReels: 0,
         decaissements: 0,
+        decaissementsDepenses: 0, // Détail pour tooltip
         taxes: 0
       };
       current.setMonth(current.getMonth() + 1);
@@ -231,15 +472,38 @@ export function TreasuryPage() {
       if (monthlyData[monthKey]) {
         const amount = expense.amountTTC || expense.amountHT || 0;
         monthlyData[monthKey].decaissements += amount;
+        monthlyData[monthKey].decaissementsDepenses += amount;
       }
     });
 
-    // Ajouter les notes de débours des opportunités finalisées comme décaissements
-    (forecast?.finalizedDeboursNotes || []).forEach(debours => {
-      const deboursDate = new Date(debours.issueDate);
-      const monthKey = `${deboursDate.getFullYear()}-${String(deboursDate.getMonth() + 1).padStart(2, '0')}`;
-      if (monthlyData[monthKey]) {
-        monthlyData[monthKey].decaissements += Number(debours.totalAmount) || 0;
+    // Ajouter les notes de débours en prévisionnel comme encaissements (comme les opportunités)
+    // Utiliser le montant totalFrais (calculé depuis les dépenses) et non totalAmount
+    (forecast?.deboursNotesForecast || []).forEach(debours => {
+      if (!debours.expectedPaymentDate || !debours.totalFrais) return;
+      
+      // Vérifier si cette note de débours a déjà un paiement réel
+      const realPayment = payments.find(p => p.deboursNoteId === debours.id);
+      if (realPayment) {
+        // Si un paiement réel existe, on ne compte pas le prévisionnel (il sera compté dans encaissements réels)
+        return;
+      }
+      
+      try {
+        const paymentDate = new Date(debours.expectedPaymentDate);
+        if (isNaN(paymentDate.getTime())) {
+          console.warn('Date invalide pour note de débours:', debours.id, debours.expectedPaymentDate);
+          return;
+        }
+        
+        const monthKey = `${paymentDate.getFullYear()}-${String(paymentDate.getMonth() + 1).padStart(2, '0')}`;
+        if (monthlyData[monthKey]) {
+          // Utiliser totalFrais (montant des dépenses récupérées) et non totalAmount
+          const montantDebours = Number(debours.totalFrais) || 0;
+          monthlyData[monthKey].encaissementsPrevisionnels += montantDebours;
+          monthlyData[monthKey].encaissementsPrevisionnelDebours += montantDebours;
+        }
+      } catch (error) {
+        console.error('Erreur traitement note de débours prévisionnelle:', debours.id, error);
       }
     });
 
@@ -268,11 +532,13 @@ export function TreasuryPage() {
         
         const monthKey = `${paymentDate.getFullYear()}-${String(paymentDate.getMonth() + 1).padStart(2, '0')}`;
         if (monthlyData[monthKey]) {
-          monthlyData[monthKey].encaissementsPrevisionnels += Number(opp.amount) || 0;
+          const montantOpp = Number(opp.amount) || 0;
+          monthlyData[monthKey].encaissementsPrevisionnels += montantOpp;
+          monthlyData[monthKey].encaissementsPrevisionnelOpportunites += montantOpp;
           
           // Calculer les taxes pour les paiements prévisionnels (mois +1, au 30)
           const taxRate = opp.taxRate ?? 0.27;
-          const taxAmount = (Number(opp.amount) || 0) * taxRate;
+          const taxAmount = montantOpp * taxRate;
           // Les taxes sont imputées au 30 du mois suivant le paiement
           const taxMonth = new Date(paymentDate.getFullYear(), paymentDate.getMonth() + 1, 1);
           const taxMonthKey = `${taxMonth.getFullYear()}-${String(taxMonth.getMonth() + 1).padStart(2, '0')}`;
@@ -314,6 +580,7 @@ export function TreasuryPage() {
       if (monthlyData[monthKey]) {
         const amount = expense.amountTTC || expense.amountHT || 0;
         monthlyData[monthKey].decaissements += amount;
+        monthlyData[monthKey].decaissementsDepenses += amount;
       }
     });
 
@@ -354,16 +621,8 @@ export function TreasuryPage() {
       month.totalDecaissements = totalDecaissements;
       return month;
     });
-  }, [forecast, payments, expenses, currentBalance, startDate, endDate]);
+  }, [forecast, payments, expenses, currentBalance, startDate, endDate, viewGranularity, buildDailyData]);
 
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('fr-FR', {
-      style: 'currency',
-      currency: 'EUR',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0
-    }).format(value);
-  };
 
   // Opportunités avec paiement ou prévisionnel
   const opportunitiesWithPayment = useMemo(() => {
@@ -413,12 +672,25 @@ export function TreasuryPage() {
       <div className="bg-white rounded-lg shadow p-6">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-sm font-medium text-slate-500">Solde de référence (à jour J)</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-medium text-slate-500">Solde de référence (à jour J)</h2>
+              {balanceIsManual ? (
+                <span className="px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded">
+                  Manuel
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 text-xs font-medium bg-slate-100 text-slate-600 rounded">
+                  Calculé
+                </span>
+              )}
+            </div>
             <p className={`text-3xl font-bold mt-1 ${currentBalance < 0 ? 'text-red-600' : 'text-green-600'}`}>
               {formatCurrency(currentBalance)}
             </p>
             <p className="text-xs text-slate-400 mt-1">
-              Ce solde sert de point de départ pour les projections mensuelles
+              {balanceIsManual 
+                ? 'Ce solde manuel sert de point de départ pour les projections mensuelles'
+                : 'Ce solde calculé sert de point de départ pour les projections mensuelles'}
             </p>
           </div>
           <CurrencyEuroIcon className="h-12 w-12 text-slate-300" />
@@ -521,21 +793,45 @@ export function TreasuryPage() {
 
       {/* Graphique */}
       <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-lg font-semibold text-slate-900 mb-4">Évolution de la trésorerie</h2>
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-lg font-semibold text-slate-900">Évolution de la trésorerie</h2>
+          <div className="flex items-center space-x-2">
+            <label className="text-sm font-medium text-slate-700">Vue :</label>
+            <button
+              onClick={() => setViewGranularity('month')}
+              className={`px-3 py-1 rounded text-sm ${viewGranularity === 'month' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-700'}`}
+            >
+              Mensuelle
+            </button>
+            <button
+              onClick={() => {
+                if (!exceedsThreeMonths) {
+                  setViewGranularity('day');
+                }
+              }}
+              className={`px-3 py-1 rounded text-sm ${viewGranularity === 'day' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-700'} ${exceedsThreeMonths ? 'opacity-50 cursor-not-allowed' : ''}`}
+              disabled={exceedsThreeMonths}
+              title={exceedsThreeMonths ? 'Vue journalière limitée à 3 mois maximum' : ''}
+            >
+              Journalière
+            </button>
+            {viewGranularity === 'day' && exceedsThreeMonths && (
+              <span className="text-xs text-orange-600">Limite: 3 mois max</span>
+            )}
+          </div>
+        </div>
         <ResponsiveContainer width="100%" height={300}>
           <ComposedChart data={chartData}>
             <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="month" />
-            <YAxis />
-            <Tooltip 
-              formatter={(value: number, name: string) => {
-                // Pour les taxes et décaissements, afficher comme valeurs négatives dans le tooltip
-                if (name === 'Taxes' || name === 'Décaissements') {
-                  return formatCurrency(-Math.abs(value));
-                }
-                return formatCurrency(value);
-              }}
+            <XAxis 
+              dataKey={viewGranularity === 'day' ? 'day' : 'month'} 
+              angle={viewGranularity === 'day' ? -45 : 0} 
+              textAnchor={viewGranularity === 'day' ? 'end' : 'middle'} 
+              height={viewGranularity === 'day' ? 80 : 30}
+              interval={viewGranularity === 'day' ? 'preserveStartEnd' : 0}
             />
+            <YAxis />
+            <Tooltip content={<CustomTooltip />} />
             <Legend />
             <Bar dataKey="encaissementsPrevisionnels" fill="#10b981" name="Encaissements prévisionnels" />
             <Bar dataKey="encaissementsReels" fill="#059669" name="Encaissements réels" />

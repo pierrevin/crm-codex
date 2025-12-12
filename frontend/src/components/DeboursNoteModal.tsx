@@ -1,5 +1,5 @@
 import { useState, FormEvent, useEffect } from 'react';
-import { XMarkIcon, PlusIcon } from '@heroicons/react/24/outline';
+import { XMarkIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/outline';
 import { deboursNoteService, CreateDeboursNoteDto, DeboursNote } from '../services/deboursNoteService';
 import { expensesService, Expense, CreateExpenseDto } from '../services/expensesService';
 import { SupplierSearchSelect } from './SupplierSearchSelect';
@@ -29,6 +29,7 @@ export function DeboursNoteModal({
   const [issueDate, setIssueDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [expectedPaymentDate, setExpectedPaymentDate] = useState<string>('');
   const [totalAmount, setTotalAmount] = useState<string>('');
+  const [invoiceNumber, setInvoiceNumber] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
   const [loading, setLoading] = useState(false);
@@ -52,39 +53,52 @@ export function DeboursNoteModal({
 
   useEffect(() => {
     if (isOpen) {
-      if (deboursNote) {
-        // Mode édition
-        setTitle(deboursNote.title);
-        setIssueDate(deboursNote.issueDate ? new Date(deboursNote.issueDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
-        setExpectedPaymentDate(deboursNote.expectedPaymentDate ? new Date(deboursNote.expectedPaymentDate).toISOString().split('T')[0] : '');
-        setTotalAmount(deboursNote.totalAmount?.toString() || '');
-        setNotes(deboursNote.notes || '');
-        setSelectedTemplateId(deboursNote.templateId || '');
-        setSelectedExpenseIds(deboursNote.expenses?.map(e => e.id) || []);
-      } else {
-        // Mode création
-        setTitle(`Note de débours - ${opportunityTitle}`);
-        setIssueDate(new Date().toISOString().split('T')[0]);
-        setExpectedPaymentDate('');
-        setTotalAmount('');
-        setNotes('');
-        setSelectedTemplateId('');
-        setSelectedExpenseIds([]);
+      try {
+        if (deboursNote) {
+          // Mode édition - charger les données complètes si nécessaire
+          console.log('Mode édition - deboursNote:', deboursNote);
+          setTitle(deboursNote.title || '');
+          setIssueDate(deboursNote.issueDate ? new Date(deboursNote.issueDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
+          setExpectedPaymentDate(deboursNote.expectedPaymentDate ? new Date(deboursNote.expectedPaymentDate).toISOString().split('T')[0] : '');
+          setTotalAmount(deboursNote.totalAmount?.toString() || '');
+          setInvoiceNumber(deboursNote.invoiceNumber || '');
+          setNotes(deboursNote.notes || '');
+          setSelectedTemplateId(deboursNote.templateId || '');
+          // S'assurer que expenses est un tableau avant de mapper
+          const expenseIds = Array.isArray(deboursNote.expenses) 
+            ? deboursNote.expenses.map((e: any) => e?.id).filter(Boolean)
+            : [];
+          console.log('Expense IDs chargés:', expenseIds);
+          setSelectedExpenseIds(expenseIds);
+        } else {
+          // Mode création
+          setTitle(`Note de débours - ${opportunityTitle}`);
+          setIssueDate(new Date().toISOString().split('T')[0]);
+          setExpectedPaymentDate('');
+          setTotalAmount('');
+          setInvoiceNumber('');
+          setNotes('');
+          setSelectedTemplateId('');
+          setSelectedExpenseIds([]);
+        }
+        setError(null);
+        setShowCreateExpense(false);
+        setSelectedSupplierId('');
+        setNewExpense({
+          supplierName: '',
+          invoiceNumber: '',
+          invoiceDate: new Date().toISOString().split('T')[0],
+          amountTTC: '',
+          amountHT: '',
+          vatRate: '20',
+          accountCode: '',
+          accountLabel: ''
+        });
+        void loadAvailableExpenses();
+      } catch (error) {
+        console.error('Erreur lors de l\'initialisation du modal:', error);
+        setError('Erreur lors du chargement de la note de débours');
       }
-      setError(null);
-      setShowCreateExpense(false);
-      setSelectedSupplierId('');
-      setNewExpense({
-        supplierName: '',
-        invoiceNumber: '',
-        invoiceDate: new Date().toISOString().split('T')[0],
-        amountTTC: '',
-        amountHT: '',
-        vatRate: '20',
-        accountCode: '',
-        accountLabel: ''
-      });
-      void loadAvailableExpenses();
     }
   }, [isOpen, opportunityId, opportunityTitle, deboursNote]);
 
@@ -96,6 +110,7 @@ export function DeboursNoteModal({
       console.error('Erreur chargement dépenses:', error);
     }
   };
+
 
   // Calculer le montant total depuis les dépenses sélectionnées
   useEffect(() => {
@@ -111,6 +126,26 @@ export function DeboursNoteModal({
 
   if (!isOpen) return null;
 
+  // Protection contre les erreurs de rendu
+  if (isEditMode && !deboursNote) {
+    console.error('Mode édition activé mais deboursNote est undefined');
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+        <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl p-6">
+          <div className="text-red-600">
+            <p>Erreur : Impossible de charger la note de débours pour l'édition.</p>
+            <button
+              onClick={onClose}
+              className="mt-4 px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
+            >
+              Fermer
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -119,7 +154,7 @@ export function DeboursNoteModal({
     try {
       if (isEditMode && deboursNote) {
         // Mode édition
-        const updateDto = {
+        const updateDto: any = {
           title,
           issueDate: issueDate ? new Date(issueDate + 'T00:00:00').toISOString() : undefined,
           expectedPaymentDate: expectedPaymentDate ? new Date(expectedPaymentDate + 'T00:00:00').toISOString() : undefined,
@@ -128,7 +163,13 @@ export function DeboursNoteModal({
           notes: notes || undefined,
           templateId: selectedTemplateId || undefined,
         };
-
+        
+        // Toujours envoyer invoiceNumber (même si vide, pour permettre de vider le champ)
+        // invoiceNumber est toujours défini (string initialisé à '')
+        const trimmedInvoiceNumber = invoiceNumber.trim();
+        updateDto.invoiceNumber = trimmedInvoiceNumber !== '' ? trimmedInvoiceNumber : null;
+        
+        console.log('Envoi updateDto avec invoiceNumber:', updateDto.invoiceNumber, '(valeur originale:', invoiceNumber, ')');
         await deboursNoteService.update(deboursNote.id, updateDto);
         // Le Google Docs sera mis à jour automatiquement par l'API si googleDocId existe
       } else {
@@ -140,6 +181,7 @@ export function DeboursNoteModal({
           totalAmount: parseFloat(totalAmount),
           opportunityId,
           expenseIds: selectedExpenseIds.length > 0 ? selectedExpenseIds : undefined,
+          invoiceNumber: invoiceNumber ? invoiceNumber : undefined,
           notes: notes || undefined,
           templateId: selectedTemplateId || undefined,
           status: 'DRAFT'
@@ -206,10 +248,6 @@ export function DeboursNoteModal({
   const handleCreateExpense = async (e: FormEvent) => {
     e.preventDefault();
     e.stopPropagation(); // Empêcher la propagation au formulaire parent
-    // Empêcher aussi la propagation de l'événement au formulaire parent
-    if (e.nativeEvent) {
-      e.nativeEvent.stopImmediatePropagation();
-    }
     setCreatingExpense(true);
     setError(null);
 
@@ -277,12 +315,37 @@ export function DeboursNoteModal({
           <h2 className="text-xl font-semibold text-slate-900">
             {isEditMode ? 'Modifier la note de débours' : 'Créer une note de débours'}
           </h2>
-          <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-slate-600"
-          >
-            <XMarkIcon className="h-6 w-6" />
-          </button>
+          <div className="flex items-center gap-2">
+            {isEditMode && deboursNote && (
+              <button
+                onClick={async () => {
+                  if (window.confirm('Êtes-vous sûr de vouloir supprimer cette note de débours ?\n\nLa note et le document Google Docs associé seront définitivement supprimés.')) {
+                    try {
+                      setLoading(true);
+                      await deboursNoteService.delete(deboursNote.id);
+                      onSuccess();
+                      onClose();
+                    } catch (err: any) {
+                      setError(err.response?.data?.message || 'Erreur lors de la suppression de la note de débours');
+                    } finally {
+                      setLoading(false);
+                    }
+                  }
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-red-600 bg-red-50 rounded-md hover:bg-red-100 transition-colors"
+                disabled={loading}
+              >
+                <TrashIcon className="h-4 w-4" />
+                Supprimer
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="text-slate-400 hover:text-slate-600"
+            >
+              <XMarkIcon className="h-6 w-6" />
+            </button>
+          </div>
         </div>
 
         <p className="text-sm text-slate-600 mb-4">
@@ -295,12 +358,13 @@ export function DeboursNoteModal({
           </div>
         )}
 
-        <form onSubmit={handleSubmit} onClick={(e) => {
-          // Si on clique sur le formulaire de création de dépense, ne pas déclencher le submit du formulaire parent
-          if ((e.target as HTMLElement).closest('form[class*="space-y-3"]')) {
-            e.stopPropagation();
-          }
-        }}>
+        {generatingDoc && (
+          <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded text-blue-700 text-sm">
+            Génération du document Google Docs en cours...
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit}>
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">
@@ -339,6 +403,22 @@ export function DeboursNoteModal({
                   className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
                 />
               </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                N° de facture
+              </label>
+              <input
+                type="text"
+                value={invoiceNumber}
+                onChange={(e) => setInvoiceNumber(e.target.value)}
+                placeholder='Pour alimenter {{num_facture}} dans le template'
+                className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+              />
+              <p className="mt-1 text-xs text-slate-500">
+                Ce numéro sera utilisé pour remplacer {'{{num_facture}}'} dans le template Google Docs
+              </p>
             </div>
 
             <div>
@@ -403,7 +483,12 @@ export function DeboursNoteModal({
                     </button>
                   </div>
                   <form 
-                    onSubmit={handleCreateExpense} 
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      void handleCreateExpense(e);
+                    }}
+                    onClick={(e) => e.stopPropagation()}
                     className="space-y-3" 
                     onClick={(e) => e.stopPropagation()}
                     onKeyDown={(e) => {
@@ -568,7 +653,6 @@ export function DeboursNoteModal({
                         type="submit"
                         disabled={creatingExpense || !newExpense.amountTTC || !newExpense.supplierName || !newExpense.accountCode}
                         className="px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50"
-                        onClick={(e) => e.stopPropagation()}
                       >
                         {creatingExpense ? 'Création...' : 'Créer'}
                       </button>

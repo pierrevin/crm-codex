@@ -355,6 +355,7 @@ model DeboursNote {
   googleDocId         String?           // ID du document Google Docs créé
   googleDocUrl        String?           // URL du document Google Docs
   templateId         String?           // ID du modèle Google Docs utilisé
+  invoiceNumber       String?           // Numéro de facture pour alimenter {{num_facture}} dans les templates
   notes               String?           // Notes additionnelles
   // Relations
   opportunity         Opportunity       @relation(fields: [opportunityId], references: [id], onDelete: Cascade)

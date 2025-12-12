@@ -627,14 +627,15 @@ export function OpportunityDetailPage() {
       </div>
 
       {/* Layout 2 colonnes */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Colonne gauche (1/3) */}
-        <div className="space-y-6">
+      <div className="grid grid-cols-1 lg:grid-cols-7 gap-6">
+        {/* Colonne gauche (2/7) */}
+        <div className="lg:col-span-2 space-y-6">
           {/* Métriques compactes */}
           <OpportunityMetrics
             opportunityAmount={opportunity.amount}
             invoiceUrls={invoiceUrls}
             expenses={expenses}
+            deboursNotes={deboursNotes}
           />
 
           {/* Documents */}
@@ -645,8 +646,8 @@ export function OpportunityDetailPage() {
           />
         </div>
 
-        {/* Colonne droite (2/3) */}
-        <div className="lg:col-span-2 space-y-6">
+        {/* Colonne droite (5/7) */}
+        <div className="lg:col-span-5 space-y-6">
           {/* Tableau des recettes */}
           <RevenueTable
             quotes={quotes}

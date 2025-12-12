@@ -31,11 +31,6 @@ api.interceptors.request.use((config) => {
     (config.headers as any).Authorization = `Bearer ${anon}`;
     (config.headers as any).apikey = anon;
     
-    // Log pour debug si la variable d'env manque
-    if (!anonKey) {
-      console.warn('VITE_SUPABASE_ANON_KEY non définie, utilisation du fallback. Vérifiez la configuration Vercel.');
-    }
-    
     // JWT utilisateur dans un header custom (seulement si présent)
     if (at) {
       (config.headers as any)['x-user-authorization'] = `Bearer ${at}`;
@@ -48,38 +43,112 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// Flag pour éviter les boucles infinies lors du refresh
+let isRefreshing = false;
+let failedQueue: Array<{
+  resolve: (value?: any) => void;
+  reject: (error?: any) => void;
+}> = [];
+
+const processQueue = (error: any, token: string | null = null) => {
+  failedQueue.forEach((prom) => {
+    if (error) {
+      prom.reject(error);
+    } else {
+      prom.resolve(token);
+    }
+  });
+  failedQueue = [];
+};
+
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
-    if (error.response?.status === 401) {
+    const originalRequest = error.config;
+
+    // Si c'est déjà une requête de refresh qui échoue, ne pas réessayer
+    if (originalRequest?.url?.includes('/api/auth/refresh')) {
+      // Échec du refresh token : déconnexion
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refreshToken');
+      window.location.href = '/';
+      return Promise.reject(error);
+    }
+
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      if (isRefreshing) {
+        // Si un refresh est déjà en cours, ajouter la requête à la queue
+        return new Promise((resolve, reject) => {
+          failedQueue.push({ resolve, reject });
+        })
+          .then((token) => {
+            const isSupabaseEdge = typeof api.defaults.baseURL === 'string' && api.defaults.baseURL.includes('.supabase.co/functions/v1');
+            if (!originalRequest.headers) originalRequest.headers = {};
+            if (isSupabaseEdge) {
+              (originalRequest.headers as any)['x-user-authorization'] = `Bearer ${token}`;
+            } else {
+              (originalRequest.headers as any).Authorization = `Bearer ${token}`;
+            }
+            return api.request(originalRequest);
+          })
+          .catch((err) => {
+            return Promise.reject(err);
+          });
+      }
+
+      originalRequest._retry = true;
+      isRefreshing = true;
+
       const refreshToken = localStorage.getItem('refreshToken');
       if (refreshToken) {
         try {
-          // Utiliser l'instance API pour bénéficier des bons en-têtes (apikey/Authorization ANON)
-          const { data } = await api.post(`/api/auth/refresh`, { refreshToken });
-          localStorage.setItem('accessToken', data.accessToken);
-          localStorage.setItem('refreshToken', data.refreshToken);
-          // Ajuster le header du retry selon la cible
-          const isSupabaseEdge = typeof api.defaults.baseURL === 'string' && api.defaults.baseURL.includes('.supabase.co/functions/v1');
-          if (!error.config.headers) error.config.headers = {};
-          if (isSupabaseEdge) {
-            (error.config.headers as any)['x-user-authorization'] = `Bearer ${data.accessToken}`;
-          } else {
-            (error.config.headers as any).Authorization = `Bearer ${data.accessToken}`;
+          const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9lY2JydHllcWF0aWVleWJqdmhqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk5MTUyMDIsImV4cCI6MjA3NTQ5MTIwMn0.Z4u7oicInUcPjT19p71NRyu6ck63HSXHByH8uL5-IvY';
+          // Créer une instance axios séparée pour éviter la récursion
+          const refreshResponse = await axios.post(`${API_BASE_URL}/api/auth/refresh`, { refreshToken }, {
+            headers: {
+              'Authorization': `Bearer ${anonKey}`,
+              'apikey': anonKey
+            }
+          });
+          
+          const { accessToken, refreshToken: newRefreshToken } = refreshResponse.data;
+          localStorage.setItem('accessToken', accessToken);
+          if (newRefreshToken) {
+            localStorage.setItem('refreshToken', newRefreshToken);
           }
-          return api.request(error.config);
-        } catch (refreshError) {
+
+          // Traiter la queue
+          processQueue(null, accessToken);
+
+          // Retry de la requête originale
+          const isSupabaseEdge = typeof api.defaults.baseURL === 'string' && api.defaults.baseURL.includes('.supabase.co/functions/v1');
+          if (!originalRequest.headers) originalRequest.headers = {};
+          if (isSupabaseEdge) {
+            (originalRequest.headers as any)['x-user-authorization'] = `Bearer ${accessToken}`;
+          } else {
+            (originalRequest.headers as any).Authorization = `Bearer ${accessToken}`;
+          }
+          
+          isRefreshing = false;
+          return api.request(originalRequest);
+        } catch (refreshError: any) {
           // Échec du refresh token : déconnexion
+          console.error('Erreur lors du refresh du token:', refreshError?.response?.status, refreshError?.message);
+          processQueue(refreshError, null);
           localStorage.removeItem('accessToken');
           localStorage.removeItem('refreshToken');
-          window.location.href = '/';
+          isRefreshing = false;
+          // Ne pas rediriger automatiquement, laisser l'utilisateur continuer
+          // window.location.href = '/';
           return Promise.reject(refreshError);
         }
       } else {
-        // Pas de refresh token : déconnexion immédiate
-        localStorage.removeItem('accessToken');
-        localStorage.removeItem('refreshToken');
-        window.location.href = '/';
+        // Pas de refresh token : ne pas rediriger automatiquement
+        isRefreshing = false;
+        // Ne pas supprimer le token, permettre à l'utilisateur de continuer
+        // localStorage.removeItem('accessToken');
+        // localStorage.removeItem('refreshToken');
+        // window.location.href = '/';
       }
     }
     return Promise.reject(error);

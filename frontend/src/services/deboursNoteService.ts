@@ -11,6 +11,7 @@ export interface DeboursNote {
   status: DeboursNoteStatus;
   googleDocId?: string;
   googleDocUrl?: string;
+  invoiceNumber?: string;
   notes?: string;
   opportunityId: string;
   companyId?: string;
@@ -29,6 +30,7 @@ export interface CreateDeboursNoteDto {
   opportunityId: string;
   companyId?: string;
   expenseIds?: string[];
+  invoiceNumber?: string;
   notes?: string;
   templateId?: string;
 }

@@ -1,25 +1,45 @@
 import { CurrencyEuroIcon, ArrowTrendingUpIcon } from '@heroicons/react/24/outline';
 import { Expense } from '../services/expensesService';
+import { DeboursNote } from '../services/deboursNoteService';
 
 interface OpportunityMetricsProps {
   opportunityAmount?: number;
   invoiceUrls?: string[];
   expenses: Expense[];
   paymentsTotal?: number;
+  deboursNotes?: DeboursNote[];
 }
 
 export function OpportunityMetrics({
   opportunityAmount = 0,
   invoiceUrls = [],
   expenses,
-  paymentsTotal = 0
+  paymentsTotal = 0,
+  deboursNotes = []
 }: OpportunityMetricsProps) {
   // Calculer le CA total
   // CA = montant de l'opportunité (les factures Tiime sont déjà incluses dans le montant)
   const ca = opportunityAmount || 0;
 
-  // Calculer le total des dépenses
+  // Identifier les dépenses liées aux notes de débours
+  // Les notes de débours sont des encaissements qui compensent ces dépenses
+  const expenseIdsLinkedToDebours = new Set<string>();
+  deboursNotes.forEach(note => {
+    if (note.expenses && note.expenses.length > 0) {
+      note.expenses.forEach((exp: any) => {
+        expenseIdsLinkedToDebours.add(exp.id);
+      });
+    }
+  });
+
+  // Calculer le total des dépenses en excluant celles liées aux notes de débours
+  // Car les notes de débours représentent des encaissements qui compensent ces dépenses
   const totalExpenses = expenses.reduce((sum, expense) => {
+    // Si la dépense est liée à une note de débours, on ne la compte pas dans les dépenses
+    // car elle est compensée par l'encaissement de la note de débours
+    if (expenseIdsLinkedToDebours.has(expense.id)) {
+      return sum;
+    }
     const amount = expense.amountTTC ? parseFloat(expense.amountTTC.toString()) : 
                    expense.amountHT ? parseFloat(expense.amountHT.toString()) : 0;
     return sum + amount;
