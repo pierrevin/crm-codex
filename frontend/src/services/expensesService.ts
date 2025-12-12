@@ -7,7 +7,7 @@ const expensesApi = api;
 
 // Les intercepteurs sont déjà gérés par apiClient
 
-export type ExpenseStatus = 'PENDING' | 'PROCESSED' | 'VERIFIED' | 'REJECTED';
+export type ExpenseStatus = 'PENDING' | 'PROCESSED' | 'VERIFIED' | 'PAID' | 'REJECTED';
 
 export interface Expense {
   id: string;

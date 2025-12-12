@@ -22,6 +22,7 @@ const STATUS_COLORS: Record<ExpenseStatus, string> = {
   PENDING: 'bg-yellow-100 text-yellow-700 border-yellow-200',
   PROCESSED: 'bg-blue-100 text-blue-700 border-blue-200',
   VERIFIED: 'bg-green-100 text-green-700 border-green-200',
+  PAID: 'bg-emerald-100 text-emerald-700 border-emerald-200',
   REJECTED: 'bg-red-100 text-red-700 border-red-200'
 };
 
@@ -29,6 +30,7 @@ const STATUS_LABELS: Record<ExpenseStatus, string> = {
   PENDING: 'En attente',
   PROCESSED: 'Traité',
   VERIFIED: 'Vérifié',
+  PAID: 'Réglé',
   REJECTED: 'Rejeté'
 };
 
@@ -318,6 +320,24 @@ export function ExpenseDetailPage() {
                     >
                       <CheckIcon className="w-5 h-5" />
                       Vérifier
+                    </button>
+                  )}
+                  {expense.status !== 'PAID' && (
+                    <button
+                      onClick={async () => {
+                        if (!expense) return;
+                        try {
+                          await expensesService.update(expense.id, { status: 'PAID' });
+                          await loadExpense(expense.id);
+                        } catch (error) {
+                          console.error('Erreur lors du marquage comme réglé:', error);
+                          alert('Erreur lors du marquage comme réglé');
+                        }
+                      }}
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors font-medium"
+                    >
+                      <CheckIcon className="w-5 h-5" />
+                      Réglé
                     </button>
                   )}
                   <button

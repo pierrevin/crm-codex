@@ -751,11 +751,13 @@ export function OpportunityDetailPage() {
                             expense.status === 'PENDING' ? 'bg-yellow-100 text-yellow-700' :
                             expense.status === 'PROCESSED' ? 'bg-blue-100 text-blue-700' :
                             expense.status === 'VERIFIED' ? 'bg-green-100 text-green-700' :
+                            expense.status === 'PAID' ? 'bg-emerald-100 text-emerald-700' :
                             'bg-red-100 text-red-700'
                           }`}>
                             {expense.status === 'PENDING' ? 'En attente' :
                              expense.status === 'PROCESSED' ? 'Traité' :
                              expense.status === 'VERIFIED' ? 'Vérifié' :
+                             expense.status === 'PAID' ? 'Réglé' :
                              'Rejeté'}
                           </span>
                         </td>

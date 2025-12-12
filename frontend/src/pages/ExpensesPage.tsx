@@ -1,15 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { PlusIcon, MagnifyingGlassIcon, CheckIcon, PencilIcon, TrashIcon, XMarkIcon } from '@heroicons/react/24/outline';
-import { expensesService, Expense, ExpenseStatus, ExpenseFilters } from '../services/expensesService';
+import { PlusIcon, MagnifyingGlassIcon, CheckIcon, PencilIcon, TrashIcon, XMarkIcon, ChevronUpIcon, ChevronDownIcon } from '@heroicons/react/24/outline';
+import { expensesService, Expense, ExpenseStatus, ExpenseFilters, UpdateExpenseDto } from '../services/expensesService';
 import { recurringExpensesService, RecurringExpense, RecurrenceType, UpdateRecurringExpenseDto } from '../services/recurringExpensesService';
 import { ExpenseUploadModal } from '../components/ExpenseUploadModal';
 import { RecurringExpenseEditForm } from '../components/RecurringExpenseEditForm';
+import { AccountCodeSelector } from '../components/AccountCodeSelector';
 
 const STATUS_COLORS: Record<ExpenseStatus, string> = {
   PENDING: 'bg-yellow-100 text-yellow-700',
   PROCESSED: 'bg-blue-100 text-blue-700',
   VERIFIED: 'bg-green-100 text-green-700',
+  PAID: 'bg-emerald-100 text-emerald-700',
   REJECTED: 'bg-red-100 text-red-700'
 };
 
@@ -17,8 +19,22 @@ const STATUS_LABELS: Record<ExpenseStatus, string> = {
   PENDING: 'En attente',
   PROCESSED: 'Traité',
   VERIFIED: 'Vérifié',
+  PAID: 'Réglé',
   REJECTED: 'Rejeté'
 };
+
+type SortField = 'invoiceDate' | 'supplierName' | 'invoiceNumber' | 'amountHT' | 'vatAmount' | 'amountTTC' | 'accountCode' | 'status';
+type SortDirection = 'asc' | 'desc';
+
+interface ColumnFilter {
+  supplierName?: string;
+  invoiceNumber?: string;
+  amountHT?: string;
+  vatAmount?: string;
+  amountTTC?: string;
+  accountCode?: string;
+  status?: ExpenseStatus | '';
+}
 
 export function ExpensesPage() {
   const navigate = useNavigate();
@@ -28,6 +44,19 @@ export function ExpensesPage() {
   const [showModal, setShowModal] = useState(false);
   const [editingRecurring, setEditingRecurring] = useState<RecurringExpense | null>(null);
   const [filters, setFilters] = useState<ExpenseFilters>({});
+  
+  // Tri et filtrage
+  const [sortField, setSortField] = useState<SortField>('invoiceDate');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const [columnFilters, setColumnFilters] = useState<ColumnFilter>({});
+  
+  // Édition inline
+  const [editingCell, setEditingCell] = useState<{ expenseId: string; field: string } | null>(null);
+  const [editValue, setEditValue] = useState<string>('');
+  const [savingExpense, setSavingExpense] = useState<string | null>(null);
+  
+  // Sélection multiple
+  const [selectedExpenseIds, setSelectedExpenseIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     void loadExpenses();
@@ -62,7 +91,7 @@ export function ExpensesPage() {
     try {
       await recurringExpensesService.delete(id);
       await loadRecurringExpenses();
-      await loadExpenses(); // Recharger aussi les dépenses car les prévisionnelles liées peuvent être affectées
+      await loadExpenses();
     } catch (error) {
       console.error('Erreur suppression:', error);
       alert('Erreur lors de la suppression');
@@ -103,6 +132,159 @@ export function ExpensesPage() {
     }
   };
 
+  // Sauvegarder une modification inline (mise à jour locale sans recharger toute la page)
+  const handleSaveCell = async (expenseId: string, field: string, value: string, label?: string) => {
+    setSavingExpense(expenseId);
+    try {
+      const expense = expenses.find(e => e.id === expenseId);
+      if (!expense) return;
+
+      const updateData: UpdateExpenseDto = {};
+      
+      switch (field) {
+        case 'invoiceDate':
+          updateData.invoiceDate = value || undefined;
+          break;
+        case 'supplierName':
+          updateData.supplierName = value || undefined;
+          break;
+        case 'invoiceNumber':
+          updateData.invoiceNumber = value || undefined;
+          break;
+        case 'amountHT':
+          updateData.amountHT = value ? parseFloat(value) : undefined;
+          break;
+        case 'vatAmount':
+          updateData.vatAmount = value ? parseFloat(value) : undefined;
+          break;
+        case 'amountTTC':
+          updateData.amountTTC = value ? parseFloat(value) : undefined;
+          break;
+        case 'accountCode':
+          updateData.accountCode = value || undefined;
+          updateData.accountLabel = label || undefined;
+          break;
+        case 'status':
+          updateData.status = value as ExpenseStatus;
+          break;
+      }
+
+      // Sauvegarder sur le serveur
+      const updatedExpense = await expensesService.update(expenseId, updateData);
+      
+      // Mettre à jour localement sans recharger toute la page
+      setExpenses(prevExpenses => 
+        prevExpenses.map(e => e.id === expenseId ? { ...e, ...updatedExpense } : e)
+      );
+      
+      setEditingCell(null);
+    } catch (error) {
+      console.error('Erreur sauvegarde cellule:', error);
+      alert('Erreur lors de la sauvegarde');
+    } finally {
+      setSavingExpense(null);
+    }
+  };
+
+  // Gérer le tri
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  // Filtrer et trier les dépenses
+  const filteredAndSortedExpenses = useMemo(() => {
+    let filtered = [...expenses];
+
+    // Appliquer les filtres de colonnes
+    if (columnFilters.supplierName) {
+      const filter = columnFilters.supplierName.toLowerCase();
+      filtered = filtered.filter(e => 
+        (e.supplierName || '').toLowerCase().includes(filter) ||
+        (e.company?.name || '').toLowerCase().includes(filter)
+      );
+    }
+    if (columnFilters.invoiceNumber) {
+      const filter = columnFilters.invoiceNumber.toLowerCase();
+      filtered = filtered.filter(e => 
+        (e.invoiceNumber || '').toLowerCase().includes(filter)
+      );
+    }
+    if (columnFilters.accountCode) {
+      const filter = columnFilters.accountCode.toLowerCase();
+      filtered = filtered.filter(e => 
+        (e.accountCode || '').toLowerCase().includes(filter)
+      );
+    }
+    if (columnFilters.status) {
+      filtered = filtered.filter(e => e.status === columnFilters.status);
+    }
+
+    // Appliquer le tri
+    filtered.sort((a, b) => {
+      let aValue: any;
+      let bValue: any;
+
+      switch (sortField) {
+        case 'invoiceDate':
+          // Pour tri descendant (du plus récent au plus ancien), placer les dates nulles à la fin
+          if (!a.invoiceDate) {
+            aValue = sortDirection === 'desc' ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
+          } else {
+            const dateA = new Date(a.invoiceDate);
+            aValue = isNaN(dateA.getTime()) ? (sortDirection === 'desc' ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY) : dateA.getTime();
+          }
+          if (!b.invoiceDate) {
+            bValue = sortDirection === 'desc' ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
+          } else {
+            const dateB = new Date(b.invoiceDate);
+            bValue = isNaN(dateB.getTime()) ? (sortDirection === 'desc' ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY) : dateB.getTime();
+          }
+          break;
+        case 'supplierName':
+          aValue = (a.supplierName || a.company?.name || '').toLowerCase();
+          bValue = (b.supplierName || b.company?.name || '').toLowerCase();
+          break;
+        case 'invoiceNumber':
+          aValue = (a.invoiceNumber || '').toLowerCase();
+          bValue = (b.invoiceNumber || '').toLowerCase();
+          break;
+        case 'amountHT':
+          aValue = a.amountHT ? parseFloat(a.amountHT.toString()) : 0;
+          bValue = b.amountHT ? parseFloat(b.amountHT.toString()) : 0;
+          break;
+        case 'vatAmount':
+          aValue = a.vatAmount ? parseFloat(a.vatAmount.toString()) : 0;
+          bValue = b.vatAmount ? parseFloat(b.vatAmount.toString()) : 0;
+          break;
+        case 'amountTTC':
+          aValue = a.amountTTC ? parseFloat(a.amountTTC.toString()) : 0;
+          bValue = b.amountTTC ? parseFloat(b.amountTTC.toString()) : 0;
+          break;
+        case 'accountCode':
+          aValue = (a.accountCode || '').toLowerCase();
+          bValue = (b.accountCode || '').toLowerCase();
+          break;
+        case 'status':
+          aValue = a.status;
+          bValue = b.status;
+          break;
+        default:
+          return 0;
+      }
+
+      if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1;
+      if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+    return filtered;
+  }, [expenses, columnFilters, sortField, sortDirection]);
+
   const formatCurrency = (amount?: number) => {
     if (!amount) return '-';
     return new Intl.NumberFormat('fr-FR', {
@@ -116,13 +298,128 @@ export function ExpensesPage() {
     return new Date(date).toLocaleDateString('fr-FR');
   };
 
-  // Sécuriser contre un éventuel tableau nul renvoyé par l'API
-  const safeExpenses = Array.isArray(expenses) ? expenses : [];
+  const formatDateInput = (date?: string) => {
+    if (!date) return '';
+    return new Date(date).toISOString().split('T')[0];
+  };
 
-  const filteredExpenses = safeExpenses.filter(expense => {
-    if (filters.status && expense.status !== filters.status) return false;
-    return true;
-  });
+  const getSortIcon = (field: SortField) => {
+    if (sortField !== field) return null;
+    return sortDirection === 'asc' ? (
+      <ChevronUpIcon className="w-4 h-4 inline-block ml-1" />
+    ) : (
+      <ChevronDownIcon className="w-4 h-4 inline-block ml-1" />
+    );
+  };
+
+  const startEditing = (expenseId: string, field: string, currentValue: any) => {
+    setEditingCell({ expenseId, field });
+    if (field === 'invoiceDate') {
+      setEditValue(formatDateInput(currentValue));
+    } else if (field === 'amountHT' || field === 'vatAmount' || field === 'amountTTC') {
+      setEditValue(currentValue ? currentValue.toString() : '');
+    } else {
+      setEditValue(currentValue || '');
+    }
+  };
+
+  const cancelEditing = () => {
+    setEditingCell(null);
+    setEditValue('');
+  };
+
+  const saveEditing = async () => {
+    if (editingCell) {
+      await handleSaveCell(editingCell.expenseId, editingCell.field, editValue);
+    }
+  };
+
+  // Gestion de la sélection multiple (clic direct sur la ligne)
+  const handleRowClick = (expenseId: string, e: React.MouseEvent) => {
+    // Ne pas sélectionner si on clique sur un champ éditable ou un bouton
+    const target = e.target as HTMLElement;
+    if (target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.tagName === 'BUTTON' || target.closest('button') || target.closest('input') || target.closest('select')) {
+      return;
+    }
+    
+    setSelectedExpenseIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(expenseId)) {
+        newSet.delete(expenseId);
+      } else {
+        newSet.add(expenseId);
+      }
+      return newSet;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedExpenseIds.size === filteredAndSortedExpenses.length) {
+      setSelectedExpenseIds(new Set());
+    } else {
+      setSelectedExpenseIds(new Set(filteredAndSortedExpenses.map(e => e.id)));
+    }
+  };
+
+  // Édition en masse
+  const handleBulkUpdateStatus = async (status: ExpenseStatus) => {
+    if (selectedExpenseIds.size === 0) return;
+    
+    if (!confirm(`Voulez-vous changer le statut de ${selectedExpenseIds.size} dépense(s) en "${STATUS_LABELS[status]}" ?`)) {
+      return;
+    }
+
+    try {
+      const updatePromises = Array.from(selectedExpenseIds).map(id =>
+        expensesService.update(id, { status })
+      );
+      
+      const updatedExpenses = await Promise.all(updatePromises);
+      
+      // Mettre à jour localement
+      setExpenses(prevExpenses => 
+        prevExpenses.map(e => {
+          if (selectedExpenseIds.has(e.id)) {
+            const updated = updatedExpenses.find(ue => ue.id === e.id);
+            return updated ? { ...e, ...updated } : e;
+          }
+          return e;
+        })
+      );
+      
+      setSelectedExpenseIds(new Set());
+    } catch (error) {
+      console.error('Erreur édition en masse:', error);
+      alert('Erreur lors de l\'édition en masse');
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedExpenseIds.size === 0) return;
+    
+    if (!confirm(`Voulez-vous supprimer ${selectedExpenseIds.size} dépense(s) ?`)) {
+      return;
+    }
+
+    try {
+      const deletePromises = Array.from(selectedExpenseIds).map(id =>
+        expensesService.delete(id)
+      );
+      
+      await Promise.all(deletePromises);
+      
+      // Mettre à jour localement
+      setExpenses(prevExpenses => 
+        prevExpenses.filter(e => !selectedExpenseIds.has(e.id))
+      );
+      
+      setSelectedExpenseIds(new Set());
+      await loadExpenses(); // Recharger pour synchroniser
+    } catch (error) {
+      console.error('Erreur suppression en masse:', error);
+      alert('Erreur lors de la suppression en masse');
+    }
+  };
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -140,7 +437,7 @@ export function ExpensesPage() {
         </button>
       </div>
 
-      {/* Filtres */}
+      {/* Filtres principaux */}
       <div className="bg-white rounded-lg border border-slate-200 p-4">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
@@ -226,11 +523,48 @@ export function ExpensesPage() {
         </div>
       )}
 
-      {/* Tableau */}
+      {/* Barre d'actions en masse */}
+      {selectedExpenseIds.size > 0 && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <span className="text-sm font-medium text-blue-900">
+              {selectedExpenseIds.size} dépense(s) sélectionnée(s)
+            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-blue-700">Statut:</span>
+              {Object.entries(STATUS_LABELS).map(([value, label]) => (
+                <button
+                  key={value}
+                  onClick={() => handleBulkUpdateStatus(value as ExpenseStatus)}
+                  className="px-3 py-1 text-xs font-medium rounded bg-white border border-blue-300 text-blue-700 hover:bg-blue-100 transition-colors"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleBulkDelete}
+              className="px-4 py-2 text-sm font-medium rounded bg-red-600 text-white hover:bg-red-700 transition-colors"
+            >
+              Supprimer
+            </button>
+            <button
+              onClick={() => setSelectedExpenseIds(new Set())}
+              className="px-4 py-2 text-sm font-medium rounded bg-slate-200 text-slate-700 hover:bg-slate-300 transition-colors"
+            >
+              Annuler
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Tableau éditable */}
       <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
         {loading ? (
           <div className="p-8 text-center text-slate-500">Chargement...</div>
-        ) : filteredExpenses.length === 0 ? (
+        ) : filteredAndSortedExpenses.length === 0 ? (
           <div className="p-8 text-center text-slate-500">
             <MagnifyingGlassIcon className="w-12 h-12 mx-auto mb-4 text-slate-300" />
             <p>Aucune dépense trouvée</p>
@@ -240,53 +574,331 @@ export function ExpensesPage() {
             <table className="w-full">
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-600 uppercase">Date</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-600 uppercase">Fournisseur</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-600 uppercase">N° Facture</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-slate-600 uppercase">Montant HT</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-slate-600 uppercase">TVA</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-slate-600 uppercase">TTC</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-600 uppercase">Compte</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-600 uppercase">Statut</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-slate-600 uppercase">Actions</th>
+                  <th 
+                    className="px-4 py-2 text-left w-12"
+                  >
+                    <div 
+                      className="text-xs font-medium text-slate-600 uppercase cursor-pointer hover:bg-slate-100 rounded px-1 py-0.5 -mx-1 -my-0.5 inline-block"
+                      onClick={toggleSelectAll}
+                      title={selectedExpenseIds.size === filteredAndSortedExpenses.length && filteredAndSortedExpenses.length > 0 ? "Tout désélectionner" : "Tout sélectionner"}
+                    >
+                      {selectedExpenseIds.size === filteredAndSortedExpenses.length && filteredAndSortedExpenses.length > 0 ? '✓' : ''}
+                    </div>
+                  </th>
+                  <th className="px-4 py-2 text-left">
+                    <div 
+                      className="text-xs font-medium text-slate-600 uppercase cursor-pointer hover:bg-slate-100 rounded px-1 py-0.5 -mx-1 inline-flex items-center w-fit"
+                      onClick={() => handleSort('invoiceDate')}
+                    >
+                      Date {getSortIcon('invoiceDate')}
+                    </div>
+                  </th>
+                  <th className="px-4 py-2 text-left">
+                    <div className="flex flex-col gap-1">
+                      <div 
+                        className="text-xs font-medium text-slate-600 uppercase cursor-pointer hover:bg-slate-100 rounded px-1 py-0.5 -mx-1 inline-flex items-center w-fit"
+                        onClick={() => handleSort('supplierName')}
+                      >
+                        Fournisseur {getSortIcon('supplierName')}
+                      </div>
+                      <input
+                        type="text"
+                        value={columnFilters.supplierName || ''}
+                        onChange={(e) => setColumnFilters({ ...columnFilters, supplierName: e.target.value })}
+                        onClick={(e) => e.stopPropagation()}
+                        placeholder="Filtrer..."
+                        className="w-full px-2 py-1 text-xs border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      />
+                    </div>
+                  </th>
+                  <th className="px-4 py-2 text-left hidden">
+                    <div className="flex flex-col gap-1">
+                      <div 
+                        className="text-xs font-medium text-slate-600 uppercase cursor-pointer hover:bg-slate-100 rounded px-1 py-0.5 -mx-1 inline-flex items-center w-fit"
+                        onClick={() => handleSort('invoiceNumber')}
+                      >
+                        N° Facture {getSortIcon('invoiceNumber')}
+                      </div>
+                    </div>
+                  </th>
+                  <th className="px-4 py-2 text-right">
+                    <div className="flex flex-col gap-1 items-end">
+                      <div 
+                        className="text-xs font-medium text-slate-600 uppercase cursor-pointer hover:bg-slate-100 rounded px-1 py-0.5 -mx-1 inline-flex items-center w-fit"
+                        onClick={() => handleSort('amountTTC')}
+                      >
+                        Montant {getSortIcon('amountTTC')}
+                      </div>
+                    </div>
+                  </th>
+                  <th className="px-4 py-2 text-left">
+                    <div className="flex flex-col gap-1">
+                      <div 
+                        className="text-xs font-medium text-slate-600 uppercase cursor-pointer hover:bg-slate-100 rounded px-1 py-0.5 -mx-1 inline-flex items-center w-fit"
+                        onClick={() => handleSort('accountCode')}
+                      >
+                        Compte {getSortIcon('accountCode')}
+                      </div>
+                      <input
+                        type="text"
+                        value={columnFilters.accountCode || ''}
+                        onChange={(e) => setColumnFilters({ ...columnFilters, accountCode: e.target.value })}
+                        onClick={(e) => e.stopPropagation()}
+                        placeholder="Filtrer..."
+                        className="w-full px-2 py-1 text-xs border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      />
+                    </div>
+                  </th>
+                  <th className="px-4 py-2 text-left">
+                    <div className="text-xs font-medium text-slate-600 uppercase">
+                      Opportunité + Client
+                    </div>
+                  </th>
+                  <th className="px-4 py-2 text-left">
+                    <div className="flex flex-col gap-1">
+                      <div 
+                        className="text-xs font-medium text-slate-600 uppercase cursor-pointer hover:bg-slate-100 rounded px-1 py-0.5 -mx-1 inline-flex items-center w-fit"
+                        onClick={() => handleSort('status')}
+                      >
+                        Statut {getSortIcon('status')}
+                      </div>
+                      <select
+                        value={columnFilters.status || ''}
+                        onChange={(e) => setColumnFilters({ ...columnFilters, status: e.target.value as ExpenseStatus || '' })}
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-full px-2 py-1 text-xs border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      >
+                        <option value="">Tous</option>
+                        {Object.entries(STATUS_LABELS).map(([value, label]) => (
+                          <option key={value} value={value}>{label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </th>
+                  <th className="px-4 py-2 text-right">
+                    <div className="text-xs font-medium text-slate-600 uppercase">
+                      Actions
+                    </div>
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200">
-                {filteredExpenses.map((expense) => (
-                  <tr key={expense.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 text-sm text-slate-900">
-                      {formatDate(expense.invoiceDate)}
+                {filteredAndSortedExpenses.map((expense) => (
+                  <tr 
+                    key={expense.id} 
+                    className={`hover:bg-slate-50 cursor-pointer transition-colors ${
+                      selectedExpenseIds.has(expense.id) 
+                        ? 'bg-blue-50 border-l-4 border-blue-500' 
+                        : 'border-l-4 border-transparent'
+                    }`}
+                    onClick={(e) => handleRowClick(expense.id, e)}
+                  >
+                    {/* Indicateur de sélection */}
+                    <td className="px-4 py-3">
+                      {selectedExpenseIds.has(expense.id) && (
+                        <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                      )}
                     </td>
-                    <td className="px-4 py-3 text-sm text-slate-900">
-                      {expense.supplierName || expense.company?.name || '-'}
+                    {/* Date */}
+                    <td 
+                      className="px-4 py-3 text-sm text-slate-900 cursor-pointer"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!editingCell) startEditing(expense.id, 'invoiceDate', expense.invoiceDate);
+                      }}
+                    >
+                      {editingCell?.expenseId === expense.id && editingCell.field === 'invoiceDate' ? (
+                        <input
+                          type="date"
+                          value={editValue}
+                          onChange={(e) => setEditValue(e.target.value)}
+                          onBlur={saveEditing}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') saveEditing();
+                            if (e.key === 'Escape') cancelEditing();
+                          }}
+                          autoFocus
+                          className="w-full px-2 py-1 text-sm border border-blue-500 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                      ) : (
+                        formatDate(expense.invoiceDate)
+                      )}
                     </td>
+                    {/* Fournisseur */}
+                    <td 
+                      className="px-4 py-3 text-sm text-slate-900 cursor-pointer"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!editingCell) startEditing(expense.id, 'supplierName', expense.supplierName || expense.company?.name);
+                      }}
+                    >
+                      {editingCell?.expenseId === expense.id && editingCell.field === 'supplierName' ? (
+                        <input
+                          type="text"
+                          value={editValue}
+                          onChange={(e) => setEditValue(e.target.value)}
+                          onBlur={saveEditing}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') saveEditing();
+                            if (e.key === 'Escape') cancelEditing();
+                          }}
+                          autoFocus
+                          className="w-full px-2 py-1 text-sm border border-blue-500 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                      ) : (
+                        expense.supplierName || expense.company?.name || '-'
+                      )}
+                    </td>
+                    {/* N° Facture - Masquée */}
+                    <td 
+                      className="px-4 py-3 text-sm text-slate-600 cursor-pointer hidden"
+                      onClick={() => !editingCell && startEditing(expense.id, 'invoiceNumber', expense.invoiceNumber)}
+                    >
+                      {editingCell?.expenseId === expense.id && editingCell.field === 'invoiceNumber' ? (
+                        <input
+                          type="text"
+                          value={editValue}
+                          onChange={(e) => setEditValue(e.target.value)}
+                          onBlur={saveEditing}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') saveEditing();
+                            if (e.key === 'Escape') cancelEditing();
+                          }}
+                          autoFocus
+                          className="w-full px-2 py-1 text-sm border border-blue-500 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                      ) : (
+                        expense.invoiceNumber || '-'
+                      )}
+                    </td>
+                    {/* Montant (TTC + HT) */}
+                    <td 
+                      className="px-4 py-3 text-sm text-right"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!editingCell) {
+                          startEditing(expense.id, 'amountTTC', expense.amountTTC);
+                        }
+                      }}
+                    >
+                      {editingCell?.expenseId === expense.id && editingCell.field === 'amountTTC' ? (
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={editValue}
+                          onChange={(e) => setEditValue(e.target.value)}
+                          onBlur={saveEditing}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') saveEditing();
+                            if (e.key === 'Escape') cancelEditing();
+                          }}
+                          autoFocus
+                          className="w-full px-2 py-1 text-sm border border-blue-500 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-right"
+                        />
+                      ) : (
+                        <div className="cursor-pointer">
+                          <div className="font-medium text-slate-900">
+                            {formatCurrency(expense.amountTTC)}
+                          </div>
+                          {expense.amountHT && (
+                            <div className="text-xs text-slate-500 mt-0.5">
+                              HT: {formatCurrency(expense.amountHT)}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </td>
+                    {/* Compte */}
                     <td className="px-4 py-3 text-sm text-slate-600">
-                      {expense.invoiceNumber || '-'}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-right text-slate-900">
-                      {formatCurrency(expense.amountHT)}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-right text-slate-600">
-                      {formatCurrency(expense.vatAmount)}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-right font-medium text-slate-900">
-                      {formatCurrency(expense.amountTTC)}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-slate-600">
-                      {expense.accountCode || '-'}
-                    </td>
-                    <td className="px-4 py-3 text-sm">
-                      <div className="flex items-center gap-2">
-                        <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${STATUS_COLORS[expense.status]}`}>
-                          {STATUS_LABELS[expense.status]}
+                      {editingCell?.expenseId === expense.id && editingCell.field === 'accountCode' ? (
+                        <div className="min-w-[200px]" onClick={(e) => e.stopPropagation()}>
+                          <AccountCodeSelector
+                            value={editValue}
+                            onChange={async (code, label) => {
+                              setEditValue(code);
+                              await handleSaveCell(expense.id, 'accountCode', code, label);
+                            }}
+                            className="w-full"
+                          />
+                        </div>
+                      ) : (
+                        <span 
+                          className="cursor-pointer hover:text-blue-600"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!editingCell) startEditing(expense.id, 'accountCode', expense.accountCode);
+                          }}
+                        >
+                          {expense.accountCode ? (
+                            <>
+                              {expense.accountCode}
+                              {expense.accountLabel && (
+                                <span className="text-slate-400 ml-1">- {expense.accountLabel}</span>
+                              )}
+                            </>
+                          ) : '-'}
                         </span>
-                        {expense.isForecast && (
-                          <span className="inline-flex px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
-                            Prévisionnel
-                          </span>
+                      )}
+                    </td>
+                    {/* Opportunité + Client */}
+                    <td className="px-4 py-3 text-sm text-slate-600">
+                      <div className="space-y-1">
+                        {expense.opportunity && (
+                          <div className="font-medium text-slate-900">
+                            {expense.opportunity.title}
+                          </div>
+                        )}
+                        {expense.company && (
+                          <div className="text-slate-500 text-xs">
+                            {expense.company.name}
+                          </div>
+                        )}
+                        {!expense.opportunity && !expense.company && (
+                          <span className="text-slate-400">-</span>
                         )}
                       </div>
                     </td>
+                    {/* Statut */}
+                    <td className="px-4 py-3 text-sm">
+                      {editingCell?.expenseId === expense.id && editingCell.field === 'status' ? (
+                        <select
+                          value={editValue}
+                          onChange={(e) => {
+                            setEditValue(e.target.value);
+                            handleSaveCell(expense.id, 'status', e.target.value);
+                          }}
+                          onBlur={saveEditing}
+                          autoFocus
+                          className="px-2 py-1 text-xs border border-blue-500 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {Object.entries(STATUS_LABELS).map(([value, label]) => (
+                            <option key={value} value={value}>{label}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <div 
+                          className="flex items-center gap-2 cursor-pointer"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!editingCell) startEditing(expense.id, 'status', expense.status);
+                          }}
+                        >
+                          <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${STATUS_COLORS[expense.status]}`}>
+                            {STATUS_LABELS[expense.status]}
+                          </span>
+                          {expense.isForecast && (
+                            <span className="inline-flex px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
+                              Prévisionnel
+                            </span>
+                          )}
+                          {savingExpense === expense.id && (
+                            <span className="text-xs text-slate-400">Sauvegarde...</span>
+                          )}
+                        </div>
+                      )}
+                    </td>
+                    {/* Actions */}
                     <td className="px-4 py-3 text-sm text-right">
                       <div className="flex justify-end gap-2">
                         {expense.isForecast && (
@@ -357,4 +969,3 @@ export function ExpensesPage() {
     </div>
   );
 }
-
