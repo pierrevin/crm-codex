@@ -92,6 +92,20 @@ export function OpportunityDetailPage() {
     }
   };
 
+  const handleDeleteDeboursNote = async (noteId: string) => {
+    try {
+      await deboursNoteService.delete(noteId);
+      // Recharger les notes de débours et rafraîchir la page
+      if (id) {
+        await loadDeboursNotes(id);
+        await loadPayments(id);
+      }
+    } catch (error: any) {
+      console.error('Erreur suppression note de débours:', error);
+      throw error; // Re-lancer pour que RevenueTable puisse afficher l'erreur
+    }
+  };
+
   const loadExpenses = async (opportunityId: string) => {
     try {
       console.log('[OPPORTUNITY] Loading expenses for opportunityId:', opportunityId);
@@ -653,6 +667,7 @@ export function OpportunityDetailPage() {
               setEditingDeboursNote(note);
               setShowDeboursNoteModal(true);
             }}
+            onDeleteDeboursNote={handleDeleteDeboursNote}
           />
 
           {/* Section Dépenses */}

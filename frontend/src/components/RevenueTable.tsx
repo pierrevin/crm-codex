@@ -49,6 +49,7 @@ interface RevenueTableProps {
   onCreateQuote?: () => void;
   onCreateDeboursNote?: () => void;
   onEditDeboursNote?: (note: DeboursNote) => void;
+  onDeleteDeboursNote?: (noteId: string) => void;
 }
 
 export function RevenueTable({
@@ -63,7 +64,8 @@ export function RevenueTable({
   onRefresh,
   onCreateQuote,
   onCreateDeboursNote,
-  onEditDeboursNote
+  onEditDeboursNote,
+  onDeleteDeboursNote
 }: RevenueTableProps) {
   const navigate = useNavigate();
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
@@ -240,6 +242,23 @@ export function RevenueTable({
     }
   };
 
+  const handleDeleteDeboursNote = async (noteId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    if (!window.confirm('Êtes-vous sûr de vouloir supprimer cette note de débours ?\n\nLa note et le document Google Docs associé seront définitivement supprimés.')) {
+      return;
+    }
+
+    if (onDeleteDeboursNote) {
+      try {
+        await onDeleteDeboursNote(noteId);
+        onRefresh();
+      } catch (error: any) {
+        alert(error.response?.data?.message || 'Erreur lors de la suppression de la note de débours');
+      }
+    }
+  };
+
   const handlePaymentSuccess = () => {
     onRefresh();
     setShowPaymentModal(false);
@@ -406,6 +425,15 @@ export function RevenueTable({
                                 <PlusIcon className="h-3 w-3" />
                                 Paiement
                               </button>
+                              {onDeleteDeboursNote && (
+                                <button
+                                  onClick={(e) => handleDeleteDeboursNote(item.deboursNoteId!, e)}
+                                  className="flex items-center gap-1 rounded-md bg-red-600 px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-red-700"
+                                  title="Supprimer la note de débours"
+                                >
+                                  <TrashIcon className="h-3 w-3" />
+                                </button>
+                              )}
                             </>
                           ) : (
                             <button

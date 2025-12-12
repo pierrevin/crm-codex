@@ -1266,6 +1266,19 @@ serve(async (req) => {
       return true
     }
 
+    async function deleteFile(accessToken: string, fileId: string) {
+      // Supprimer définitivement le fichier (pas seulement le mettre à la corbeille)
+      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${accessToken}` }
+      })
+      if (!res.ok) {
+        const errorText = await res.text()
+        throw new Error(`Failed to delete file: ${res.status} ${errorText}`)
+      }
+      return true
+    }
+
     // ===== DRIVE ROUTES =====
     if (path === 'drive/ensure-company' && method === 'POST') {
       const { companyId, companyName } = await req.json()
@@ -3443,6 +3456,48 @@ serve(async (req) => {
 
     if (path.startsWith('debours-notes/') && method === 'DELETE') {
       const id = path.split('/')[1]
+      
+      // Extraire userId du token JWT
+      let userId: string | null = null
+      const authHeader = req.headers.get('x-user-authorization') || req.headers.get('authorization') || ''
+      if (authHeader?.startsWith('Bearer ')) {
+        try {
+          const token = authHeader.substring(7)
+          const payload = await verifyAccessToken(token)
+          if (payload && payload.userId) {
+            userId = payload.userId
+          }
+        } catch (e) {
+          console.warn('Erreur décodage token pour suppression note de débours:', e)
+        }
+      }
+      
+      // Récupérer la note pour obtenir le googleDocId avant suppression
+      const { data: deboursNote, error: fetchError } = await supabase
+        .from('DeboursNote')
+        .select('googleDocId')
+        .eq('id', id)
+        .single()
+      
+      if (fetchError) throw fetchError
+      
+      // Supprimer le Google Doc si il existe
+      if (deboursNote?.googleDocId && userId) {
+        const at = await getValidAccessToken(userId)
+        if (at) {
+          try {
+            await deleteFile(at, deboursNote.googleDocId)
+            console.log('Google Doc supprimé:', deboursNote.googleDocId)
+          } catch (docError) {
+            console.warn('Erreur suppression Google Doc (continuation):', docError)
+            // On continue même si la suppression du doc échoue
+          }
+        } else {
+          console.warn('Token Google manquant, impossible de supprimer le Google Doc')
+        }
+      }
+      
+      // Supprimer la note de la base de données
       const { error } = await supabase
         .from('DeboursNote')
         .delete()
