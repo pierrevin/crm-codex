@@ -11,7 +11,8 @@ import {
   DocumentTextIcon,
   CurrencyEuroIcon,
   InformationCircleIcon,
-  LinkIcon
+  LinkIcon,
+  PlusIcon
 } from '@heroicons/react/24/outline';
 import { expensesService, Expense, ExpenseStatus, UpdateExpenseDto } from '../services/expensesService';
 import { recurringExpensesService, RecurringExpense } from '../services/recurringExpensesService';
@@ -58,6 +59,9 @@ export function ExpenseDetailPage() {
   const [notes, setNotes] = useState('');
   const [selectedOpportunityId, setSelectedOpportunityId] = useState<string>('');
   const [opportunities, setOpportunities] = useState<any[]>([]);
+  const [isForecast, setIsForecast] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [uploadingFile, setUploadingFile] = useState(false);
   
   // État pour afficher les infos de récurrence (lecture seule)
   const [recurringExpense, setRecurringExpense] = useState<RecurringExpense | null>(null);
@@ -99,6 +103,7 @@ export function ExpenseDetailPage() {
       setStatus(data.status);
       setNotes(data.notes || '');
       setSelectedOpportunityId(data.opportunityId || '');
+      setIsForecast(data.isForecast || false);
       
       // Charger les informations de récurrence si la dépense est liée à un modèle récurrent (lecture seule)
       if (data.recurringExpenseId) {
@@ -135,10 +140,30 @@ export function ExpenseDetailPage() {
         accountLabel: accountLabel || undefined,
         status,
         notes: notes || undefined,
-        opportunityId: selectedOpportunityId || undefined
+        opportunityId: selectedOpportunityId || undefined,
+        isForecast
       };
 
-      await expensesService.update(expense.id, updateData);
+      // Si un fichier a été sélectionné, l'uploader d'abord
+      if (file) {
+        setUploadingFile(true);
+        try {
+          const scannedExpense = await expensesService.scanExpense(file, accountCode || undefined, selectedOpportunityId || undefined);
+          // Mettre à jour avec les données du scan et les modifications manuelles
+          await expensesService.update(scannedExpense.id, updateData);
+          await loadExpense(scannedExpense.id);
+          setFile(null);
+        } catch (error) {
+          console.error('Erreur upload fichier:', error);
+          alert('Erreur lors de l\'upload du fichier');
+          setUploadingFile(false);
+          return;
+        } finally {
+          setUploadingFile(false);
+        }
+      } else {
+        await expensesService.update(expense.id, updateData);
+      }
       
       setIsEditing(false);
       await loadExpense(expense.id);
@@ -319,10 +344,10 @@ export function ExpenseDetailPage() {
                       className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
                     >
                       <CheckIcon className="w-5 h-5" />
-                      Vérifier
+                      Vérifié
                     </button>
                   )}
-                  {expense.status !== 'PAID' && (
+                  {expense.status === 'VERIFIED' && !expense.isForecast && (
                     <button
                       onClick={async () => {
                         if (!expense) return;
@@ -334,10 +359,28 @@ export function ExpenseDetailPage() {
                           alert('Erreur lors du marquage comme réglé');
                         }
                       }}
-                      className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors font-medium"
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium"
                     >
                       <CheckIcon className="w-5 h-5" />
                       Réglé
+                    </button>
+                  )}
+                  {expense.status !== 'VERIFIED' && expense.status !== 'PAID' && !expense.isForecast && (
+                    <button
+                      onClick={async () => {
+                        if (!expense) return;
+                        try {
+                          await expensesService.update(expense.id, { status: 'VERIFIED' });
+                          await loadExpense(expense.id);
+                        } catch (error) {
+                          console.error('Erreur lors de la vérification:', error);
+                          alert('Erreur lors de la vérification');
+                        }
+                      }}
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
+                    >
+                      <CheckIcon className="w-5 h-5" />
+                      Vérifié
                     </button>
                   )}
                   <button
@@ -577,6 +620,20 @@ export function ExpenseDetailPage() {
                       ))}
                     </select>
                   </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                      Prévisionnel
+                    </label>
+                    <select
+                      value={isForecast ? 'true' : 'false'}
+                      onChange={(e) => setIsForecast(e.target.value === 'true')}
+                      className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      <option value="false">Non</option>
+                      <option value="true">Oui</option>
+                    </select>
+                  </div>
                 </div>
               </div>
             )}
@@ -672,52 +729,113 @@ export function ExpenseDetailPage() {
             </div>
 
             {/* Document */}
-            {expense.fileUrl && (
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-                <h2 className="text-lg font-semibold text-slate-900 mb-4">Document</h2>
-                <div className="space-y-4">
-                  <p className="text-sm text-slate-600">{expense.fileName || 'Fichier'}</p>
-                  
-                  {expense.fileType?.startsWith('image/') ? (
-                    <div 
-                      className="border border-slate-200 rounded-lg overflow-hidden cursor-pointer group relative"
-                      onClick={() => setShowImageZoom(true)}
-                    >
-                      <img
-                        src={expense.fileUrl}
-                        alt="Aperçu facture"
-                        className="w-full h-auto max-h-64 object-contain transition-transform group-hover:scale-105"
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+              <h2 className="text-lg font-semibold text-slate-900 mb-4">Document</h2>
+              <div className="space-y-4">
+                {isEditing ? (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-2">
+                        Joindre un document
+                      </label>
+                      <input
+                        type="file"
+                        accept="image/*,application/pdf"
+                        onChange={(e) => {
+                          const selectedFile = e.target.files?.[0];
+                          if (selectedFile) {
+                            setFile(selectedFile);
+                          }
+                        }}
+                        className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
-                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
-                        <svg className="w-8 h-8 text-white opacity-0 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
-                        </svg>
+                      {file && (
+                        <p className="mt-2 text-sm text-slate-600">Fichier sélectionné : {file.name}</p>
+                      )}
+                    </div>
+                    {expense.fileUrl && (
+                      <div className="pt-4 border-t border-slate-200">
+                        <p className="text-sm text-slate-600 mb-2">Document actuel : {expense.fileName || 'Fichier'}</p>
+                        <a
+                          href={expense.fileUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center justify-center gap-2 w-full px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 text-sm font-medium transition-colors"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                          </svg>
+                          Ouvrir le document actuel
+                        </a>
                       </div>
-                    </div>
-                  ) : expense.fileType === 'application/pdf' ? (
-                    <div className="border border-slate-200 rounded-lg overflow-hidden bg-slate-50">
-                      <iframe
-                        src={expense.fileUrl}
-                        className="w-full h-64"
-                        title="Aperçu PDF"
-                      />
-                    </div>
-                  ) : null}
-                  
-                  <a
-                    href={expense.fileUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center gap-2 w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium transition-colors"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                    </svg>
-                    Ouvrir dans un nouvel onglet
-                  </a>
-                </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {expense.fileUrl ? (
+                      <>
+                        <p className="text-sm text-slate-600">{expense.fileName || 'Fichier'}</p>
+                        
+                        {expense.fileType?.startsWith('image/') ? (
+                          <div 
+                            className="border border-slate-200 rounded-lg overflow-hidden cursor-pointer group relative"
+                            onClick={() => setShowImageZoom(true)}
+                          >
+                            <img
+                              src={expense.fileUrl}
+                              alt="Aperçu facture"
+                              className="w-full h-auto max-h-64 object-contain transition-transform group-hover:scale-105"
+                            />
+                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+                              <svg className="w-8 h-8 text-white opacity-0 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
+                              </svg>
+                            </div>
+                          </div>
+                        ) : expense.fileType === 'application/pdf' ? (
+                          <div className="border border-slate-200 rounded-lg overflow-hidden bg-slate-50">
+                            <iframe
+                              src={expense.fileUrl}
+                              className="w-full h-64"
+                              title="Aperçu PDF"
+                            />
+                          </div>
+                        ) : (
+                          <div className="border border-slate-200 rounded-lg p-4 bg-slate-50 text-center">
+                            <DocumentTextIcon className="w-12 h-12 mx-auto text-slate-400 mb-2" />
+                            <p className="text-sm text-slate-600">{expense.fileName || 'Document'}</p>
+                          </div>
+                        )}
+                        
+                        <a
+                          href={expense.fileUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center justify-center gap-2 w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium transition-colors"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                          </svg>
+                          Ouvrir dans un nouvel onglet
+                        </a>
+                      </>
+                    ) : (
+                      <div className="text-center py-8 border border-slate-200 rounded-lg bg-slate-50">
+                        <DocumentTextIcon className="w-12 h-12 mx-auto text-slate-400 mb-2" />
+                        <p className="text-sm text-slate-600 mb-4">Aucun document joint</p>
+                        <button
+                          onClick={() => setIsEditing(true)}
+                          className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium transition-colors"
+                        >
+                          <PlusIcon className="w-4 h-4" />
+                          Joindre un document
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
-            )}
+            </div>
 
             {/* Informations système - Compact et pliable */}
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">

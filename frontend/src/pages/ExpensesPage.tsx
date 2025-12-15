@@ -1,19 +1,13 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { PlusIcon, MagnifyingGlassIcon, CheckIcon, PencilIcon, TrashIcon, XMarkIcon, ChevronUpIcon, ChevronDownIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, MagnifyingGlassIcon, CheckIcon, PencilIcon, TrashIcon, XMarkIcon, ChevronUpIcon, ChevronDownIcon, EyeIcon } from '@heroicons/react/24/outline';
 import { expensesService, Expense, ExpenseStatus, ExpenseFilters, UpdateExpenseDto } from '../services/expensesService';
 import { recurringExpensesService, RecurringExpense, RecurrenceType, UpdateRecurringExpenseDto } from '../services/recurringExpensesService';
 import { ExpenseUploadModal } from '../components/ExpenseUploadModal';
 import { RecurringExpenseEditForm } from '../components/RecurringExpenseEditForm';
 import { AccountCodeSelector } from '../components/AccountCodeSelector';
-
-const STATUS_COLORS: Record<ExpenseStatus, string> = {
-  PENDING: 'bg-yellow-100 text-yellow-700',
-  PROCESSED: 'bg-blue-100 text-blue-700',
-  VERIFIED: 'bg-green-100 text-green-700',
-  PAID: 'bg-emerald-100 text-emerald-700',
-  REJECTED: 'bg-red-100 text-red-700'
-};
+import { Button } from '../components/ui/Button';
+import { Badge } from '../components/ui/Badge';
 
 const STATUS_LABELS: Record<ExpenseStatus, string> = {
   PENDING: 'En attente',
@@ -21,6 +15,14 @@ const STATUS_LABELS: Record<ExpenseStatus, string> = {
   VERIFIED: 'Vérifié',
   PAID: 'Réglé',
   REJECTED: 'Rejeté'
+};
+
+const STATUS_TO_BADGE_VARIANT: Record<ExpenseStatus, 'pending' | 'processed' | 'verified' | 'paid' | 'rejected'> = {
+  PENDING: 'pending',
+  PROCESSED: 'processed',
+  VERIFIED: 'verified',
+  PAID: 'paid',
+  REJECTED: 'rejected'
 };
 
 type SortField = 'invoiceDate' | 'supplierName' | 'invoiceNumber' | 'amountHT' | 'vatAmount' | 'amountTTC' | 'accountCode' | 'status';
@@ -47,7 +49,7 @@ export function ExpensesPage() {
   
   // Tri et filtrage
   const [sortField, setSortField] = useState<SortField>('invoiceDate');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc'); // Tri ascendant: du plus ancien au plus récent
   const [columnFilters, setColumnFilters] = useState<ColumnFilter>({});
   
   // Édition inline
@@ -67,6 +69,18 @@ export function ExpensesPage() {
     setLoading(true);
     try {
       const data = await expensesService.getAll(filters);
+      // Log pour débogage : vérifier que les champs nécessaires sont présents
+      if (data && data.length > 0) {
+        const sampleRecurring = data.find(e => e.recurringExpenseId);
+        if (sampleRecurring) {
+          console.log('[ExpensesPage] Sample recurring expense loaded:', {
+            id: sampleRecurring.id,
+            isForecast: sampleRecurring.isForecast,
+            recurringExpenseId: sampleRecurring.recurringExpenseId,
+            status: sampleRecurring.status
+          });
+        }
+      }
       setExpenses(data);
     } catch (error) {
       console.error('Erreur chargement dépenses:', error);
@@ -124,7 +138,19 @@ export function ExpensesPage() {
 
   const handleValidateForecast = async (id: string) => {
     try {
-      await expensesService.validateForecast(id);
+      const updatedExpense = await expensesService.validateForecast(id);
+      console.log('[ExpensesPage] Dépense validée:', updatedExpense);
+      console.log('[ExpensesPage] isForecast:', updatedExpense.isForecast);
+      console.log('[ExpensesPage] recurringExpenseId:', updatedExpense.recurringExpenseId);
+      
+      // Mise à jour locale immédiate pour feedback visuel
+      setExpenses(prevExpenses => 
+        prevExpenses.map(e => 
+          e.id === id ? { ...e, ...updatedExpense } : e
+        )
+      );
+      
+      // Recharger pour synchroniser avec le serveur
       await loadExpenses();
     } catch (error) {
       console.error('Erreur validation:', error);
@@ -224,7 +250,8 @@ export function ExpensesPage() {
       filtered = filtered.filter(e => e.status === columnFilters.status);
     }
 
-    // Appliquer le tri
+    // Appliquer le tri (toujours appliqué, y compris au chargement initial)
+    // Tri par date du plus récent au plus ancien (ordre chronologique inverse)
     filtered.sort((a, b) => {
       let aValue: any;
       let bValue: any;
@@ -244,7 +271,13 @@ export function ExpensesPage() {
             const dateB = new Date(b.invoiceDate);
             bValue = isNaN(dateB.getTime()) ? (sortDirection === 'desc' ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY) : dateB.getTime();
           }
-          break;
+          // Les valeurs sont maintenant en millisecondes (timestamp), plus grand = plus récent
+          // Pour tri descendant: plus récent (plus grand timestamp) en premier
+          if (sortDirection === 'desc') {
+            return bValue - aValue; // bValue - aValue pour mettre les plus grandes valeurs (plus récentes) en premier
+          } else {
+            return aValue - bValue; // aValue - bValue pour mettre les plus petites valeurs (plus anciennes) en premier
+          }
         case 'supplierName':
           aValue = (a.supplierName || a.company?.name || '').toLowerCase();
           bValue = (b.supplierName || b.company?.name || '').toLowerCase();
@@ -277,8 +310,18 @@ export function ExpensesPage() {
           return 0;
       }
 
-      if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1;
-      if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1;
+      // Tri: pour 'desc' (descendant), les plus grandes valeurs (dates plus récentes) doivent être en premier
+      // Si aValue > bValue (a plus récent que b) et desc: a doit être avant b -> retourner -1
+      // Si aValue < bValue (a plus ancien que b) et desc: a doit être après b -> retourner 1
+      if (sortDirection === 'desc') {
+        // Tri descendant: plus récent en premier
+        if (aValue > bValue) return -1; // a plus récent, a avant b
+        if (aValue < bValue) return 1;  // a plus ancien, a après b
+      } else {
+        // Tri ascendant: plus ancien en premier
+        if (aValue < bValue) return -1; // a plus ancien, a avant b
+        if (aValue > bValue) return 1;  // a plus récent, a après b
+      }
       return 0;
     });
 
@@ -388,8 +431,42 @@ export function ExpensesPage() {
       );
       
       setSelectedExpenseIds(new Set());
+      await loadExpenses(); // Recharger pour synchroniser
     } catch (error) {
       console.error('Erreur édition en masse:', error);
+      alert('Erreur lors de l\'édition en masse');
+    }
+  };
+
+  const handleBulkUpdateForecast = async (isForecast: boolean) => {
+    if (selectedExpenseIds.size === 0) return;
+    
+    if (!confirm(`Voulez-vous ${isForecast ? 'marquer' : 'démarquer'} ${selectedExpenseIds.size} dépense(s) comme prévisionnelle(s) ?`)) {
+      return;
+    }
+
+    try {
+      const updatePromises = Array.from(selectedExpenseIds).map(id =>
+        expensesService.update(id, { isForecast })
+      );
+      
+      const updatedExpenses = await Promise.all(updatePromises);
+      
+      // Mettre à jour localement
+      setExpenses(prevExpenses => 
+        prevExpenses.map(e => {
+          if (selectedExpenseIds.has(e.id)) {
+            const updated = updatedExpenses.find(ue => ue.id === e.id);
+            return updated ? { ...e, ...updated } : e;
+          }
+          return e;
+        })
+      );
+      
+      setSelectedExpenseIds(new Set());
+      await loadExpenses(); // Recharger pour synchroniser
+    } catch (error) {
+      console.error('Erreur édition en masse prévisionnel:', error);
       alert('Erreur lors de l\'édition en masse');
     }
   };
@@ -428,13 +505,13 @@ export function ExpensesPage() {
           <h1 className="text-xl sm:text-2xl font-semibold text-slate-900">Dépenses</h1>
           <p className="text-sm text-slate-500">Gérez vos factures et tickets de dépense.</p>
         </div>
-        <button
+        <Button
           onClick={() => setShowModal(true)}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          variant="primary"
+          icon={<PlusIcon className="w-5 h-5" />}
         >
-          <PlusIcon className="w-5 h-5" />
-          <span>Nouvelle dépense</span>
-        </button>
+          Nouvelle dépense
+        </Button>
       </div>
 
       {/* Filtres principaux */}
@@ -500,22 +577,24 @@ export function ExpensesPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button
+                  <Button
                     onClick={() => setEditingRecurring(recurring)}
-                    className="inline-flex items-center gap-2 px-3 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 transition-colors text-sm"
+                    variant="secondary"
+                    size="sm"
+                    icon={<PencilIcon className="w-4 h-4" />}
                     title="Modifier cette dépense récurrente"
                   >
-                    <PencilIcon className="w-4 h-4" />
                     Modifier
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     onClick={() => handleDeleteRecurring(recurring.id)}
-                    className="inline-flex items-center gap-2 px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm"
+                    variant="danger"
+                    size="sm"
+                    icon={<TrashIcon className="w-4 h-4" />}
                     title="Supprimer cette dépense récurrente"
                   >
-                    <TrashIcon className="w-4 h-4" />
                     Supprimer
-                  </button>
+                  </Button>
                 </div>
               </div>
             ))}
@@ -525,37 +604,59 @@ export function ExpensesPage() {
 
       {/* Barre d'actions en masse */}
       {selectedExpenseIds.size > 0 && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <span className="text-sm font-medium text-blue-900">
-              {selectedExpenseIds.size} dépense(s) sélectionnée(s)
-            </span>
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-blue-700">Statut:</span>
-              {Object.entries(STATUS_LABELS).map(([value, label]) => (
-                <button
-                  key={value}
-                  onClick={() => handleBulkUpdateStatus(value as ExpenseStatus)}
-                  className="px-3 py-1 text-xs font-medium rounded bg-white border border-blue-300 text-blue-700 hover:bg-blue-100 transition-colors"
+        <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+              <span className="text-sm font-medium text-indigo-900">
+                {selectedExpenseIds.size} dépense(s) sélectionnée(s)
+              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm text-indigo-700 font-medium">Statut:</span>
+                {Object.entries(STATUS_LABELS).map(([value, label]) => (
+                  <Button
+                    key={value}
+                    onClick={() => handleBulkUpdateStatus(value as ExpenseStatus)}
+                    variant="secondary"
+                    size="sm"
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm text-indigo-700 font-medium">Prévisionnel:</span>
+                <Button
+                  onClick={() => handleBulkUpdateForecast(true)}
+                  variant="secondary"
+                  size="sm"
                 >
-                  {label}
-                </button>
-              ))}
+                  Oui
+                </Button>
+                <Button
+                  onClick={() => handleBulkUpdateForecast(false)}
+                  variant="secondary"
+                  size="sm"
+                >
+                  Non
+                </Button>
+              </div>
             </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleBulkDelete}
-              className="px-4 py-2 text-sm font-medium rounded bg-red-600 text-white hover:bg-red-700 transition-colors"
-            >
-              Supprimer
-            </button>
-            <button
-              onClick={() => setSelectedExpenseIds(new Set())}
-              className="px-4 py-2 text-sm font-medium rounded bg-slate-200 text-slate-700 hover:bg-slate-300 transition-colors"
-            >
-              Annuler
-            </button>
+            <div className="flex items-center gap-2">
+              <Button
+                onClick={handleBulkDelete}
+                variant="danger"
+                size="sm"
+              >
+                Supprimer
+              </Button>
+              <Button
+                onClick={() => setSelectedExpenseIds(new Set())}
+                variant="secondary"
+                size="sm"
+              >
+                Annuler
+              </Button>
+            </div>
           </div>
         </div>
       )}
@@ -607,7 +708,7 @@ export function ExpensesPage() {
                         onChange={(e) => setColumnFilters({ ...columnFilters, supplierName: e.target.value })}
                         onClick={(e) => e.stopPropagation()}
                         placeholder="Filtrer..."
-                        className="w-full px-2 py-1 text-xs border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        className="w-full px-2 py-1 text-xs border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
                       />
                     </div>
                   </th>
@@ -645,7 +746,7 @@ export function ExpensesPage() {
                         onChange={(e) => setColumnFilters({ ...columnFilters, accountCode: e.target.value })}
                         onClick={(e) => e.stopPropagation()}
                         placeholder="Filtrer..."
-                        className="w-full px-2 py-1 text-xs border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        className="w-full px-2 py-1 text-xs border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
                       />
                     </div>
                   </th>
@@ -666,7 +767,7 @@ export function ExpensesPage() {
                         value={columnFilters.status || ''}
                         onChange={(e) => setColumnFilters({ ...columnFilters, status: e.target.value as ExpenseStatus || '' })}
                         onClick={(e) => e.stopPropagation()}
-                        className="w-full px-2 py-1 text-xs border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        className="w-full px-2 py-1 text-xs border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
                       >
                         <option value="">Tous</option>
                         {Object.entries(STATUS_LABELS).map(([value, label]) => (
@@ -688,7 +789,7 @@ export function ExpensesPage() {
                     key={expense.id} 
                     className={`hover:bg-slate-50 cursor-pointer transition-colors ${
                       selectedExpenseIds.has(expense.id) 
-                        ? 'bg-blue-50 border-l-4 border-blue-500' 
+                        ? 'bg-indigo-50 border-l-4 border-indigo-500' 
                         : 'border-l-4 border-transparent'
                     }`}
                     onClick={(e) => handleRowClick(expense.id, e)}
@@ -696,7 +797,7 @@ export function ExpensesPage() {
                     {/* Indicateur de sélection */}
                     <td className="px-4 py-3">
                       {selectedExpenseIds.has(expense.id) && (
-                        <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                        <div className="w-2 h-2 rounded-full bg-indigo-500"></div>
                       )}
                     </td>
                     {/* Date */}
@@ -718,7 +819,7 @@ export function ExpensesPage() {
                             if (e.key === 'Escape') cancelEditing();
                           }}
                           autoFocus
-                          className="w-full px-2 py-1 text-sm border border-blue-500 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          className="w-full px-2 py-1 text-sm border border-indigo-500 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
                         />
                       ) : (
                         formatDate(expense.invoiceDate)
@@ -743,7 +844,7 @@ export function ExpensesPage() {
                             if (e.key === 'Escape') cancelEditing();
                           }}
                           autoFocus
-                          className="w-full px-2 py-1 text-sm border border-blue-500 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          className="w-full px-2 py-1 text-sm border border-indigo-500 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
                         />
                       ) : (
                         expense.supplierName || expense.company?.name || '-'
@@ -765,7 +866,7 @@ export function ExpensesPage() {
                             if (e.key === 'Escape') cancelEditing();
                           }}
                           autoFocus
-                          className="w-full px-2 py-1 text-sm border border-blue-500 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          className="w-full px-2 py-1 text-sm border border-indigo-500 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
                         />
                       ) : (
                         expense.invoiceNumber || '-'
@@ -823,7 +924,7 @@ export function ExpensesPage() {
                         </div>
                       ) : (
                         <span 
-                          className="cursor-pointer hover:text-blue-600"
+                          className="cursor-pointer hover:text-indigo-600"
                           onClick={(e) => {
                             e.stopPropagation();
                             if (!editingCell) startEditing(expense.id, 'accountCode', expense.accountCode);
@@ -832,8 +933,10 @@ export function ExpensesPage() {
                           {expense.accountCode ? (
                             <>
                               {expense.accountCode}
-                              {expense.accountLabel && (
-                                <span className="text-slate-400 ml-1">- {expense.accountLabel}</span>
+                              {expense.accountLabel ? (
+                                <span className="text-slate-500 ml-1">- {expense.accountLabel}</span>
+                              ) : (
+                                <span className="text-slate-400 italic ml-1">(sans intitulé)</span>
                               )}
                             </>
                           ) : '-'}
@@ -848,11 +951,12 @@ export function ExpensesPage() {
                             {expense.opportunity.title}
                           </div>
                         )}
-                        {expense.company && (
+                        {/* Afficher le client via l'opportunité en priorité, sinon le company direct */}
+                        {(expense.opportunity?.company?.name || expense.company?.name) ? (
                           <div className="text-slate-500 text-xs">
-                            {expense.company.name}
+                            {expense.opportunity?.company?.name || expense.company?.name}
                           </div>
-                        )}
+                        ) : null}
                         {!expense.opportunity && !expense.company && (
                           <span className="text-slate-400">-</span>
                         )}
@@ -869,7 +973,7 @@ export function ExpensesPage() {
                           }}
                           onBlur={saveEditing}
                           autoFocus
-                          className="px-2 py-1 text-xs border border-blue-500 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          className="px-2 py-1 text-xs border border-indigo-500 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
                           onClick={(e) => e.stopPropagation()}
                         >
                           {Object.entries(STATUS_LABELS).map(([value, label]) => (
@@ -884,13 +988,11 @@ export function ExpensesPage() {
                             if (!editingCell) startEditing(expense.id, 'status', expense.status);
                           }}
                         >
-                          <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${STATUS_COLORS[expense.status]}`}>
+                          <Badge variant={STATUS_TO_BADGE_VARIANT[expense.status]}>
                             {STATUS_LABELS[expense.status]}
-                          </span>
+                          </Badge>
                           {expense.isForecast && (
-                            <span className="inline-flex px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
-                              Prévisionnel
-                            </span>
+                            <Badge variant="forecast">Prévisionnel</Badge>
                           )}
                           {savingExpense === expense.id && (
                             <span className="text-xs text-slate-400">Sauvegarde...</span>
@@ -902,27 +1004,58 @@ export function ExpensesPage() {
                     <td className="px-4 py-3 text-sm text-right">
                       <div className="flex justify-end gap-2">
                         {expense.isForecast && (
-                          <button
+                          <Button
                             onClick={() => handleValidateForecast(expense.id)}
-                            className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
-                            title="Valider cette dépense prévisionnelle"
+                            variant="success"
+                            size="sm"
+                            icon={<CheckIcon className="w-4 h-4" />}
+                            title="Vérifier cette dépense prévisionnelle"
                           >
-                            <CheckIcon className="w-4 h-4" />
-                            Vérifier
-                          </button>
+                            Vérifié
+                          </Button>
                         )}
-                        <button
-                          onClick={() => navigate(`/depenses/${expense.id}`)}
-                          className="text-blue-600 hover:text-blue-800"
+                        {expense.status === 'VERIFIED' && !expense.isForecast && (
+                          <Button
+                            onClick={async () => {
+                              try {
+                                await expensesService.update(expense.id, { status: 'PAID' });
+                                await loadExpenses();
+                              } catch (error) {
+                                console.error('Erreur lors du marquage comme réglé:', error);
+                                alert('Erreur lors du marquage comme réglé');
+                              }
+                            }}
+                            variant="primary"
+                            size="sm"
+                            icon={<CheckIcon className="w-4 h-4" />}
+                            title="Marquer comme réglé"
+                            className="bg-indigo-600 hover:bg-indigo-700"
+                          >
+                            Réglé
+                          </Button>
+                        )}
+                        <Button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/depenses/${expense.id}`);
+                          }}
+                          variant="secondary"
+                          size="sm"
+                          icon={<EyeIcon className="w-4 h-4" />}
                         >
                           Voir
-                        </button>
-                        <button
-                          onClick={() => handleDelete(expense.id)}
-                          className="text-red-600 hover:text-red-800"
+                        </Button>
+                        <Button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDelete(expense.id);
+                          }}
+                          variant="danger"
+                          size="sm"
+                          icon={<TrashIcon className="w-4 h-4" />}
                         >
                           Supprimer
-                        </button>
+                        </Button>
                       </div>
                     </td>
                   </tr>

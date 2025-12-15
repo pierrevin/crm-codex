@@ -27,6 +27,9 @@ interface ExpensePayload {
   companyId?: string | null
   notes?: string | null
   status?: ExpenseStatus
+  recurringExpenseId?: string | null
+  isForecast?: boolean
+  forecastDate?: string
 }
 
 serve(async (req) => {
@@ -204,7 +207,7 @@ async function scanExpense(req: Request, userId: string) {
 async function listExpenses(params: URLSearchParams, defaultUserId?: string) {
   let query = supabaseClient
     .from('Expense')
-    .select('*, company:Company(*), opportunity:Opportunity(*), user:User(id,email)')
+    .select('*, company:Company(*), opportunity:Opportunity(*, company:Company(*)), user:User(id,email)')
     .order('createdAt', { ascending: false })
 
   const userId = params.get('userId') ?? defaultUserId
@@ -263,11 +266,40 @@ async function updateExpense(id: string, payload: ExpensePayload, userId: string
 
   const updateData = serializeExpensePayload(payload)
 
+  // Si la dépense a un recurringExpenseId, elle doit rester prévisionnelle jusqu'à ce qu'elle soit réglée (PAID)
+  const finalRecurringExpenseId = (payload as any).recurringExpenseId !== undefined 
+    ? (payload as any).recurringExpenseId 
+    : expense?.recurringExpenseId
+  const finalStatus = payload.status !== undefined ? payload.status : expense?.status
+  
+  if (finalRecurringExpenseId) {
+    // IMPORTANT : Préserver explicitement le recurringExpenseId si ce n'est pas modifié dans le payload
+    if ((payload as any).recurringExpenseId === undefined) {
+      updateData.recurringExpenseId = finalRecurringExpenseId
+    }
+    
+    if (finalStatus === 'PAID') {
+      // Une fois réglée, retirer le tag prévisionnel
+      updateData.isForecast = false
+      updateData.forecastDate = null
+    } else {
+      // Sinon, elle doit rester prévisionnelle (même si VERIFIED)
+      updateData.isForecast = true
+      // Si forecastDate n'est pas défini et qu'on a une invoiceDate, l'utiliser comme forecastDate
+      if (!updateData.forecastDate && payload.invoiceDate) {
+        updateData.forecastDate = new Date(payload.invoiceDate).toISOString()
+      } else if (!updateData.forecastDate && !expense?.isForecast && expense?.invoiceDate) {
+        // Si pas de forecastDate et que c'était pas prévisionnel avant, utiliser invoiceDate actuelle
+        updateData.forecastDate = new Date(expense.invoiceDate).toISOString()
+      }
+    }
+  }
+
   const { data, error } = await supabaseClient
     .from('Expense')
     .update(updateData)
     .eq('id', id)
-    .select('*, company:Company(*), user:User(id,email)')
+    .select('*, company:Company(*), opportunity:Opportunity(*, company:Company(*)), user:User(id,email)')
     .single()
 
   if (error) {
@@ -341,6 +373,13 @@ function serializeExpensePayload(payload: ExpensePayload) {
   if (payload.companyId !== undefined) data.companyId = payload.companyId
   if (payload.notes !== undefined) data.notes = payload.notes
   if (payload.status !== undefined) data.status = payload.status
+  if (payload.recurringExpenseId !== undefined) data.recurringExpenseId = payload.recurringExpenseId
+  if (payload.isForecast !== undefined) data.isForecast = payload.isForecast
+  if (payload.forecastDate !== undefined && payload.forecastDate !== null) {
+    data.forecastDate = new Date(payload.forecastDate).toISOString()
+  } else if (payload.forecastDate === null) {
+    data.forecastDate = null
+  }
   return data
 }
 

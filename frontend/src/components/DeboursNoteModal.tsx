@@ -7,6 +7,7 @@ import { AccountCodeSelector } from './AccountCodeSelector';
 import { supplierPreferencesService } from '../services/supplierPreferences';
 import api from '../services/apiClient';
 import { Breadcrumb, BreadcrumbItem } from './Breadcrumb';
+import { Button } from './ui/Button';
 
 interface DeboursNoteModalProps {
   isOpen: boolean;
@@ -540,8 +541,7 @@ export function DeboursNoteModal({
                       void handleCreateExpense(e);
                     }}
                     onClick={(e) => e.stopPropagation()}
-                    className="space-y-3" 
-                    onClick={(e) => e.stopPropagation()}
+                    className="space-y-3"
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && e.target instanceof HTMLInputElement && e.target.type !== 'textarea') {
                         e.stopPropagation();
@@ -785,20 +785,20 @@ export function DeboursNoteModal({
           </div>
 
           <div className="mt-6 flex justify-end space-x-3">
-            <button
+            <Button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 rounded-md hover:bg-slate-200"
+              variant="secondary"
             >
               Annuler
-            </button>
-            <button
+            </Button>
+            <Button
               type="submit"
               disabled={loading || generatingDoc || !totalAmount || !title}
-              className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50"
+              variant="primary"
             >
               {generatingDoc ? 'Génération du document...' : loading ? (isEditMode ? 'Modification...' : 'Création...') : (isEditMode ? 'Enregistrer les modifications' : 'Créer et générer le document')}
-            </button>
+            </Button>
           </div>
         </form>
       </div>

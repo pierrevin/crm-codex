@@ -42,6 +42,10 @@ export interface Expense {
   opportunity?: {
     id: string;
     title: string;
+    company?: {
+      id: string;
+      name: string;
+    };
   };
   createdAt: string;
   updatedAt: string;

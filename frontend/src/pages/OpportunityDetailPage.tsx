@@ -9,12 +9,14 @@ import { paymentService, Payment } from '../services/paymentService';
 import { PaymentModal } from '../components/PaymentModal';
 import { deboursNoteService, DeboursNote } from '../services/deboursNoteService';
 import { DeboursNoteModal } from '../components/DeboursNoteModal';
-import { expensesService, Expense } from '../services/expensesService';
+import { expensesService, Expense, ExpenseStatus } from '../services/expensesService';
 import { ExpenseUploadModal } from '../components/ExpenseUploadModal';
 import { OpportunityMetrics } from '../components/OpportunityMetrics';
 import { DocumentSection } from '../components/DocumentSection';
 import { RevenueTable } from '../components/RevenueTable';
 import { Breadcrumb } from '../components/Breadcrumb';
+import { Button } from '../components/ui/Button';
+import { Badge } from '../components/ui/Badge';
 
 const STAGES = {
   QUALIFICATION: { label: 'Qualification', color: 'bg-blue-100 text-blue-700' },
@@ -397,13 +399,13 @@ export function OpportunityDetailPage() {
           />
         </div>
         <div className="flex justify-end gap-3">
-          <button
+          <Button
             type="button"
             onClick={() => navigate('/opportunites')}
-            className="rounded-md border border-slate-200 px-4 py-2 text-sm"
+            variant="secondary"
           >
             Annuler
-          </button>
+          </Button>
           <button
             type="submit"
             className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500"
@@ -468,14 +470,14 @@ export function OpportunityDetailPage() {
               Drive
             </a>
           )}
-          <button
+          <Button
             type="button"
             onClick={handleDelete}
-            className="flex items-center gap-2 rounded-lg border border-rose-200 px-4 py-2 text-sm font-medium text-rose-600 hover:bg-rose-50 transition-colors"
+            variant="danger"
+            icon={<TrashIcon className="h-5 w-5" />}
           >
-            <TrashIcon className="h-5 w-5" />
             Supprimer
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -519,14 +521,15 @@ export function OpportunityDetailPage() {
                 </div>
               )}
             </div>
-            <button
+            <Button
               type="button"
               onClick={() => setIsGeneralInfoCollapsed(false)}
-              className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+              variant="secondary"
+              size="sm"
+              icon={<PencilIcon className="h-4 w-4" />}
             >
-              <PencilIcon className="h-4 w-4" />
               Éditer
-            </button>
+            </Button>
           </div>
         ) : (
           <div className="space-y-4">
@@ -638,19 +641,19 @@ export function OpportunityDetailPage() {
                 </div>
               </div>
               <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
-                <button
+                <Button
                   type="button"
                   onClick={() => setIsGeneralInfoCollapsed(true)}
-                  className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  variant="secondary"
                 >
                   Annuler
-                </button>
-                <button
+                </Button>
+                <Button
                   type="submit"
-                  className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
+                  variant="primary"
                 >
                   Enregistrer
-                </button>
+                </Button>
               </div>
             </form>
           </div>
@@ -706,14 +709,14 @@ export function OpportunityDetailPage() {
           <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-semibold text-slate-900">Dépenses</h2>
-              <button
+              <Button
                 type="button"
                 onClick={() => setShowExpenseModal(true)}
-                className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
+                variant="primary"
+                icon={<PlusIcon className="w-5 h-5" />}
               >
-                <PlusIcon className="w-5 h-5" />
                 Ajouter une dépense
-              </button>
+              </Button>
             </div>
             
             {expenses.length === 0 ? (
@@ -747,19 +750,19 @@ export function OpportunityDetailPage() {
                           {expense.amountTTC ? new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(parseFloat(expense.amountTTC.toString())) : '-'}
                         </td>
                         <td className="px-4 py-3">
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                            expense.status === 'PENDING' ? 'bg-yellow-100 text-yellow-700' :
-                            expense.status === 'PROCESSED' ? 'bg-blue-100 text-blue-700' :
-                            expense.status === 'VERIFIED' ? 'bg-green-100 text-green-700' :
-                            expense.status === 'PAID' ? 'bg-emerald-100 text-emerald-700' :
-                            'bg-red-100 text-red-700'
-                          }`}>
+                          <Badge variant={
+                            expense.status === 'PENDING' ? 'pending' :
+                            expense.status === 'PROCESSED' ? 'processed' :
+                            expense.status === 'VERIFIED' ? 'verified' :
+                            expense.status === 'PAID' ? 'paid' :
+                            'rejected'
+                          }>
                             {expense.status === 'PENDING' ? 'En attente' :
                              expense.status === 'PROCESSED' ? 'Traité' :
                              expense.status === 'VERIFIED' ? 'Vérifié' :
                              expense.status === 'PAID' ? 'Réglé' :
                              'Rejeté'}
-                          </span>
+                          </Badge>
                         </td>
                       </tr>
                     ))}

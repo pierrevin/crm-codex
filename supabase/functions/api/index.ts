@@ -5250,7 +5250,8 @@ serve(async (req) => {
         const endDate = url.searchParams.get('endDate')
 
         // Sélectionner les relations de manière sécurisée
-        let selectQuery = '*, company:Company(*)'
+        // IMPORTANT : Sélectionner explicitement recurringExpenseId, isForecast, forecastDate pour éviter les problèmes avec le wildcard *
+        let selectQuery = '*, recurringExpenseId, isForecast, forecastDate, company:Company(*)'
         // Ajouter opportunity seulement si la colonne existe
         selectQuery += ', opportunity:Opportunity(*)'
         // Ajouter user seulement si la colonne existe
@@ -5316,6 +5317,18 @@ serve(async (req) => {
           )
         }
         console.log('[EXPENSES GET] Found', data?.length || 0, 'expenses with filters:', { userId, status, companyId, opportunityId, startDate, endDate })
+        // Log pour débogage : vérifier que les champs nécessaires sont présents
+        if (data && data.length > 0) {
+          const sampleRecurring = data.find((e: any) => e.recurringExpenseId);
+          if (sampleRecurring) {
+            console.log('[EXPENSES GET] Sample recurring expense:', {
+              id: sampleRecurring.id,
+              isForecast: sampleRecurring.isForecast,
+              recurringExpenseId: sampleRecurring.recurringExpenseId,
+              status: sampleRecurring.status
+            });
+          }
+        }
         return new Response(
           JSON.stringify(data || []),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -5621,15 +5634,58 @@ serve(async (req) => {
       if (notes !== undefined) updateData.notes = notes || null
       if (companyId !== undefined) updateData.companyId = companyId || null
       if (opportunityId !== undefined) updateData.opportunityId = opportunityId || null
-      if (body.isForecast !== undefined) updateData.isForecast = body.isForecast
-      if (body.forecastDate !== undefined) updateData.forecastDate = body.forecastDate ? new Date(body.forecastDate).toISOString() : null
+      // Récupérer la dépense actuelle pour vérifier le recurringExpenseId
+      const { data: currentExpense } = await supabase
+        .from('Expense')
+        .select('recurringExpenseId, status, isForecast, invoiceDate, forecastDate')
+        .eq('id', id)
+        .single()
+
+      // Si la dépense a un recurringExpenseId, elle doit rester prévisionnelle jusqu'à ce qu'elle soit réglée (PAID)
+      const finalRecurringExpenseId = body.recurringExpenseId !== undefined ? body.recurringExpenseId : currentExpense?.recurringExpenseId
+      const finalStatus = body.status !== undefined ? body.status : currentExpense?.status
+      
+      // Gérer isForecast et forecastDate selon la logique des dépenses récurrentes
+      if (finalRecurringExpenseId) {
+        // IMPORTANT : Préserver explicitement le recurringExpenseId si ce n'est pas modifié dans le body
+        if (body.recurringExpenseId === undefined) {
+          updateData.recurringExpenseId = finalRecurringExpenseId
+        }
+        
+        if (finalStatus === 'PAID') {
+          // Une fois réglée, retirer le tag prévisionnel (même si explicitement défini dans le body)
+          updateData.isForecast = false
+          updateData.forecastDate = null
+        } else {
+          // Sinon, elle doit rester prévisionnelle (même si VERIFIED)
+          // Forcer isForecast à true même si le body essaie de le mettre à false
+          updateData.isForecast = true
+          // Si forecastDate n'est pas défini dans le body, utiliser celle existante ou invoiceDate
+          if (body.forecastDate !== undefined) {
+            updateData.forecastDate = body.forecastDate ? new Date(body.forecastDate).toISOString() : null
+          } else if (!currentExpense?.forecastDate) {
+            // Si pas de forecastDate existante, utiliser invoiceDate
+            if (body.invoiceDate) {
+              updateData.forecastDate = new Date(body.invoiceDate).toISOString()
+            } else if (currentExpense?.invoiceDate) {
+              updateData.forecastDate = new Date(currentExpense.invoiceDate).toISOString()
+            }
+          }
+        }
+      } else {
+        // Si ce n'est pas une dépense récurrente, appliquer les valeurs du body
+        if (body.isForecast !== undefined) updateData.isForecast = body.isForecast
+        if (body.forecastDate !== undefined) updateData.forecastDate = body.forecastDate ? new Date(body.forecastDate).toISOString() : null
+      }
+      
+      // Appliquer recurringExpenseId du body s'il est défini
       if (body.recurringExpenseId !== undefined) updateData.recurringExpenseId = body.recurringExpenseId || null
 
       const { data, error } = await supabase
         .from('Expense')
         .update(updateData)
         .eq('id', id)
-        .select('*, company:Company(*), opportunity:Opportunity(*), user:User(id, email)')
+        .select('*, company:Company(*), opportunity:Opportunity(*, company:Company(*)), user:User(id, email)')
         .single()
 
       if (error) throw error
@@ -5666,90 +5722,166 @@ serve(async (req) => {
     if (path.startsWith('expenses/') && path.endsWith('/validate') && method === 'POST') {
       const id = path.split('/')[1]
       
-      // Récupérer la dépense
-      const { data: expense, error: fetchError } = await supabase
+      // REQUÊTE DIRECTE EN BASE pour récupérer le recurringExpenseId AVANT toute autre opération
+      // C'est la seule façon fiable de s'assurer qu'on a la vraie valeur
+      const { data: directCheck, error: directError } = await supabase
         .from('Expense')
-        .select('*, recurringExpense:RecurringExpense(*)')
+        .select('recurringExpenseId, isForecast, forecastDate, invoiceDate')
         .eq('id', id)
         .single()
 
-      if (fetchError || !expense) {
+      if (directError || !directCheck) {
         return new Response(
           JSON.stringify({ message: 'Dépense non trouvée' }),
           { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
 
-      if (!expense.isForecast) {
+      const actualRecurringExpenseId = directCheck.recurringExpenseId
+      const wasForecast = directCheck.isForecast === true
+
+      console.log('[VALIDATE] Vérification directe en base:', {
+        id,
+        recurringExpenseId: actualRecurringExpenseId,
+        isForecast: wasForecast
+      })
+
+      // Récupérer la dépense complète pour les autres champs
+      const { data: expense, error: fetchError } = await supabase
+        .from('Expense')
+        .select('*, company:Company(*), opportunity:Opportunity(*, company:Company(*)), user:User(id, email)')
+        .eq('id', id)
+        .single()
+
+      if (fetchError || !expense) {
         return new Response(
-          JSON.stringify({ message: 'Cette dépense n\'est pas une dépense prévisionnelle' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          JSON.stringify({ message: 'Erreur lors de la récupération de la dépense' }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
 
-      // Mettre à jour la dépense
+      // Mettre à jour la dépense : passer à VERIFIED mais garder isForecast si c'est une dépense récurrente
+      // Le tag prévisionnel sera retiré uniquement quand la dépense sera marquée comme PAID
+      const updateData: any = {
+        status: 'VERIFIED',
+        updatedAt: new Date().toISOString()
+      }
+      
+      // RÈGLE SIMPLE : Si la dépense a un recurringExpenseId, elle DOIT rester prévisionnelle jusqu'à PAID
+      if (actualRecurringExpenseId) {
+        console.log('[VALIDATE] Dépense récurrente détectée - recurringExpenseId:', actualRecurringExpenseId)
+        
+        // FORCER la préservation du recurringExpenseId
+        updateData.recurringExpenseId = actualRecurringExpenseId
+        
+        // FORCER isForecast à true - c'est une dépense récurrente, elle reste prévisionnelle
+        updateData.isForecast = true
+        
+        // Garder forecastDate si elle existe, sinon utiliser invoiceDate
+        if (directCheck.forecastDate) {
+          updateData.forecastDate = directCheck.forecastDate
+        } else if (directCheck.invoiceDate) {
+          updateData.forecastDate = directCheck.invoiceDate
+        }
+        
+        console.log('[VALIDATE] Mise à jour RÉCURRENTE - isForecast=true, recurringExpenseId préservé:', updateData)
+      } else {
+        console.log('[VALIDATE] Dépense NON récurrente - retirer le tag prévisionnel')
+        // Si pas de recurringExpenseId, retirer le tag prévisionnel
+        updateData.isForecast = false
+        updateData.forecastDate = null
+      }
+      
+      console.log('[VALIDATE] Données à mettre à jour:', JSON.stringify(updateData))
+      
       const { data: updatedExpense, error: updateError } = await supabase
         .from('Expense')
-        .update({
-          isForecast: false,
-          status: 'VERIFIED',
-          forecastDate: null,
-          updatedAt: new Date().toISOString()
-        })
+        .update(updateData)
         .eq('id', id)
-        .select('*, company:Company(*), opportunity:Opportunity(*), user:User(id, email)')
+        .select('*, recurringExpenseId, isForecast, forecastDate, company:Company(*), opportunity:Opportunity(*, company:Company(*)), user:User(id, email)')
         .single()
 
       if (updateError) {
+        console.error('[VALIDATE] Erreur mise à jour:', updateError)
         return new Response(
           JSON.stringify({ message: updateError.message }),
           { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
+      
+      console.log('[VALIDATE] Dépense mise à jour:', updatedExpense?.id, 'isForecast:', updatedExpense?.isForecast, 'recurringExpenseId:', updatedExpense?.recurringExpenseId)
+      console.log('[VALIDATE] Données complètes updatedExpense:', JSON.stringify(updatedExpense, null, 2))
 
-      // Optionnellement, générer la prochaine dépense prévisionnelle
-      if (expense.recurringExpense && expense.recurringExpense.isActive) {
-        const forecastDate = expense.forecastDate || expense.invoiceDate
-        if (forecastDate) {
-          const nextDate = new Date(forecastDate)
-          nextDate.setMonth(nextDate.getMonth() + 1)
-          
-          // Vérifier si une dépense existe déjà pour cette date
-          const { data: existing } = await supabase
-            .from('Expense')
-            .select('id')
-            .eq('recurringExpenseId', expense.recurringExpenseId)
-            .eq('forecastDate', nextDate.toISOString())
-            .eq('isForecast', true)
-            .single()
+      // IMPORTANT : Recharger la dépense pour s'assurer que recurringExpenseId est bien présent dans la réponse
+      // Sélectionner explicitement recurringExpenseId, isForecast, forecastDate pour éviter les problèmes avec le wildcard *
+      const { data: finalExpense, error: reloadError } = await supabase
+        .from('Expense')
+        .select('*, recurringExpenseId, isForecast, forecastDate, company:Company(*), opportunity:Opportunity(*, company:Company(*)), user:User(id, email)')
+        .eq('id', id)
+        .single()
 
-          if (!existing) {
-            await supabase
+      if (reloadError) {
+        console.error('[VALIDATE] Erreur rechargement:', reloadError)
+      } else {
+        console.log('[VALIDATE] Dépense rechargée:', finalExpense?.id, 'isForecast:', finalExpense?.isForecast, 'recurringExpenseId:', finalExpense?.recurringExpenseId)
+        console.log('[VALIDATE] Données complètes finalExpense:', JSON.stringify(finalExpense, null, 2))
+      }
+
+      const expenseToReturn = finalExpense || updatedExpense
+      console.log('[VALIDATE] Dépense finale retournée au frontend:', expenseToReturn?.id, 'isForecast:', expenseToReturn?.isForecast, 'recurringExpenseId:', expenseToReturn?.recurringExpenseId)
+
+      // Optionnellement, générer la prochaine dépense prévisionnelle si c'est une dépense récurrente
+      if (actualRecurringExpenseId && expenseToReturn?.isForecast) {
+        // Récupérer les informations de la dépense récurrente
+        const { data: recurringExpense } = await supabase
+          .from('RecurringExpense')
+          .select('*')
+          .eq('id', actualRecurringExpenseId)
+          .single()
+        
+        if (recurringExpense && recurringExpense.isActive) {
+          const forecastDate = directCheck.forecastDate || directCheck.invoiceDate
+          if (forecastDate) {
+            const nextDate = new Date(forecastDate)
+            nextDate.setMonth(nextDate.getMonth() + 1)
+            
+            // Vérifier si une dépense existe déjà pour cette date
+            const { data: existing } = await supabase
               .from('Expense')
-              .insert({
-                supplierName: expense.recurringExpense.supplierName,
-                amountHT: expense.recurringExpense.amountHT,
-                amountTTC: expense.recurringExpense.amountTTC,
-                vatAmount: expense.recurringExpense.vatAmount,
-                vatRate: expense.recurringExpense.vatRate,
-                accountCode: expense.recurringExpense.accountCode,
-                accountLabel: expense.recurringExpense.accountLabel,
-                invoiceDate: nextDate.toISOString(),
-                forecastDate: nextDate.toISOString(),
-                isForecast: true,
-                status: 'PENDING',
-                recurringExpenseId: expense.recurringExpenseId,
-                companyId: expense.recurringExpense.companyId,
-                userId: expense.recurringExpense.userId,
-                opportunityId: expense.recurringExpense.opportunityId,
-                notes: expense.recurringExpense.notes
-              })
+              .select('id')
+              .eq('recurringExpenseId', actualRecurringExpenseId)
+              .eq('forecastDate', nextDate.toISOString())
+              .eq('isForecast', true)
+              .single()
+
+            if (!existing) {
+              await supabase
+                .from('Expense')
+                .insert({
+                  supplierName: recurringExpense.supplierName,
+                  amountHT: recurringExpense.amountHT,
+                  amountTTC: recurringExpense.amountTTC,
+                  vatAmount: recurringExpense.vatAmount,
+                  vatRate: recurringExpense.vatRate,
+                  accountCode: recurringExpense.accountCode,
+                  accountLabel: recurringExpense.accountLabel,
+                  invoiceDate: nextDate.toISOString(),
+                  forecastDate: nextDate.toISOString(),
+                  isForecast: true,
+                  status: 'PENDING',
+                  recurringExpenseId: actualRecurringExpenseId,
+                  companyId: recurringExpense.companyId,
+                  userId: recurringExpense.userId,
+                  opportunityId: recurringExpense.opportunityId,
+                  notes: recurringExpense.notes
+                })
+            }
           }
         }
       }
 
       return new Response(
-        JSON.stringify(updatedExpense),
+        JSON.stringify(expenseToReturn),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }

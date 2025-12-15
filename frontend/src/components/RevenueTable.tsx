@@ -13,6 +13,7 @@ import {
 import { Payment, paymentService } from '../services/paymentService';
 import { DeboursNote } from '../services/deboursNoteService';
 import { PaymentModal } from './PaymentModal';
+import { Button } from './ui/Button';
 
 interface Quote {
   id: string;
@@ -274,22 +275,25 @@ export function RevenueTable({
         <div className="flex flex-wrap items-center gap-2">
           {/* Boutons d'action */}
           {onCreateQuote && (
-            <button
+            <Button
               onClick={onCreateQuote}
-              className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 transition-colors"
+              variant="primary"
+              size="sm"
+              icon={<PlusIcon className="h-3.5 w-3.5" />}
             >
-              <PlusIcon className="h-3.5 w-3.5" />
               Devis
-            </button>
+            </Button>
           )}
           {onCreateDeboursNote && (
-            <button
+            <Button
               onClick={onCreateDeboursNote}
-              className="flex items-center gap-1.5 rounded-md bg-purple-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-purple-700 transition-colors"
+              variant="primary"
+              size="sm"
+              icon={<PlusIcon className="h-3.5 w-3.5" />}
+              className="bg-purple-600 hover:bg-purple-700"
             >
-              <PlusIcon className="h-3.5 w-3.5" />
               Note
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -382,68 +386,76 @@ export function RevenueTable({
                       <td className="px-2 py-2">
                         <div className="flex items-center gap-1">
                           {item.type === 'QUOTE' && item.quoteId ? (
-                            <button
+                            <Button
                               onClick={() => navigate(`/quotes/${item.quoteId}?opportunityId=${opportunityId}`)}
-                              className="flex items-center gap-1 rounded-md bg-indigo-600 px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-indigo-700"
+                              variant="primary"
+                              size="sm"
+                              icon={<PencilIcon className="h-3 w-3" />}
                             >
-                              <PencilIcon className="h-3 w-3" />
                               Éditer
-                            </button>
+                            </Button>
                           ) : item.type === 'DEBOURS_NOTE' && item.deboursNoteId ? (
                             <>
                               {item.url && (
-                                <button
+                                <Button
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     window.open(item.url, '_blank', 'noopener,noreferrer');
                                   }}
-                                  className="flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
+                                  variant="secondary"
+                                  size="sm"
+                                  icon={<DocumentTextIcon className="h-3 w-3" />}
                                   title="Ouvrir le document Google Docs"
                                 >
-                                  <DocumentTextIcon className="h-3 w-3" />
-                                </button>
+                                  <span className="sr-only">Ouvrir le document</span>
+                                </Button>
                               )}
                               {onEditDeboursNote && (
-                                <button
+                                <Button
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     const note = deboursNotes.find(n => n.id === item.deboursNoteId);
                                     if (note) onEditDeboursNote(note);
                                   }}
-                                  className="flex items-center gap-1 rounded-md bg-indigo-600 px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-indigo-700"
+                                  variant="primary"
+                                  size="sm"
+                                  icon={<PencilIcon className="h-3 w-3" />}
                                 >
-                                  <PencilIcon className="h-3 w-3" />
                                   Éditer
-                                </button>
+                                </Button>
                               )}
-                              <button
+                              <Button
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handleAddPayment(item);
                                 }}
-                                className="flex items-center gap-1 rounded-md bg-green-600 px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-green-700"
+                                variant="success"
+                                size="sm"
+                                icon={<PlusIcon className="h-3 w-3" />}
                               >
-                                <PlusIcon className="h-3 w-3" />
                                 Paiement
-                              </button>
+                              </Button>
                               {onDeleteDeboursNote && (
-                                <button
+                                <Button
                                   onClick={(e) => handleDeleteDeboursNote(item.deboursNoteId!, e)}
-                                  className="flex items-center gap-1 rounded-md bg-red-600 px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-red-700"
+                                  variant="danger"
+                                  size="sm"
+                                  icon={<TrashIcon className="h-3 w-3" />}
                                   title="Supprimer la note de débours"
                                 >
-                                  <TrashIcon className="h-3 w-3" />
-                                </button>
+                                  <span className="sr-only">Supprimer</span>
+                                </Button>
                               )}
                             </>
                           ) : (
-                            <button
+                            <Button
                               onClick={() => handleAddPayment(item)}
-                              className="flex items-center gap-1 rounded-md bg-indigo-600 px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-indigo-700"
+                              variant="primary"
+                              size="sm"
+                              icon={<PlusIcon className="h-3 w-3" />}
                             >
-                              <PlusIcon className="h-3 w-3" />
                               Paiement
-                            </button>
+                            </Button>
                           )}
                         </div>
                       </td>
@@ -479,13 +491,15 @@ export function RevenueTable({
                             <td></td>
                             <td></td>
                             <td className="px-2 py-1.5">
-                              <button
+                              <Button
                                 onClick={(e) => handleDeletePayment(payment, e)}
-                                className="flex items-center gap-1 rounded-md bg-red-600 px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-red-700"
+                                variant="danger"
+                                size="sm"
+                                icon={<TrashIcon className="h-3 w-3" />}
                                 title="Supprimer le paiement"
                               >
-                                <TrashIcon className="h-3 w-3" />
-                              </button>
+                                <span className="sr-only">Supprimer</span>
+                              </Button>
                             </td>
                           </tr>
                         ))}

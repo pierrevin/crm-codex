@@ -171,18 +171,37 @@ export class RecurringExpensesService {
       },
     });
 
-    if (!expense || !expense.isForecast) {
-      throw new Error('Dépense prévisionnelle non trouvée');
+    if (!expense) {
+      throw new Error('Dépense non trouvée');
     }
+    
+    // Accepter la validation même si isForecast est false (pour les dépenses récurrentes déjà validées)
+    // La vérification principale est que la dépense existe et peut être validée
 
-    // Convertir la dépense prévisionnelle en dépense réelle
+    // Valider la dépense prévisionnelle : passer à VERIFIED mais garder isForecast si c'est une dépense récurrente
+    // Le tag prévisionnel sera retiré uniquement quand la dépense sera marquée comme PAID
+    const updateData: any = {
+      status: 'VERIFIED',
+    };
+    
+    // Si c'est une dépense récurrente, garder le tag prévisionnel jusqu'à ce qu'elle soit réglée
+    if (expense.recurringExpenseId) {
+      // IMPORTANT : Préserver explicitement le recurringExpenseId
+      updateData.recurringExpenseId = expense.recurringExpenseId;
+      updateData.isForecast = true;
+      // Garder forecastDate si elle existe
+      if (expense.forecastDate) {
+        updateData.forecastDate = expense.forecastDate;
+      }
+    } else {
+      // Si ce n'est pas une dépense récurrente, retirer le tag prévisionnel
+      updateData.isForecast = false;
+      updateData.forecastDate = null;
+    }
+    
     const updatedExpense = await this.prisma.expense.update({
       where: { id: expenseId },
-      data: {
-        isForecast: false,
-        status: 'VERIFIED',
-        forecastDate: null,
-      },
+      data: updateData,
     });
 
     // Optionnellement, générer la prochaine dépense prévisionnelle
