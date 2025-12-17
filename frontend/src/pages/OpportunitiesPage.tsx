@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useRef } from 'react';
-import { PlusIcon, CurrencyEuroIcon, MagnifyingGlassIcon, BuildingOfficeIcon, ChevronLeftIcon, ChevronRightIcon, ArrowsPointingOutIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, CurrencyEuroIcon, MagnifyingGlassIcon, BuildingOfficeIcon, ChevronDownIcon, ChevronUpIcon, ArrowsPointingOutIcon } from '@heroicons/react/24/outline';
 
 import api from '../services/apiClient';
 import { CompanySearchSelect } from '../components/CompanySearchSelect';
@@ -404,7 +404,7 @@ export function OpportunitiesPage() {
       <EffectiveSalesSection companyId={selectedCompanyId} />
 
       {view === 'kanban' && (
-        <div className="flex flex-wrap items-start gap-3 sm:gap-4 pb-2">
+        <div className="grid gap-3 sm:gap-4 pb-2 [grid-template-columns:repeat(auto-fit,minmax(280px,1fr))]">
           {Object.entries(STAGES).map(([stageKey, { label }]) => {
             const stage = stageKey as keyof typeof STAGES;
             const collapsed = isStageCollapsed(stage);
@@ -414,59 +414,39 @@ export function OpportunitiesPage() {
             return (
               <div
                 key={stageKey}
-                className={`flex flex-col rounded-lg border-2 ${draggedOpp ? 'border-dashed border-indigo-300' : 'border-slate-200'} bg-slate-50 min-h-64 md:min-h-96 ${collapsed ? 'w-16 min-w-16' : 'w-[280px] min-w-[280px] sm:w-[320px] sm:min-w-[320px]'}`}
+                className={`flex flex-col rounded-lg border-2 ${draggedOpp ? 'border-dashed border-indigo-300' : 'border-slate-200'} bg-slate-50`}
                 onDragOver={handleDragOver}
                 onDrop={() => handleDrop(stage)}
               >
-                <div className={`border-b border-slate-200 bg-white ${collapsed ? 'px-2 py-2' : 'px-3 sm:px-4 py-2 sm:py-3'}`}>
-                  {!collapsed ? (
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <h3 className="text-sm font-semibold text-slate-900">{label}</h3>
-                        <p className="text-xs text-slate-500">{count} opportunité(s)</p>
-                        <div className="mt-1 space-y-0.5 sm:space-y-1">
-                          <p className="text-xs sm:text-sm font-semibold text-slate-700">
-                            CA: {ca.toFixed(0)} €
-                          </p>
-                          <p className="text-xs sm:text-sm font-semibold text-emerald-600">
-                            Net: {(ca * 0.73).toFixed(0)} €
-                          </p>
-                        </div>
+                <div className="border-b border-slate-200 bg-white px-3 sm:px-4 py-2 sm:py-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-900">{label}</h3>
+                      <p className="text-xs text-slate-500">{count} opportunité(s)</p>
+                      <div className="mt-1 space-y-0.5 sm:space-y-1">
+                        <p className="text-xs sm:text-sm font-semibold text-slate-700">
+                          CA: {ca.toFixed(0)} €
+                        </p>
+                        <p className="text-xs sm:text-sm font-semibold text-emerald-600">
+                          Net: {(ca * 0.73).toFixed(0)} €
+                        </p>
                       </div>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleStageCollapsed(stage);
-                        }}
-                        className="rounded-md border border-slate-200 bg-white p-1 text-slate-600 hover:bg-slate-50"
-                        title="Replier"
-                      >
-                        <ChevronLeftIcon className="h-4 w-4" />
-                      </button>
                     </div>
-                  ) : (
-                    <div className="flex flex-col items-center justify-between h-48">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleStageCollapsed(stage);
-                        }}
-                        className="rounded-md border border-slate-200 bg-white p-1 text-slate-600 hover:bg-slate-50"
-                        title="Déplier"
-                      >
-                        <ChevronRightIcon className="h-4 w-4" />
-                      </button>
-                      <div className="text-xs font-semibold text-slate-700">{count}</div>
-                      <div className="text-xs font-semibold text-slate-700 transform -rotate-90 whitespace-nowrap">
-                        {label}
-                      </div>
-                      <div className="h-6" />
-                    </div>
-                  )}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleStageCollapsed(stage);
+                      }}
+                      className="rounded-md border border-slate-200 bg-white p-1 text-slate-600 hover:bg-slate-50"
+                      title={collapsed ? 'Déplier' : 'Replier'}
+                    >
+                      {collapsed ? <ChevronDownIcon className="h-4 w-4" /> : <ChevronUpIcon className="h-4 w-4" />}
+                    </button>
+                  </div>
                 </div>
 
                 {!collapsed && (
-                  <div className="flex-1 space-y-2 p-2 sm:p-3">
+                  <div className="flex-1 space-y-2 p-2 sm:p-3 min-h-40">
                     {opportunitiesByStage[stageKey]?.map((opp) => {
                       const hasPayment = payments.some(p => p.opportunityId === opp.id);
                       return (
@@ -522,6 +502,11 @@ export function OpportunitiesPage() {
                         </div>
                       );
                     })}
+                    {count === 0 && (
+                      <div className="rounded-lg border border-dashed border-slate-200 bg-white/60 p-4 text-center text-xs text-slate-500">
+                        Colonne vide
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

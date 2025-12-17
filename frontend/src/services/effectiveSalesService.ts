@@ -53,8 +53,10 @@ export const effectiveSalesService = {
     if (filters?.limit) params.append('limit', String(filters.limit));
 
     const query = params.toString();
-    const { data } = await api.get<EffectiveSale[]>(`/api/effective-sales${query ? `?${query}` : ''}`);
-    return Array.isArray(data) ? data : [];
+    const { data } = await api.get<any>(`/api/effective-sales${query ? `?${query}` : ''}`);
+    // Compat: l’API peut renvoyer soit un array, soit { items: [...] } en cas de warning
+    const items = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
+    return items as EffectiveSale[];
   },
 
   async create(dto: CreateEffectiveSaleDto): Promise<EffectiveSale> {

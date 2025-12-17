@@ -2662,71 +2662,108 @@ serve(async (req) => {
 
     // ===== EFFECTIVE SALES ROUTES =====
     if (path === 'effective-sales' && method === 'GET') {
-      const opportunityId = url.searchParams.get('opportunityId')
-      const companyId = url.searchParams.get('companyId')
-      const startDate = url.searchParams.get('startDate')
-      const endDate = url.searchParams.get('endDate')
-      const source = url.searchParams.get('source') // OPPORTUNITY | OFF_PIPE
-      const status = url.searchParams.get('status') // CONFIRMED | INVOICED | PAID
-      const limit = parseInt(url.searchParams.get('limit') ?? '200')
+      try {
+        const opportunityId = url.searchParams.get('opportunityId')
+        const companyId = url.searchParams.get('companyId')
+        const startDate = url.searchParams.get('startDate')
+        const endDate = url.searchParams.get('endDate')
+        const source = url.searchParams.get('source') // OPPORTUNITY | OFF_PIPE
+        const status = url.searchParams.get('status') // CONFIRMED | INVOICED | PAID
+        const limit = parseInt(url.searchParams.get('limit') ?? '200')
 
-      let query = supabase
-        .from('EffectiveSale')
-        .select('*, opportunity:Opportunity(id, title), company:Company(id, name)')
-        .order('effectiveDate', { ascending: false })
-        .limit(limit)
+        let query = supabase
+          .from('EffectiveSale')
+          .select('*, opportunity:Opportunity(id, title), company:Company(id, name)')
+          .order('effectiveDate', { ascending: false })
+          .limit(limit)
 
-      if (opportunityId) query = query.eq('opportunityId', opportunityId)
-      if (companyId) query = query.eq('companyId', companyId)
-      if (source) query = query.eq('source', source)
-      if (status) query = query.eq('status', status)
-      if (startDate) query = query.gte('effectiveDate', startDate)
-      if (endDate) query = query.lte('effectiveDate', endDate)
+        if (opportunityId) query = query.eq('opportunityId', opportunityId)
+        if (companyId) query = query.eq('companyId', companyId)
+        if (source) query = query.eq('source', source)
+        if (status) query = query.eq('status', status)
+        if (startDate) query = query.gte('effectiveDate', startDate)
+        if (endDate) query = query.lte('effectiveDate', endDate)
 
-      const { data, error } = await query
-      if (error) throw error
+        const { data, error } = await query
+        if (error) {
+          // Si la migration n'est pas appliquée, ne pas casser l'UI (retourner vide + hint)
+          const code = (error as any)?.code
+          const msg = (error as any)?.message || ''
+          if (code === '42P01' || msg.toLowerCase().includes('does not exist')) {
+            return new Response(
+              JSON.stringify({ items: [], warning: 'Table EffectiveSale manquante. Applique la migration et redéploie la function.' }),
+              { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            )
+          }
+          throw error
+        }
 
-      return new Response(JSON.stringify(data || []), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+        return new Response(JSON.stringify({ items: data || [] }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+      } catch (e: any) {
+        console.error('[EffectiveSale] GET error:', e)
+        return new Response(
+          JSON.stringify({ message: e?.message || 'Erreur chargement ventes effectives' }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
     }
 
     if (path === 'effective-sales' && method === 'POST') {
-      const body = await req.json()
-      const now = new Date().toISOString()
-      const id = crypto.randomUUID()
+      try {
+        const body = await req.json()
+        const now = new Date().toISOString()
+        const id = crypto.randomUUID()
 
-      const amountNumber = Number(body.amount || 0)
-      if (!Number.isFinite(amountNumber) || amountNumber <= 0) {
+        const amountNumber = Number(body.amount || 0)
+        if (!Number.isFinite(amountNumber) || amountNumber <= 0) {
+          return new Response(
+            JSON.stringify({ message: 'amount must be a number > 0' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+
+        const payload = {
+          id,
+          effectiveDate: body.effectiveDate ?? now,
+          label: body.label ?? null,
+          amount: amountNumber.toFixed(2),
+          currency: body.currency ?? 'EUR',
+          status: body.status ?? 'CONFIRMED',
+          source: body.source ?? 'OFF_PIPE',
+          opportunityId: body.opportunityId ?? null,
+          companyId: body.companyId ?? null,
+          externalRef: body.externalRef ?? null,
+          createdById: userId || null,
+          createdAt: now,
+          updatedAt: now
+        }
+
+        const { data, error } = await supabase
+          .from('EffectiveSale')
+          .insert(payload)
+          .select('*, opportunity:Opportunity(id, title), company:Company(id, name)')
+          .single()
+
+        if (error) {
+          const code = (error as any)?.code
+          const msg = (error as any)?.message || ''
+          if (code === '42P01' || msg.toLowerCase().includes('does not exist')) {
+            return new Response(
+              JSON.stringify({ message: 'Table EffectiveSale manquante. Applique la migration puis réessaie.' }),
+              { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            )
+          }
+          throw error
+        }
+
+        return new Response(JSON.stringify(data), { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+      } catch (e: any) {
+        console.error('[EffectiveSale] POST error:', e)
         return new Response(
-          JSON.stringify({ message: 'amount must be a number > 0' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          JSON.stringify({ message: e?.message || 'Erreur création vente effective' }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
-
-      const payload = {
-        id,
-        effectiveDate: body.effectiveDate ?? now,
-        label: body.label ?? null,
-        amount: amountNumber.toFixed(2),
-        currency: body.currency ?? 'EUR',
-        status: body.status ?? 'CONFIRMED',
-        source: body.source ?? 'OFF_PIPE',
-        opportunityId: body.opportunityId ?? null,
-        companyId: body.companyId ?? null,
-        externalRef: body.externalRef ?? null,
-        createdById: userId || null,
-        createdAt: now,
-        updatedAt: now
-      }
-
-      const { data, error } = await supabase
-        .from('EffectiveSale')
-        .insert(payload)
-        .select('*, opportunity:Opportunity(id, title), company:Company(id, name)')
-        .single()
-
-      if (error) throw error
-
-      return new Response(JSON.stringify(data), { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
 
     // ===== PAYMENTS ROUTES =====
