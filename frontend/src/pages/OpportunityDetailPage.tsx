@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { TrashIcon, PlusIcon, DocumentTextIcon, BanknotesIcon, ReceiptRefundIcon, DocumentDuplicateIcon, ChevronDownIcon, ChevronUpIcon, FolderIcon, PencilIcon, CalendarIcon } from '@heroicons/react/24/outline';
 
 import api from '../services/apiClient';
@@ -50,6 +50,7 @@ type OpportunityResponse = OpportunityPayload & {
 export function OpportunityDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const isNew = id === 'new' || !id;
   const [opportunity, setOpportunity] = useState<OpportunityPayload>({ 
     title: '', 
@@ -85,6 +86,17 @@ export function OpportunityDetailPage() {
       void loadExpenses(id);
     }
   }, [id, isNew]);
+
+  // Pré-remplir l'entreprise si on arrive depuis une page client (?companyId=...)
+  useEffect(() => {
+    if (!isNew) return;
+    const companyIdFromQuery = searchParams.get('companyId');
+    if (!companyIdFromQuery) return;
+    setOpportunity((prev) => {
+      if (prev.companyId) return prev;
+      return { ...prev, companyId: companyIdFromQuery };
+    });
+  }, [isNew, searchParams]);
 
   const loadDeboursNotes = async (opportunityId: string) => {
     try {

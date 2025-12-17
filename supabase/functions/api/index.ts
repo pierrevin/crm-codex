@@ -2670,6 +2670,7 @@ serve(async (req) => {
         const source = url.searchParams.get('source') // OPPORTUNITY | OFF_PIPE
         const status = url.searchParams.get('status') // CONFIRMED | INVOICED | PAID
         const limit = parseInt(url.searchParams.get('limit') ?? '200')
+        const includeOpportunities = (url.searchParams.get('includeOpportunities') ?? 'true') !== 'false'
 
         let query = supabase
           .from('EffectiveSale')
@@ -2698,7 +2699,97 @@ serve(async (req) => {
           throw error
         }
 
-        return new Response(JSON.stringify({ items: data || [] }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+        let items: any[] = data || []
+
+        // IMPORTANT: garantir l'exhaustivité pour les opportunités gagnées/finalisées,
+        // même si elles ne sont pas encore matérialisées dans EffectiveSale (backfill à la volée).
+        if (includeOpportunities && (!source || source === 'OPPORTUNITY')) {
+          let oppQuery = supabase
+            .from('Opportunity')
+            .select('id, title, amount, stage, closeDate, updatedAt, createdAt, companyId')
+            .in('stage', ['CLOSED_WON', 'FINALIZED'])
+            .order('updatedAt', { ascending: false })
+            .limit(2000)
+
+          if (opportunityId) oppQuery = oppQuery.eq('id', opportunityId)
+          if (companyId) oppQuery = oppQuery.eq('companyId', companyId)
+
+          // Filtrage temporel: on se base sur closeDate si présent, sinon updatedAt/createdAt
+          // (côté SQL, on filtre approximativement via updatedAt si start/end sont fournis,
+          // puis on refiltre en JS sur la date effective).
+          if (startDate) oppQuery = oppQuery.gte('updatedAt', startDate)
+          if (endDate) oppQuery = oppQuery.lte('updatedAt', endDate)
+
+          const { data: opps, error: oppErr } = await oppQuery
+          if (!oppErr && Array.isArray(opps) && opps.length > 0) {
+            const existingOppIds = new Set(items.filter((s: any) => s.opportunityId).map((s: any) => s.opportunityId))
+
+            const computed = opps
+              .filter((o: any) => Number(o.amount || 0) > 0)
+              .map((o: any) => {
+                const effectiveDate = o.closeDate || o.updatedAt || o.createdAt || new Date().toISOString()
+                return {
+                  id: o.id,
+                  effectiveDate,
+                  label: o.title || null,
+                  amount: Number(o.amount || 0).toFixed(2),
+                  currency: 'EUR',
+                  status: o.stage === 'FINALIZED' ? 'PAID' : 'CONFIRMED',
+                  source: 'OPPORTUNITY',
+                  opportunityId: o.id,
+                  companyId: o.companyId || null,
+                  externalRef: null,
+                  createdById: userId || null,
+                  createdAt: o.createdAt || new Date().toISOString(),
+                  updatedAt: o.updatedAt || new Date().toISOString(),
+                  opportunity: { id: o.id, title: o.title }
+                }
+              })
+              .filter((s: any) => {
+                if (!startDate && !endDate) return true
+                const d = new Date(s.effectiveDate)
+                if (startDate && d < new Date(startDate)) return false
+                if (endDate && d > new Date(endDate)) return false
+                return true
+              })
+
+            // Ajouter ceux manquants (sans doublonner)
+            const missing = computed.filter((s: any) => !existingOppIds.has(s.opportunityId))
+            if (missing.length > 0) {
+              // On tente de matérialiser pour les prochaines fois (best-effort, non bloquant)
+              supabase
+                .from('EffectiveSale')
+                .upsert(
+                  missing.map((m: any) => ({
+                    id: m.id,
+                    effectiveDate: m.effectiveDate,
+                    label: m.label,
+                    amount: m.amount,
+                    currency: m.currency,
+                    status: m.status,
+                    source: m.source,
+                    opportunityId: m.opportunityId,
+                    companyId: m.companyId,
+                    externalRef: m.externalRef,
+                    createdById: m.createdById,
+                    createdAt: m.createdAt,
+                    updatedAt: new Date().toISOString()
+                  })),
+                  { onConflict: 'opportunityId' }
+                )
+                .then(() => {})
+                .catch(() => {})
+
+              items = [...items, ...missing]
+            }
+          }
+        }
+
+        // Uniformiser le tri final (effectiveDate desc)
+        items.sort((a: any, b: any) => new Date(b.effectiveDate).getTime() - new Date(a.effectiveDate).getTime())
+        items = items.slice(0, limit)
+
+        return new Response(JSON.stringify({ items }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
       } catch (e: any) {
         console.error('[EffectiveSale] GET error:', e)
         return new Response(

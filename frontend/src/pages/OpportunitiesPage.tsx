@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useRef } from 'react';
-import { PlusIcon, CurrencyEuroIcon, MagnifyingGlassIcon, BuildingOfficeIcon, ChevronDownIcon, ChevronUpIcon, ArrowsPointingOutIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, CurrencyEuroIcon, MagnifyingGlassIcon, BuildingOfficeIcon, ChevronLeftIcon, ChevronRightIcon, ArrowsPointingOutIcon } from '@heroicons/react/24/outline';
 
 import api from '../services/apiClient';
 import { CompanySearchSelect } from '../components/CompanySearchSelect';
@@ -12,6 +12,7 @@ type Opportunity = {
   id: string;
   title: string;
   stage: 'QUALIFICATION' | 'PROPOSAL' | 'CLOSED_WON' | 'FINALIZED' | 'CLOSED_LOST';
+  companyId?: string;
   amount?: number;
   closeDate?: string;
   expectedPaymentDate?: string;
@@ -90,6 +91,7 @@ export function OpportunitiesPage() {
     }
   }, [collapsedStageOverrides]);
 
+
   // Fermer le dropdown quand on clique en dehors
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -110,8 +112,9 @@ export function OpportunitiesPage() {
       // Extraire les entreprises qui ont des opportunités actives
       const companiesWithActiveOpps = new Set<string>();
       opps.forEach((opp: Opportunity) => {
-        if (activeStages.includes(opp.stage) && opp.company?.id) {
-          companiesWithActiveOpps.add(opp.company.id);
+        const cid = opp.company?.id ?? opp.companyId;
+        if (activeStages.includes(opp.stage) && cid) {
+          companiesWithActiveOpps.add(cid);
         }
       });
       
@@ -161,7 +164,7 @@ export function OpportunitiesPage() {
     if (!selectedCompanyId) {
       return allOpportunities;
     }
-    return allOpportunities.filter(opp => opp.company?.id === selectedCompanyId);
+    return allOpportunities.filter(opp => (opp.company?.id ?? opp.companyId) === selectedCompanyId);
   }, [allOpportunities, selectedCompanyId]);
 
   const handleCompanySelect = (company: any) => {
@@ -262,19 +265,27 @@ export function OpportunitiesPage() {
   };
 
   const expandAllStages = () => {
+    // UX: "Tout déplier" doit maximiser l'info utile.
+    // On déplie seulement les colonnes non vides, et on laisse les colonnes vides en auto-repli (compactes).
     const next: Partial<Record<keyof typeof STAGES, boolean>> = {};
     (Object.keys(STAGES) as (keyof typeof STAGES)[]).forEach((stage) => {
-      next[stage] = false;
+      const count = countsByStage[stage] ?? 0;
+      if (count > 0) next[stage] = false;
+      // si vide: ne pas override -> autoCollapsed restera true
     });
     setCollapsedStageOverrides(next);
   };
 
   const collapseEmptyStages = () => {
     setCollapsedStageOverrides((prev) => {
-      const next = { ...prev };
+      // On remet les colonnes vides en mode "auto" (et donc repliées),
+      // sans forcer un repli manuel persistant qui masquerait une future opportunité.
+      const next = { ...prev } as Partial<Record<keyof typeof STAGES, boolean>>;
       (Object.keys(STAGES) as (keyof typeof STAGES)[]).forEach((stage) => {
         const isEmpty = (countsByStage[stage] ?? 0) === 0;
-        if (isEmpty) next[stage] = true;
+        if (isEmpty) {
+          delete (next as any)[stage];
+        }
       });
       return next;
     });
@@ -404,49 +415,75 @@ export function OpportunitiesPage() {
       <EffectiveSalesSection companyId={selectedCompanyId} />
 
       {view === 'kanban' && (
-        <div className="grid gap-3 sm:gap-4 pb-2 [grid-template-columns:repeat(auto-fit,minmax(280px,1fr))]">
+        <div className="flex gap-3 sm:gap-4 overflow-x-auto pb-2">
           {Object.entries(STAGES).map(([stageKey, { label }]) => {
             const stage = stageKey as keyof typeof STAGES;
-            const collapsed = isStageCollapsed(stage);
             const count = opportunitiesByStage[stageKey]?.length || 0;
             const ca = totalByStage[stageKey] || 0;
+
+            // Trello: auto-repli si vide + override manuel persistant
+            const autoCollapsed = count === 0;
+            const override = collapsedStageOverrides[stage];
+            const collapsed = override ?? autoCollapsed;
 
             return (
               <div
                 key={stageKey}
-                className={`flex flex-col rounded-lg border-2 ${draggedOpp ? 'border-dashed border-indigo-300' : 'border-slate-200'} bg-slate-50`}
+                className={`flex flex-col rounded-lg border-2 ${draggedOpp ? 'border-dashed border-indigo-300' : 'border-slate-200'} bg-slate-50 transition-all ${
+                  collapsed ? 'w-16 min-w-16' : 'w-[320px] min-w-[320px]'
+                }`}
                 onDragOver={handleDragOver}
                 onDrop={() => handleDrop(stage)}
               >
-                <div className="border-b border-slate-200 bg-white px-3 sm:px-4 py-2 sm:py-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <h3 className="text-sm font-semibold text-slate-900">{label}</h3>
-                      <p className="text-xs text-slate-500">{count} opportunité(s)</p>
-                      <div className="mt-1 space-y-0.5 sm:space-y-1">
-                        <p className="text-xs sm:text-sm font-semibold text-slate-700">
-                          CA: {ca.toFixed(0)} €
-                        </p>
-                        <p className="text-xs sm:text-sm font-semibold text-emerald-600">
-                          Net: {(ca * 0.73).toFixed(0)} €
-                        </p>
+                <div className={`border-b border-slate-200 bg-white ${collapsed ? 'px-2 py-2' : 'px-3 sm:px-4 py-2 sm:py-3'}`}>
+                  {!collapsed ? (
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <h3 className="text-sm font-semibold text-slate-900">{label}</h3>
+                        <p className="text-xs text-slate-500">{count} opportunité(s)</p>
+                        <div className="mt-1 space-y-0.5 sm:space-y-1">
+                          <p className="text-xs sm:text-sm font-semibold text-slate-700">
+                            CA: {ca.toFixed(0)} €
+                          </p>
+                          <p className="text-xs sm:text-sm font-semibold text-emerald-600">
+                            Net: {(ca * 0.73).toFixed(0)} €
+                          </p>
+                        </div>
                       </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCollapsedStageOverrides((prev) => ({ ...prev, [stage]: true }));
+                        }}
+                        className="rounded-md border border-slate-200 bg-white p-1 text-slate-600 hover:bg-slate-50"
+                        title="Replier"
+                      >
+                        <ChevronLeftIcon className="h-4 w-4" />
+                      </button>
                     </div>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleStageCollapsed(stage);
-                      }}
-                      className="rounded-md border border-slate-200 bg-white p-1 text-slate-600 hover:bg-slate-50"
-                      title={collapsed ? 'Déplier' : 'Replier'}
-                    >
-                      {collapsed ? <ChevronDownIcon className="h-4 w-4" /> : <ChevronUpIcon className="h-4 w-4" />}
-                    </button>
-                  </div>
+                  ) : (
+                    <div className="flex flex-1 flex-col items-center justify-between py-2">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCollapsedStageOverrides((prev) => ({ ...prev, [stage]: false }));
+                        }}
+                        className="rounded-md border border-slate-200 bg-white p-1 text-slate-600 hover:bg-slate-50"
+                        title="Déplier"
+                      >
+                        <ChevronRightIcon className="h-4 w-4" />
+                      </button>
+                      <div className="mt-2 text-xs font-semibold text-slate-700">{count}</div>
+                      <div className="mt-2 text-xs font-semibold text-slate-700 [writing-mode:vertical-rl] rotate-180 whitespace-nowrap">
+                        {label}
+                      </div>
+                      <div className="h-2" />
+                    </div>
+                  )}
                 </div>
 
                 {!collapsed && (
-                  <div className="flex-1 space-y-2 p-2 sm:p-3 min-h-40">
+                  <div className="flex-1 space-y-2 p-2 sm:p-3">
                     {opportunitiesByStage[stageKey]?.map((opp) => {
                       const hasPayment = payments.some(p => p.opportunityId === opp.id);
                       return (
@@ -460,32 +497,38 @@ export function OpportunitiesPage() {
                             onClick={() => window.location.href = `/opportunites/${opp.id}`}
                             className="cursor-pointer"
                           >
-                            <h4 className="font-medium text-slate-900 text-xs sm:text-sm mb-1 line-clamp-2">{opp.title}</h4>
-                            {opp.amount && (
-                              <p className="text-xs sm:text-sm font-semibold text-indigo-600 mb-1">
-                                {Number(opp.amount).toFixed(0)} €
-                              </p>
-                            )}
-                            {opp.closeDate && (
-                              <p className="text-xs text-slate-400 mb-1">
-                                📅 {new Date(opp.closeDate).toLocaleDateString('fr-FR', { month: 'short', day: 'numeric' })}
-                              </p>
-                            )}
-                            {opp.expectedPaymentDate && (
-                              <p className="text-xs text-slate-400 mb-1">
-                                💰 Prévisionnel: {new Date(opp.expectedPaymentDate).toLocaleDateString('fr-FR', { month: 'short', day: 'numeric' })}
-                              </p>
-                            )}
-                            {hasPayment && (
-                              <p className="text-xs text-green-600 mb-1 font-semibold">
-                                ✅ Payé
-                              </p>
-                            )}
-                            <p className="text-xs text-slate-500 truncate">
+                            <div className="flex items-start justify-between gap-2">
+                              <h4 className="font-medium text-slate-900 text-xs sm:text-sm line-clamp-2">{opp.title}</h4>
+                              {opp.amount && (
+                                <div className="text-xs sm:text-sm font-semibold text-indigo-600 whitespace-nowrap">
+                                  {Number(opp.amount).toFixed(0)} €
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+                              {opp.closeDate && (
+                                <span className="whitespace-nowrap">
+                                  📅 {new Date(opp.closeDate).toLocaleDateString('fr-FR', { month: 'short', day: 'numeric' })}
+                                </span>
+                              )}
+                              {opp.expectedPaymentDate && (
+                                <span className="whitespace-nowrap">
+                                  💰 {new Date(opp.expectedPaymentDate).toLocaleDateString('fr-FR', { month: 'short', day: 'numeric' })}
+                                </span>
+                              )}
+                              {hasPayment && (
+                                <span className="whitespace-nowrap text-green-600 font-semibold">
+                                  ✅ Payé
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="mt-1 text-xs text-slate-500 truncate">
                               {opp.contact
                                 ? `${opp.contact.firstName} ${opp.contact.lastName ?? ''}`
                                 : opp.company?.name ?? 'Sans client'}
-                            </p>
+                            </div>
                           </div>
                           <div className="mt-2 pt-2 border-t border-slate-100">
                             <button

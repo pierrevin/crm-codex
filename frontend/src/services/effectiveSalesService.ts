@@ -42,6 +42,7 @@ export const effectiveSalesService = {
     source?: EffectiveSaleSource;
     status?: EffectiveSaleStatus;
     limit?: number;
+    includeOpportunities?: boolean;
   }): Promise<EffectiveSale[]> {
     const params = new URLSearchParams();
     if (filters?.opportunityId) params.append('opportunityId', filters.opportunityId);
@@ -51,6 +52,7 @@ export const effectiveSalesService = {
     if (filters?.source) params.append('source', filters.source);
     if (filters?.status) params.append('status', filters.status);
     if (filters?.limit) params.append('limit', String(filters.limit));
+    if (filters?.includeOpportunities === false) params.append('includeOpportunities', 'false');
 
     const query = params.toString();
     const { data } = await api.get<any>(`/api/effective-sales${query ? `?${query}` : ''}`);
