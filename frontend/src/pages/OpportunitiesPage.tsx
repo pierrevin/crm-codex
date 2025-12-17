@@ -1,11 +1,12 @@
 import { useEffect, useState, useMemo, useRef } from 'react';
-import { PlusIcon, CurrencyEuroIcon, MagnifyingGlassIcon, BuildingOfficeIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, CurrencyEuroIcon, MagnifyingGlassIcon, BuildingOfficeIcon, ChevronLeftIcon, ChevronRightIcon, ArrowsPointingOutIcon } from '@heroicons/react/24/outline';
 
 import api from '../services/apiClient';
 import { CompanySearchSelect } from '../components/CompanySearchSelect';
 import { ContactSearchSelect } from '../components/ContactSearchSelect';
 import { MultiplePaymentsModal } from '../components/MultiplePaymentsModal';
 import { paymentService, Payment } from '../services/paymentService';
+import { EffectiveSalesSection } from '../components/EffectiveSalesSection';
 
 type Opportunity = {
   id: string;
@@ -34,6 +35,8 @@ const STAGES = {
   CLOSED_LOST: { label: 'Perdu', color: 'bg-rose-100 text-rose-700' }
 };
 
+const KANBAN_COLLAPSED_STAGES_STORAGE_KEY = 'opportunities.kanban.collapsedStages.v1';
+
 export function OpportunitiesPage() {
   const [allOpportunities, setAllOpportunities] = useState<Opportunity[]>([]);
   const [allCompaniesWithActiveOpps, setAllCompaniesWithActiveOpps] = useState<any[]>([]);
@@ -51,6 +54,7 @@ export function OpportunitiesPage() {
   const [payments, setPayments] = useState<Payment[]>([]);
   const companySearchRef = useRef<HTMLDivElement>(null);
   const companyInputRef = useRef<HTMLInputElement>(null);
+  const [collapsedStageOverrides, setCollapsedStageOverrides] = useState<Partial<Record<keyof typeof STAGES, boolean>>>({});
 
   // Stages actifs (qualification, proposition, gagné)
   const activeStages: (keyof typeof STAGES)[] = ['QUALIFICATION', 'PROPOSAL', 'CLOSED_WON'];
@@ -59,6 +63,32 @@ export function OpportunitiesPage() {
     void loadOpportunities();
     void loadPayments();
   }, []);
+
+  // Charger les préférences de repli (override manuel)
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(KANBAN_COLLAPSED_STAGES_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const next: Partial<Record<keyof typeof STAGES, boolean>> = {};
+      (Object.keys(STAGES) as (keyof typeof STAGES)[]).forEach((stage) => {
+        const v = parsed[stage as string];
+        if (typeof v === 'boolean') next[stage] = v;
+      });
+      setCollapsedStageOverrides(next);
+    } catch {
+      // no-op
+    }
+  }, []);
+
+  // Persister les préférences de repli
+  useEffect(() => {
+    try {
+      localStorage.setItem(KANBAN_COLLAPSED_STAGES_STORAGE_KEY, JSON.stringify(collapsedStageOverrides));
+    } catch {
+      // no-op
+    }
+  }, [collapsedStageOverrides]);
 
   // Fermer le dropdown quand on clique en dehors
   useEffect(() => {
@@ -212,6 +242,44 @@ export function OpportunitiesPage() {
     return acc;
   }, {} as Record<string, number>);
 
+  const countsByStage = useMemo(() => {
+    const counts: Record<string, number> = {};
+    Object.keys(STAGES).forEach((stage) => {
+      counts[stage] = opportunitiesByStage[stage]?.length || 0;
+    });
+    return counts;
+  }, [opportunitiesByStage]);
+
+  const isStageCollapsed = (stage: keyof typeof STAGES) => {
+    const autoCollapsed = (countsByStage[stage] ?? 0) === 0;
+    const override = collapsedStageOverrides[stage];
+    return override ?? autoCollapsed;
+  };
+
+  const toggleStageCollapsed = (stage: keyof typeof STAGES) => {
+    const next = !isStageCollapsed(stage);
+    setCollapsedStageOverrides((prev) => ({ ...prev, [stage]: next }));
+  };
+
+  const expandAllStages = () => {
+    const next: Partial<Record<keyof typeof STAGES, boolean>> = {};
+    (Object.keys(STAGES) as (keyof typeof STAGES)[]).forEach((stage) => {
+      next[stage] = false;
+    });
+    setCollapsedStageOverrides(next);
+  };
+
+  const collapseEmptyStages = () => {
+    setCollapsedStageOverrides((prev) => {
+      const next = { ...prev };
+      (Object.keys(STAGES) as (keyof typeof STAGES)[]).forEach((stage) => {
+        const isEmpty = (countsByStage[stage] ?? 0) === 0;
+        if (isEmpty) next[stage] = true;
+      });
+      return next;
+    });
+  };
+
   return (
     <div className="space-y-4 sm:space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -234,6 +302,26 @@ export function OpportunitiesPage() {
               Liste
             </button>
           </div>
+          {view === 'kanban' && (
+            <div className="hidden sm:flex items-center gap-2">
+              <button
+                onClick={collapseEmptyStages}
+                className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                title="Replier les colonnes vides"
+              >
+                <ChevronLeftIcon className="h-4 w-4" />
+                Replier vides
+              </button>
+              <button
+                onClick={expandAllStages}
+                className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                title="Tout déplier"
+              >
+                <ArrowsPointingOutIcon className="h-4 w-4" />
+                Tout déplier
+              </button>
+            </div>
+          )}
           <button
             onClick={() => setShowModal(true)}
             className="flex items-center gap-1 sm:gap-2 rounded-md bg-indigo-600 px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium text-white shadow hover:bg-indigo-500"
@@ -312,86 +400,133 @@ export function OpportunitiesPage() {
         )}
       </div>
 
+      {/* Ventes effectives (global ou filtré par entreprise) */}
+      <EffectiveSalesSection companyId={selectedCompanyId} />
+
       {view === 'kanban' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
-          {Object.entries(STAGES).map(([stage, { label, color }]) => (
-            <div 
-              key={stage} 
-              className={`flex flex-col rounded-lg border-2 ${draggedOpp ? 'border-dashed border-indigo-300' : 'border-slate-200'} bg-slate-50 min-h-64 md:min-h-96`}
-              onDragOver={handleDragOver}
-              onDrop={() => handleDrop(stage as keyof typeof STAGES)}
-            >
-              <div className="border-b border-slate-200 bg-white px-3 sm:px-4 py-2 sm:py-3">
-                <h3 className="text-sm font-semibold text-slate-900">{label}</h3>
-                <p className="text-xs text-slate-500">{opportunitiesByStage[stage]?.length || 0} opportunité(s)</p>
-                <div className="mt-1 space-y-0.5 sm:space-y-1">
-                  <p className="text-xs sm:text-sm font-semibold text-slate-700">
-                    CA: {(totalByStage[stage] || 0).toFixed(0)} €
-                  </p>
-                  <p className="text-xs sm:text-sm font-semibold text-emerald-600">
-                    Net: {((totalByStage[stage] || 0) * 0.73).toFixed(0)} €
-                  </p>
-                </div>
-              </div>
-              <div className="flex-1 space-y-2 p-2 sm:p-3">
-                {opportunitiesByStage[stage]?.map((opp) => {
-                  const hasPayment = payments.some(p => p.opportunityId === opp.id);
-                  return (
-                    <div
-                      key={opp.id}
-                      draggable
-                      onDragStart={() => handleDragStart(opp)}
-                      className={`w-full rounded-lg border border-slate-200 bg-white p-2 sm:p-3 shadow-sm hover:shadow-md transition-all text-left ${draggedOpp?.id === opp.id ? 'opacity-50' : ''}`}
-                    >
-                      <div 
-                        onClick={() => window.location.href = `/opportunites/${opp.id}`}
-                        className="cursor-pointer"
+        <div className="flex flex-wrap items-start gap-3 sm:gap-4 pb-2">
+          {Object.entries(STAGES).map(([stageKey, { label }]) => {
+            const stage = stageKey as keyof typeof STAGES;
+            const collapsed = isStageCollapsed(stage);
+            const count = opportunitiesByStage[stageKey]?.length || 0;
+            const ca = totalByStage[stageKey] || 0;
+
+            return (
+              <div
+                key={stageKey}
+                className={`flex flex-col rounded-lg border-2 ${draggedOpp ? 'border-dashed border-indigo-300' : 'border-slate-200'} bg-slate-50 min-h-64 md:min-h-96 ${collapsed ? 'w-16 min-w-16' : 'w-[280px] min-w-[280px] sm:w-[320px] sm:min-w-[320px]'}`}
+                onDragOver={handleDragOver}
+                onDrop={() => handleDrop(stage)}
+              >
+                <div className={`border-b border-slate-200 bg-white ${collapsed ? 'px-2 py-2' : 'px-3 sm:px-4 py-2 sm:py-3'}`}>
+                  {!collapsed ? (
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <h3 className="text-sm font-semibold text-slate-900">{label}</h3>
+                        <p className="text-xs text-slate-500">{count} opportunité(s)</p>
+                        <div className="mt-1 space-y-0.5 sm:space-y-1">
+                          <p className="text-xs sm:text-sm font-semibold text-slate-700">
+                            CA: {ca.toFixed(0)} €
+                          </p>
+                          <p className="text-xs sm:text-sm font-semibold text-emerald-600">
+                            Net: {(ca * 0.73).toFixed(0)} €
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleStageCollapsed(stage);
+                        }}
+                        className="rounded-md border border-slate-200 bg-white p-1 text-slate-600 hover:bg-slate-50"
+                        title="Replier"
                       >
-                        <h4 className="font-medium text-slate-900 text-xs sm:text-sm mb-1 line-clamp-2">{opp.title}</h4>
-                        {opp.amount && (
-                          <p className="text-xs sm:text-sm font-semibold text-indigo-600 mb-1">
-                            {Number(opp.amount).toFixed(0)} €
-                          </p>
-                        )}
-                        {opp.closeDate && (
-                          <p className="text-xs text-slate-400 mb-1">
-                            📅 {new Date(opp.closeDate).toLocaleDateString('fr-FR', { month: 'short', day: 'numeric' })}
-                          </p>
-                        )}
-                        {opp.expectedPaymentDate && (
-                          <p className="text-xs text-slate-400 mb-1">
-                            💰 Prévisionnel: {new Date(opp.expectedPaymentDate).toLocaleDateString('fr-FR', { month: 'short', day: 'numeric' })}
-                          </p>
-                        )}
-                        {hasPayment && (
-                          <p className="text-xs text-green-600 mb-1 font-semibold">
-                            ✅ Payé
-                          </p>
-                        )}
-                        <p className="text-xs text-slate-500 truncate">
-                          {opp.contact
-                            ? `${opp.contact.firstName} ${opp.contact.lastName ?? ''}`
-                            : opp.company?.name ?? 'Sans client'}
-                        </p>
-                      </div>
-                      <div className="mt-2 pt-2 border-t border-slate-100">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleMarkAsPaid(opp);
-                          }}
-                          className="w-full flex items-center justify-center gap-1 px-2 py-1 text-xs bg-indigo-50 text-indigo-700 rounded hover:bg-indigo-100"
-                        >
-                          <CurrencyEuroIcon className="h-3 w-3" />
-                          {hasPayment ? 'Ajouter paiement' : 'Marquer comme payé'}
-                        </button>
-                      </div>
+                        <ChevronLeftIcon className="h-4 w-4" />
+                      </button>
                     </div>
-                  );
-                })}
+                  ) : (
+                    <div className="flex flex-col items-center justify-between h-48">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleStageCollapsed(stage);
+                        }}
+                        className="rounded-md border border-slate-200 bg-white p-1 text-slate-600 hover:bg-slate-50"
+                        title="Déplier"
+                      >
+                        <ChevronRightIcon className="h-4 w-4" />
+                      </button>
+                      <div className="text-xs font-semibold text-slate-700">{count}</div>
+                      <div className="text-xs font-semibold text-slate-700 transform -rotate-90 whitespace-nowrap">
+                        {label}
+                      </div>
+                      <div className="h-6" />
+                    </div>
+                  )}
+                </div>
+
+                {!collapsed && (
+                  <div className="flex-1 space-y-2 p-2 sm:p-3">
+                    {opportunitiesByStage[stageKey]?.map((opp) => {
+                      const hasPayment = payments.some(p => p.opportunityId === opp.id);
+                      return (
+                        <div
+                          key={opp.id}
+                          draggable
+                          onDragStart={() => handleDragStart(opp)}
+                          className={`w-full rounded-lg border border-slate-200 bg-white p-2 sm:p-3 shadow-sm hover:shadow-md transition-all text-left ${draggedOpp?.id === opp.id ? 'opacity-50' : ''}`}
+                        >
+                          <div
+                            onClick={() => window.location.href = `/opportunites/${opp.id}`}
+                            className="cursor-pointer"
+                          >
+                            <h4 className="font-medium text-slate-900 text-xs sm:text-sm mb-1 line-clamp-2">{opp.title}</h4>
+                            {opp.amount && (
+                              <p className="text-xs sm:text-sm font-semibold text-indigo-600 mb-1">
+                                {Number(opp.amount).toFixed(0)} €
+                              </p>
+                            )}
+                            {opp.closeDate && (
+                              <p className="text-xs text-slate-400 mb-1">
+                                📅 {new Date(opp.closeDate).toLocaleDateString('fr-FR', { month: 'short', day: 'numeric' })}
+                              </p>
+                            )}
+                            {opp.expectedPaymentDate && (
+                              <p className="text-xs text-slate-400 mb-1">
+                                💰 Prévisionnel: {new Date(opp.expectedPaymentDate).toLocaleDateString('fr-FR', { month: 'short', day: 'numeric' })}
+                              </p>
+                            )}
+                            {hasPayment && (
+                              <p className="text-xs text-green-600 mb-1 font-semibold">
+                                ✅ Payé
+                              </p>
+                            )}
+                            <p className="text-xs text-slate-500 truncate">
+                              {opp.contact
+                                ? `${opp.contact.firstName} ${opp.contact.lastName ?? ''}`
+                                : opp.company?.name ?? 'Sans client'}
+                            </p>
+                          </div>
+                          <div className="mt-2 pt-2 border-t border-slate-100">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleMarkAsPaid(opp);
+                              }}
+                              className="w-full flex items-center justify-center gap-1 px-2 py-1 text-xs bg-indigo-50 text-indigo-700 rounded hover:bg-indigo-100"
+                            >
+                              <CurrencyEuroIcon className="h-3 w-3" />
+                              {hasPayment ? 'Ajouter paiement' : 'Marquer comme payé'}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

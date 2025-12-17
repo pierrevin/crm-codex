@@ -2515,6 +2515,45 @@ serve(async (req) => {
               console.error('[Quote Auto] Erreur lors de la création automatique du devis:', quoteAutoError)
             }
           }
+
+          // Matérialiser/mettre à jour une vente effective quand l'opportunité est gagnée/finalisée
+          if (body.stage === 'CLOSED_WON' || body.stage === 'FINALIZED') {
+            try {
+              const now = new Date().toISOString()
+              const effectiveDate = (data as any).closeDate || now
+              const amount = Number((data as any).amount || 0)
+              // On ne crée pas de vente si aucun montant (évite du bruit)
+              if (amount > 0) {
+                const effectiveSalePayload = {
+                  // ID stable: 1 vente effective par opportunité (upsert)
+                  id,
+                  effectiveDate,
+                  label: (data as any).title || null,
+                  amount: amount.toFixed(2),
+                  currency: 'EUR',
+                  status: body.stage === 'FINALIZED' ? 'PAID' : 'CONFIRMED',
+                  source: 'OPPORTUNITY',
+                  opportunityId: id,
+                  companyId: (data as any).companyId || null,
+                  externalRef: null,
+                  createdById: userId || null,
+                  createdAt: now,
+                  updatedAt: now
+                }
+
+                // Upsert via contrainte unique (opportunityId)
+                const { error: upsertError } = await supabase
+                  .from('EffectiveSale')
+                  .upsert(effectiveSalePayload, { onConflict: 'opportunityId' })
+                if (upsertError) {
+                  console.error('[EffectiveSale] Erreur upsert depuis opportunité:', upsertError)
+                }
+              }
+            } catch (e) {
+              // Ne pas bloquer la mise à jour de l'opportunité
+              console.error('[EffectiveSale] Erreur matérialisation vente effective:', e)
+            }
+          }
           
           triggerWebhooks('opportunity.stage_changed', {
             opportunity: data,
@@ -2619,6 +2658,75 @@ serve(async (req) => {
       if (error) throw error
 
       return new Response(null, { status: 204, headers: corsHeaders })
+    }
+
+    // ===== EFFECTIVE SALES ROUTES =====
+    if (path === 'effective-sales' && method === 'GET') {
+      const opportunityId = url.searchParams.get('opportunityId')
+      const companyId = url.searchParams.get('companyId')
+      const startDate = url.searchParams.get('startDate')
+      const endDate = url.searchParams.get('endDate')
+      const source = url.searchParams.get('source') // OPPORTUNITY | OFF_PIPE
+      const status = url.searchParams.get('status') // CONFIRMED | INVOICED | PAID
+      const limit = parseInt(url.searchParams.get('limit') ?? '200')
+
+      let query = supabase
+        .from('EffectiveSale')
+        .select('*, opportunity:Opportunity(id, title), company:Company(id, name)')
+        .order('effectiveDate', { ascending: false })
+        .limit(limit)
+
+      if (opportunityId) query = query.eq('opportunityId', opportunityId)
+      if (companyId) query = query.eq('companyId', companyId)
+      if (source) query = query.eq('source', source)
+      if (status) query = query.eq('status', status)
+      if (startDate) query = query.gte('effectiveDate', startDate)
+      if (endDate) query = query.lte('effectiveDate', endDate)
+
+      const { data, error } = await query
+      if (error) throw error
+
+      return new Response(JSON.stringify(data || []), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+    }
+
+    if (path === 'effective-sales' && method === 'POST') {
+      const body = await req.json()
+      const now = new Date().toISOString()
+      const id = crypto.randomUUID()
+
+      const amountNumber = Number(body.amount || 0)
+      if (!Number.isFinite(amountNumber) || amountNumber <= 0) {
+        return new Response(
+          JSON.stringify({ message: 'amount must be a number > 0' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      const payload = {
+        id,
+        effectiveDate: body.effectiveDate ?? now,
+        label: body.label ?? null,
+        amount: amountNumber.toFixed(2),
+        currency: body.currency ?? 'EUR',
+        status: body.status ?? 'CONFIRMED',
+        source: body.source ?? 'OFF_PIPE',
+        opportunityId: body.opportunityId ?? null,
+        companyId: body.companyId ?? null,
+        externalRef: body.externalRef ?? null,
+        createdById: userId || null,
+        createdAt: now,
+        updatedAt: now
+      }
+
+      const { data, error } = await supabase
+        .from('EffectiveSale')
+        .insert(payload)
+        .select('*, opportunity:Opportunity(id, title), company:Company(id, name)')
+        .single()
+
+      if (error) throw error
+
+      return new Response(JSON.stringify(data), { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
 
     // ===== PAYMENTS ROUTES =====

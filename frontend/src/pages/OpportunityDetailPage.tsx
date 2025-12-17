@@ -187,7 +187,7 @@ export function OpportunityDetailPage() {
         expectedPaymentDate: data.expectedPaymentDate,
         taxRate: data.taxRate ? Number(data.taxRate) : undefined,
         contactId: data.contact?.id,
-        companyId: data.company?.id
+        companyId: data.company?.id ?? data.companyId
       });
       setTaxRate(data.taxRate ? Number(data.taxRate) : undefined);
       setDriveFolderId(data.googleDriveFolderId);

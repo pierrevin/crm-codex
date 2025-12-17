@@ -336,6 +336,37 @@ model Payment {
   updatedAt     DateTime    @updatedAt
 }
 
+enum EffectiveSaleSource {
+  OPPORTUNITY
+  OFF_PIPE
+}
+
+enum EffectiveSaleStatus {
+  CONFIRMED
+  INVOICED
+  PAID
+}
+
+model EffectiveSale {
+  id            String             @id @default(cuid())
+  effectiveDate DateTime
+  label         String?
+  amount        Decimal            @db.Decimal(18, 2)
+  currency      String             @default("EUR")
+  status        EffectiveSaleStatus @default(CONFIRMED)
+  source        EffectiveSaleSource
+  externalRef   String?
+  // Relations
+  opportunity   Opportunity?       @relation(fields: [opportunityId], references: [id])
+  opportunityId String?            @unique
+  company       Company?           @relation(fields: [companyId], references: [id])
+  companyId     String?
+  createdBy     User?              @relation(fields: [createdById], references: [id])
+  createdById   String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+}
+
 model TreasuryBalance {
   id        String   @id @default(cuid())
   date      DateTime @unique // Date du solde (unique)

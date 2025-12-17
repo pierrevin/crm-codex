@@ -1,7 +1,8 @@
 import axios from 'axios';
 
 // Construire l'URL de base pour l'API Supabase Edge Function
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
+const SUPABASE_URL_FALLBACK = 'https://oecbrtyeqatieeybjvhj.supabase.co';
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || SUPABASE_URL_FALLBACK;
 const API_BASE_URL = import.meta.env.VITE_API_URL || (SUPABASE_URL ? `${SUPABASE_URL}/functions/v1` : 'http://localhost:3000');
 
 const api = axios.create({
@@ -138,17 +139,15 @@ api.interceptors.response.use(
           localStorage.removeItem('accessToken');
           localStorage.removeItem('refreshToken');
           isRefreshing = false;
-          // Ne pas rediriger automatiquement, laisser l'utilisateur continuer
-          // window.location.href = '/';
+          window.location.href = '/';
           return Promise.reject(refreshError);
         }
       } else {
-        // Pas de refresh token : ne pas rediriger automatiquement
+        // Pas de refresh token : déconnexion
         isRefreshing = false;
-        // Ne pas supprimer le token, permettre à l'utilisateur de continuer
-        // localStorage.removeItem('accessToken');
-        // localStorage.removeItem('refreshToken');
-        // window.location.href = '/';
+        localStorage.removeItem('accessToken');
+        localStorage.removeItem('refreshToken');
+        window.location.href = '/';
       }
     }
     return Promise.reject(error);
