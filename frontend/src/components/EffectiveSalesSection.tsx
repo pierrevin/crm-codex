@@ -4,7 +4,6 @@ import { Button } from './ui/Button';
 import { Badge } from './ui/Badge';
 import { EffectiveSale, EffectiveSaleSource, EffectiveSaleStatus, effectiveSalesService } from '../services/effectiveSalesService';
 
-type PeriodPreset = '30d' | '90d' | 'ytd';
 type Scope = 'all' | 'off_pipe';
 
 const EFFECTIVE_SALES_COLLAPSE_KEY = 'effectiveSales.section.collapsed.v1';
@@ -18,10 +17,6 @@ function formatCurrency(value: number, currency = 'EUR') {
   }).format(value);
 }
 
-function toDateInputValue(d: Date) {
-  return d.toISOString().slice(0, 10);
-}
-
 function startOfYear(d: Date) {
   return new Date(d.getFullYear(), 0, 1);
 }
@@ -30,7 +25,7 @@ function sumAmount(items: EffectiveSale[]) {
   return items.reduce((sum, s) => sum + (Number(s.amount) || 0), 0);
 }
 
-export function EffectiveSalesSection(props: { companyId?: string | null; opportunityId?: string | null }) {
+export function EffectiveSalesSection(props: { companyId?: string | null }) {
   const { companyId } = props;
 
   const [loading, setLoading] = useState(false);
@@ -45,17 +40,14 @@ export function EffectiveSalesSection(props: { companyId?: string | null; opport
     }
   });
 
-  const [period, setPeriod] = useState<PeriodPreset>('ytd');
   const [scope, setScope] = useState<Scope>('all');
   const [status, setStatus] = useState<EffectiveSaleStatus | ''>('');
-  const [startDate, setStartDate] = useState<string>(() => {
-    // Par défaut: année civile en cours (YTD)
-    return toDateInputValue(startOfYear(new Date()));
-  });
-  const [endDate, setEndDate] = useState<string>(() => toDateInputValue(new Date()));
+  // Pour l'instant: pas de filtres date exposés. On garde un calcul clair sur l'année civile en cours.
+  const startDate = startOfYear(new Date()).toISOString().slice(0, 10);
+  const endDate = new Date().toISOString().slice(0, 10);
 
   const [showCreate, setShowCreate] = useState(false);
-  const [createDate, setCreateDate] = useState<string>(() => toDateInputValue(new Date()));
+  const [createDate, setCreateDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
   const [createAmount, setCreateAmount] = useState<string>('');
   const [createLabel, setCreateLabel] = useState<string>('');
   const [createStatus, setCreateStatus] = useState<EffectiveSaleStatus>('CONFIRMED');
@@ -67,27 +59,6 @@ export function EffectiveSalesSection(props: { companyId?: string | null; opport
       // no-op
     }
   }, [isCollapsed]);
-
-  // Sync dates when preset changes
-  useEffect(() => {
-    const now = new Date();
-    if (period === '30d') {
-      const d = new Date(now);
-      d.setDate(d.getDate() - 30);
-      setStartDate(toDateInputValue(d));
-      setEndDate(toDateInputValue(now));
-    }
-    if (period === '90d') {
-      const d = new Date(now);
-      d.setDate(d.getDate() - 90);
-      setStartDate(toDateInputValue(d));
-      setEndDate(toDateInputValue(now));
-    }
-    if (period === 'ytd') {
-      setStartDate(toDateInputValue(startOfYear(now)));
-      setEndDate(toDateInputValue(now));
-    }
-  }, [period]);
 
   const refresh = async () => {
     setLoading(true);
@@ -153,7 +124,7 @@ export function EffectiveSalesSection(props: { companyId?: string | null; opport
       setCreateAmount('');
       setCreateLabel('');
       setCreateStatus('CONFIRMED');
-      setCreateDate(toDateInputValue(new Date()));
+      setCreateDate(new Date().toISOString().slice(0, 10));
       await refresh();
     } catch (e: any) {
       setError(e?.message || 'Erreur création vente');
@@ -205,7 +176,7 @@ export function EffectiveSalesSection(props: { companyId?: string | null; opport
       {/* KPIs */}
       <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-          <p className="text-xs font-medium text-slate-600 mb-1">Total (année en cours)</p>
+          <p className="text-xs font-medium text-slate-600 mb-1">Total (période)</p>
           <p className="text-lg font-bold text-slate-900">{formatCurrency(totals.total)}</p>
         </div>
         <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3">
@@ -216,43 +187,8 @@ export function EffectiveSalesSection(props: { companyId?: string | null; opport
 
       {!isCollapsed && (
         <>
-          {/* Filtres */}
-          <div className="mt-4 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-            <div className="flex flex-col sm:flex-row gap-3">
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Période</label>
-                <select
-                  value={period}
-                  onChange={(e) => setPeriod(e.target.value as PeriodPreset)}
-                  className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm"
-                >
-                  <option value="30d">30 jours</option>
-                  <option value="90d">90 jours</option>
-                  <option value="ytd">YTD</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Début</label>
-                <input
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Fin</label>
-                <input
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm"
-                />
-              </div>
-            </div>
-
-            <div className="flex flex-col sm:flex-row gap-3">
+          {/* Filtres locaux (hors période, gérée au niveau page) */}
+          <div className="mt-4 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-end">
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">Périmètre</label>
                 <select
@@ -277,7 +213,6 @@ export function EffectiveSalesSection(props: { companyId?: string | null; opport
                   <option value="PAID">Encaissé</option>
                 </select>
               </div>
-            </div>
           </div>
 
           {/* Tableau */}

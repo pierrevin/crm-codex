@@ -235,7 +235,7 @@ export function OpportunitiesPage() {
   };
 
   const opportunitiesByStage = Object.keys(STAGES).reduce((acc, stage) => {
-    acc[stage as keyof typeof STAGES] = opportunities.filter(o => o.stage === stage);
+    acc[stage as keyof typeof STAGES] = opportunities.filter((o: any) => o.stage === stage);
     return acc;
   }, {} as Record<string, Opportunity[]>);
 
