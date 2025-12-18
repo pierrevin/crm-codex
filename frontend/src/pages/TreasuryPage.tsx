@@ -43,6 +43,16 @@ const CustomTooltip = ({ active, payload, label }: TooltipProps<number, string>)
   const data = payload[0]?.payload;
   if (!data) return null;
 
+  // Sur la vue journalière, le `label` peut être ambigu/incomplet selon la configuration de l'axe.
+  // On préfère afficher une date fiable quand elle est disponible dans le payload.
+  const headerLabel = (() => {
+    const d = data?.date ? new Date(data.date) : null;
+    if (d && !isNaN(d.getTime())) {
+      return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
+    }
+    return label;
+  })();
+
   const encaissementsPrevisionnels = data.encaissementsPrevisionnelOpportunites || 0;
   const encaissementsPrevisionnelDebours = data.encaissementsPrevisionnelDebours || 0;
   const encaissementsReels = data.encaissementsReels || 0;
@@ -67,7 +77,7 @@ const CustomTooltip = ({ active, payload, label }: TooltipProps<number, string>)
 
   return (
     <div className="bg-white border border-slate-200 rounded-lg shadow-lg p-4">
-      <p className="font-semibold text-slate-900 mb-3">{label}</p>
+      <p className="font-semibold text-slate-900 mb-3">{headerLabel}</p>
       
       <div className="space-y-3">
         <div>
@@ -447,7 +457,8 @@ export function TreasuryPage() {
     while (current <= end) {
       const dayKey = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(current.getDate()).padStart(2, '0')}`;
       dailyData[dayKey] = {
-        day: current.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }),
+        // Inclure l'année pour éviter toute ambiguïté sur les périodes longues (ex: 31 déc. 2025 vs 31 déc. 2026)
+        day: current.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' }),
         dayKey: dayKey,
         date: new Date(current),
         solde: 0,
