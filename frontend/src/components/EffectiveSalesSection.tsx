@@ -45,14 +45,12 @@ export function EffectiveSalesSection(props: { companyId?: string | null; opport
     }
   });
 
-  const [period, setPeriod] = useState<PeriodPreset>('90d');
+  const [period, setPeriod] = useState<PeriodPreset>('ytd');
   const [scope, setScope] = useState<Scope>('all');
   const [status, setStatus] = useState<EffectiveSaleStatus | ''>('');
   const [startDate, setStartDate] = useState<string>(() => {
-    const now = new Date();
-    const d = new Date(now);
-    d.setDate(d.getDate() - 90);
-    return toDateInputValue(d);
+    // Par défaut: année civile en cours (YTD)
+    return toDateInputValue(startOfYear(new Date()));
   });
   const [endDate, setEndDate] = useState<string>(() => toDateInputValue(new Date()));
 
@@ -119,11 +117,9 @@ export function EffectiveSalesSection(props: { companyId?: string | null; opport
   }, [companyId, startDate, endDate, scope, status]);
 
   const totals = useMemo(() => {
-    const fromOpp = sales.filter(s => s.source === 'OPPORTUNITY');
     const offPipe = sales.filter(s => s.source === 'OFF_PIPE');
     return {
       total: sumAmount(sales),
-      fromOpp: sumAmount(fromOpp),
       offPipe: sumAmount(offPipe)
     };
   }, [sales]);
@@ -207,14 +203,10 @@ export function EffectiveSalesSection(props: { companyId?: string | null; opport
       </div>
 
       {/* KPIs */}
-      <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-          <p className="text-xs font-medium text-slate-600 mb-1">Total (période)</p>
+          <p className="text-xs font-medium text-slate-600 mb-1">Total (année en cours)</p>
           <p className="text-lg font-bold text-slate-900">{formatCurrency(totals.total)}</p>
-        </div>
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
-          <p className="text-xs font-medium text-emerald-700 mb-1">Dont issues d’opportunités</p>
-          <p className="text-lg font-bold text-emerald-900">{formatCurrency(totals.fromOpp)}</p>
         </div>
         <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3">
           <p className="text-xs font-medium text-indigo-700 mb-1">Dont hors opportunité</p>
