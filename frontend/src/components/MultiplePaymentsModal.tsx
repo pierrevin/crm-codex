@@ -107,7 +107,8 @@ export function MultiplePaymentsModal({
         const dto: CreatePaymentDto = {
           opportunityId,
           amount: parseFloat(row.amount),
-          paymentDate: row.paymentDate ? new Date(row.paymentDate + 'T00:00:00').toISOString() : undefined,
+          // IMPORTANT: on envoie une date en UTC minuit pour éviter les décalages timezone (ex: 23:00 en base)
+          paymentDate: row.paymentDate ? `${row.paymentDate}T00:00:00.000Z` : undefined,
           taxRate: row.taxRate ? parseFloat(row.taxRate) / 100 : undefined,
           notes: row.notes || undefined
         };

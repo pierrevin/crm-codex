@@ -40,7 +40,8 @@ export function BalanceEditor({
     try {
       const result = await treasuryService.setBalance({
         balance: parseFloat(balance),
-        date: date ? new Date(date + 'T00:00:00').toISOString() : undefined,
+        // IMPORTANT: on envoie une date en UTC minuit pour éviter les décalages timezone (ex: 23:00 en base)
+        date: date ? `${date}T00:00:00.000Z` : undefined,
         notes: notes || undefined
       });
       // Le solde sera rechargé par onSuccess, mais on peut déjà confirmer

@@ -71,7 +71,8 @@ export function PaymentModal({
         // Mode édition
         const dto: UpdatePaymentDto = {
           amount: parseFloat(amount),
-          paymentDate: paymentDate ? new Date(paymentDate + 'T00:00:00').toISOString() : undefined,
+          // IMPORTANT: on envoie une date en UTC minuit pour éviter les décalages timezone (ex: 23:00 en base)
+          paymentDate: paymentDate ? `${paymentDate}T00:00:00.000Z` : undefined,
           taxRate: taxRate ? parseFloat(taxRate) / 100 : undefined,
           notes: notes || undefined
         };
@@ -82,7 +83,8 @@ export function PaymentModal({
           opportunityId: opportunityId || undefined,
           deboursNoteId: deboursNoteId || undefined,
           amount: parseFloat(amount),
-          paymentDate: paymentDate ? new Date(paymentDate + 'T00:00:00').toISOString() : undefined,
+          // IMPORTANT: on envoie une date en UTC minuit pour éviter les décalages timezone (ex: 23:00 en base)
+          paymentDate: paymentDate ? `${paymentDate}T00:00:00.000Z` : undefined,
           taxRate: taxRate ? parseFloat(taxRate) / 100 : undefined,
           notes: notes || undefined
         };

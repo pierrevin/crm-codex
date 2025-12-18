@@ -22,6 +22,18 @@ const formatCurrency = (value: number) => {
   }).format(value);
 };
 
+const toDateKey = (d: Date) => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const isBeforeDay = (a: Date, b: Date) => {
+  // Compare uniquement sur le jour (pas l'heure), pour éviter les effets de timezone.
+  return toDateKey(a) < toDateKey(b);
+};
+
 // Composant Tooltip personnalisé pour afficher les détails
 const CustomTooltip = ({ active, payload, label }: TooltipProps<number, string>) => {
   if (!active || !payload || !payload.length) {
@@ -41,6 +53,17 @@ const CustomTooltip = ({ active, payload, label }: TooltipProps<number, string>)
   const totalDecaissements = decaissementsDepenses + taxes;
 
   const solde = data.solde || 0;
+
+  const anchor = data.anchorInfo as
+    | {
+        label: string;
+        encaissements: number;
+        encaissementsVentes: number;
+        encaissementsDebours: number;
+        decaissements: number;
+        taxes: number;
+      }
+    | undefined;
 
   return (
     <div className="bg-white border border-slate-200 rounded-lg shadow-lg p-4">
@@ -94,6 +117,32 @@ const CustomTooltip = ({ active, payload, label }: TooltipProps<number, string>)
           </div>
         </div>
 
+        {anchor && (
+          <div className="pt-2 border-t border-slate-200">
+            <p className="font-medium text-slate-900 mb-1">
+              Avant solde manuel ({anchor.label})
+            </p>
+            <div className="pl-3 text-sm space-y-0.5">
+              <p className="text-slate-600">
+                &nbsp;&nbsp;Encaissements : {formatCurrency(anchor.encaissements)}
+              </p>
+              {(anchor.encaissementsVentes > 0 || anchor.encaissementsDebours > 0) && (
+                <p className="text-slate-500">
+                  &nbsp;&nbsp;&nbsp;&nbsp;Ventes : {formatCurrency(anchor.encaissementsVentes)} · Débours : {formatCurrency(anchor.encaissementsDebours)}
+                </p>
+              )}
+              <p className="text-slate-600">
+                &nbsp;&nbsp;Décaissements : {formatCurrency(anchor.decaissements)}
+              </p>
+              {anchor.taxes > 0 && (
+                <p className="text-slate-600">
+                  &nbsp;&nbsp;Taxes : {formatCurrency(anchor.taxes)}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
         <div className="pt-2 border-t border-slate-200">
           <p className="font-semibold text-slate-900">
             Solde : {formatCurrency(solde)}
@@ -120,7 +169,13 @@ export function TreasuryPage() {
   const [customStartDate, setCustomStartDate] = useState<string>('');
   const [customEndDate, setCustomEndDate] = useState<string>('');
   const [viewGranularity, setViewGranularity] = useState<'month' | 'day'>('month');
-  const [currentBalance, setCurrentBalance] = useState<number>(0);
+  // Solde "à jour J" (référence): soit manuel, soit calculé par l'API
+  const [balanceToday, setBalanceToday] = useState<number>(0);
+  const [balanceTodayDate, setBalanceTodayDate] = useState<string | null>(null);
+  // Solde au début de la période affichée (point de départ des projections/graph/tableau)
+  const [periodInitialBalance, setPeriodInitialBalance] = useState<number>(0);
+  // Date d'ancrage de projection (par défaut: dernier solde manuel si disponible)
+  const [projectionAnchorDate, setProjectionAnchorDate] = useState<Date | null>(null);
   const [balanceIsManual, setBalanceIsManual] = useState<boolean>(false);
   const [forecast, setForecast] = useState<TreasuryForecast | null>(null);
   const [payments, setPayments] = useState<Payment[]>([]);
@@ -130,6 +185,11 @@ export function TreasuryPage() {
   const [showBalanceEditor, setShowBalanceEditor] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedOpportunity, setSelectedOpportunity] = useState<Opportunity | null>(null);
+  // Filtre des étapes du tunnel pour le prévisionnel (opportunités)
+  // Vue par défaut: Gagné + Finalisé (Proposition optionnelle)
+  const [selectedStages, setSelectedStages] = useState<Set<string>>(
+    () => new Set(['CLOSED_WON', 'FINALIZED'])
+  );
 
   const { startDate, endDate } = useMemo(() => {
     // Si période personnalisée, vérifier que les deux dates sont valides
@@ -250,16 +310,41 @@ export function TreasuryPage() {
       // Combiner les paiements de la période et avant la période
       const allPayments = [...(prevMonthPaymentsRes || []), ...(paymentsRes || [])];
       
-      // Calculer le solde initial : toujours partir du solde de référence actuel et remonter jusqu'à startDate
+      // Solde de référence "à jour J": toujours celui renvoyé par l'API (manuel si défini récemment)
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      const balanceToday = balanceRes?.balance || 0;
+      const computedBalanceToday = balanceRes?.balance || 0;
       
-      // Le solde initial pour la période est le solde qu'on aurait eu à startDate
-      // On calcule ça en "remontant le temps" depuis aujourd'hui (le solde de référence)
-      let calculatedInitialBalance = balanceToday;
+      // Mode par défaut: projeter depuis le dernier solde manuel disponible (ancre), et ignorer l'historique avant.
+      // Si aucun solde manuel n'existe, on retombe sur l'ancien comportement (reconstruction au startDate).
+      // Ancre de projection:
+      // - si l'API renvoie `lastManual`, on l'utilise
+      // - sinon, si `isManual === true`, alors `balanceRes.balance` + `balanceRes.date` sont déjà le dernier manuel (récent)
+      const lastManualFromApi = (balanceRes as any)?.lastManual as { balance: number; date: string } | null | undefined;
+      const lastManual =
+        lastManualFromApi ??
+        (balanceRes?.isManual && balanceRes?.date
+          ? { balance: computedBalanceToday, date: balanceRes.date }
+          : null);
+
+      const anchor = lastManual?.date ? new Date(lastManual.date) : null;
+      const hasAnchor = anchor && !isNaN(anchor.getTime());
+
+      // Date effective de début de projection = max(startDate, anchorDate) si ancre présente
+      const effectiveStart = hasAnchor
+        ? new Date(Math.max(startDate.getTime(), (anchor as Date).getTime()))
+        : new Date(startDate);
+      effectiveStart.setHours(0, 0, 0, 0);
+
+      // Solde initial de projection:
+      // - si on a une ancre manuelle et qu'elle est >= startDate, le solde initial = solde manuel (ancre)
+      // - sinon on reconstruit au startDate depuis le solde à jour J (ancien mode)
+      let calculatedPeriodInitialBalance = computedBalanceToday;
+      if (hasAnchor && (anchor as Date).getTime() >= startDate.getTime()) {
+        calculatedPeriodInitialBalance = Number(lastManual!.balance) || 0;
+      }
       
-      if (startDate < today) {
+      if (!(hasAnchor && (anchor as Date).getTime() >= startDate.getTime()) && startDate < today) {
         // Date de début passée : il faut soustraire les mouvements entre startDate et aujourd'hui
         // pour retrouver le solde qu'on avait à startDate
         const pastPaymentsRes = await paymentService.getAll({
@@ -273,18 +358,27 @@ export function TreasuryPage() {
         }).then(expenses => expenses.filter((e: any) => e.status === 'VERIFIED')).catch(() => []);
         
         // Pour remonter dans le temps : on soustrait les encaissements (qui augmentent le solde)
-        // et on ajoute les décaissements (qui diminuent le solde)
+        // et on ajoute les décaissements (qui diminuent le solde), taxes incluses.
+        // Taxes: uniquement sur les ventes (opportunités). Les notes de débours ont taxAmount=0 côté backend.
         const pastEncaissements = pastPaymentsRes.reduce((sum: number, p: Payment) => sum + parseFloat(p.amount.toString()), 0);
+        const pastTaxes = pastPaymentsRes.reduce((sum: number, p: Payment) => sum + parseFloat((p.taxAmount ?? 0).toString()), 0);
         const pastDecaissements = pastExpensesRes.reduce((sum: number, e: any) => sum + parseFloat((e.amountTTC || e.amountHT || 0).toString()), 0);
         
-        // Remonter dans le temps : solde à startDate = solde aujourd'hui - encaissements depuis startDate + décaissements depuis startDate
-        calculatedInitialBalance = balanceToday - pastEncaissements + pastDecaissements;
-      } else if (startDate >= today) {
+        // Remonter dans le temps :
+        // solde à startDate = solde aujourd'hui
+        //   - encaissements depuis startDate
+        //   + décaissements depuis startDate
+        //   + taxes depuis startDate (car taxes diminuent le solde "aujourd'hui" dans l'API)
+        calculatedPeriodInitialBalance = computedBalanceToday - pastEncaissements + pastDecaissements + pastTaxes;
+      } else if (!(hasAnchor && (anchor as Date).getTime() >= startDate.getTime()) && startDate >= today) {
         // Date de début aujourd'hui ou future : le solde initial est le solde d'aujourd'hui
-        calculatedInitialBalance = balanceToday;
+        calculatedPeriodInitialBalance = computedBalanceToday;
       }
       
-      setCurrentBalance(calculatedInitialBalance);
+      setBalanceToday(computedBalanceToday);
+      setBalanceTodayDate(balanceRes?.date ?? null);
+      setPeriodInitialBalance(calculatedPeriodInitialBalance);
+      setProjectionAnchorDate(hasAnchor ? (anchor as Date) : null);
       setBalanceIsManual(balanceRes?.isManual || false);
       setForecast(forecastRes || { opportunities: [], payments: [], expenses: [], taxPayments: {} });
       setPayments(allPayments);
@@ -293,7 +387,8 @@ export function TreasuryPage() {
       
       console.log('TreasuryPage - Données chargées:', {
         balanceToday: balanceRes.balance,
-        calculatedInitialBalance,
+        calculatedPeriodInitialBalance,
+        projectionAnchorDate: hasAnchor ? (anchor as Date).toISOString().split('T')[0] : null,
         startDate: startDate.toISOString().split('T')[0],
         endDate: endDate.toISOString().split('T')[0],
         period,
@@ -340,7 +435,11 @@ export function TreasuryPage() {
     if (!forecast || viewGranularity !== 'day') return [];
 
     const dailyData: Record<string, any> = {};
-    const current = new Date(startDate);
+    const startForProjectionRaw = projectionAnchorDate && projectionAnchorDate > startDate ? projectionAnchorDate : startDate;
+    const startForProjection = new Date(startForProjectionRaw);
+    startForProjection.setHours(0, 0, 0, 0);
+
+    const current = new Date(startForProjection);
     current.setHours(0, 0, 0, 0);
     const end = new Date(endDate);
     end.setHours(23, 59, 59, 999);
@@ -370,9 +469,33 @@ export function TreasuryPage() {
       }
     });
 
-    // Opportunités prévisionnelles
+    // Pour les opportunités finalisées, utiliser les dépenses réelles (finalizedExpenses)
+    // et éviter de les compter deux fois avec `expenses`.
+    const finalizedExpenseIds = new Set(
+      (forecast?.finalizedExpenses || [])
+        .filter((e: any) => e.opportunityId && e.invoiceDate)
+        .map((e: any) => `${e.opportunityId!}-${e.invoiceDate!}`)
+    );
+
+    // Injecter d'abord les dépenses finalisées (réelles)
+    (forecast?.finalizedExpenses || []).forEach((expense: any) => {
+      if (!expense.invoiceDate) return;
+      const expenseDate = new Date(expense.invoiceDate);
+      if (isNaN(expenseDate.getTime())) return;
+      if (isBeforeDay(expenseDate, startForProjection)) return;
+      const dayKey = `${expenseDate.getFullYear()}-${String(expenseDate.getMonth() + 1).padStart(2, '0')}-${String(expenseDate.getDate()).padStart(2, '0')}`;
+      if (dailyData[dayKey]) {
+        const amount = expense.amountTTC || expense.amountHT || 0;
+        dailyData[dayKey].decaissements += amount;
+        dailyData[dayKey].decaissementsDepenses += amount;
+      }
+    });
+
+    // Opportunités prévisionnelles (filtrées par étapes)
     (forecast?.opportunities || []).forEach(opp => {
-      if (!opp.expectedPaymentDate || !opp.amount || opp.stage === 'FINALIZED') return;
+      if (!opp.expectedPaymentDate || !opp.amount) return;
+      if (opp.stage && !selectedStages.has(opp.stage)) return;
+      if (opp.stage === 'FINALIZED') return;
       if (paymentsByOpportunity.has(opp.id)) return;
 
       try {
@@ -383,6 +506,16 @@ export function TreasuryPage() {
           const montant = Number(opp.amount) || 0;
           dailyData[dayKey].encaissementsPrevisionnels += montant;
           dailyData[dayKey].encaissementsPrevisionnelOpportunites += montant;
+
+          // Taxes sur encaissements prévisionnels (ventes uniquement), imputées au 30 du mois suivant
+          const taxRate = opp.taxRate ?? 0.27;
+          const taxAmount = montant * taxRate;
+          const taxDate = new Date(paymentDate.getFullYear(), paymentDate.getMonth() + 1, 30);
+          taxDate.setHours(0, 0, 0, 0);
+          const taxDayKey = `${taxDate.getFullYear()}-${String(taxDate.getMonth() + 1).padStart(2, '0')}-${String(taxDate.getDate()).padStart(2, '0')}`;
+          if (dailyData[taxDayKey]) {
+            dailyData[taxDayKey].taxes += taxAmount;
+          }
         }
       } catch (error) {
         console.error('Erreur traitement opportunité prévisionnelle jour:', opp.id, error);
@@ -411,7 +544,9 @@ export function TreasuryPage() {
     // Encaissements réels
     (payments || []).forEach(payment => {
       const paymentDate = new Date(payment.paymentDate);
-      paymentDate.setHours(0, 0, 0, 0);
+      if (isNaN(paymentDate.getTime())) return;
+      // Ne compter le cash réel qu'après le début effectif de projection
+      if (isBeforeDay(paymentDate, startForProjection)) return;
       const dayKey = `${paymentDate.getFullYear()}-${String(paymentDate.getMonth() + 1).padStart(2, '0')}-${String(paymentDate.getDate()).padStart(2, '0')}`;
       if (dailyData[dayKey]) {
         dailyData[dayKey].encaissementsReels += payment.amount;
@@ -421,8 +556,13 @@ export function TreasuryPage() {
     // Décaissements (dépenses)
     (expenses || []).forEach(expense => {
       if (!expense.invoiceDate) return;
+      // Ne pas compter deux fois les dépenses des opportunités finalisées
+      if (expense.opportunityId && finalizedExpenseIds.has(`${expense.opportunityId}-${expense.invoiceDate}`)) {
+        return;
+      }
       const expenseDate = new Date(expense.invoiceDate);
-      expenseDate.setHours(0, 0, 0, 0);
+      if (isNaN(expenseDate.getTime())) return;
+      if (isBeforeDay(expenseDate, startForProjection)) return;
       const dayKey = `${expenseDate.getFullYear()}-${String(expenseDate.getMonth() + 1).padStart(2, '0')}-${String(expenseDate.getDate()).padStart(2, '0')}`;
       if (dailyData[dayKey]) {
         const amount = expense.amountTTC || expense.amountHT || 0;
@@ -435,7 +575,9 @@ export function TreasuryPage() {
     (payments || []).forEach(payment => {
       const paymentDate = new Date(payment.paymentDate);
       const taxDate = new Date(paymentDate.getFullYear(), paymentDate.getMonth() + 1, 30);
-      taxDate.setHours(0, 0, 0, 0);
+      if (isNaN(taxDate.getTime())) return;
+      // IMPORTANT: même si le paiement est avant l'ancre, la taxe peut tomber après l'ancre (cash out futur)
+      if (isBeforeDay(taxDate, startForProjection)) return;
       const dayKey = `${taxDate.getFullYear()}-${String(taxDate.getMonth() + 1).padStart(2, '0')}-${String(taxDate.getDate()).padStart(2, '0')}`;
       if (dailyData[dayKey]) {
         dailyData[dayKey].taxes += payment.taxAmount;
@@ -449,15 +591,15 @@ export function TreasuryPage() {
       const totalDecaissements = day.decaissements + day.taxes;
 
       if (index === 0) {
-        day.soldeInitial = currentBalance;
-        day.solde = currentBalance + totalEncaissements - totalDecaissements;
+        day.soldeInitial = periodInitialBalance;
+        day.solde = periodInitialBalance + totalEncaissements - totalDecaissements;
       } else {
         day.soldeInitial = array[index - 1].solde;
         day.solde = array[index - 1].solde + totalEncaissements - totalDecaissements;
       }
       return day;
     });
-  }, [forecast, payments, expenses, currentBalance, startDate, endDate, viewGranularity]);
+  }, [forecast, payments, expenses, periodInitialBalance, startDate, endDate, viewGranularity, projectionAnchorDate, selectedStages]);
 
   // Préparer les données pour le graphique (mensuel)
   const chartData = useMemo(() => {
@@ -484,7 +626,11 @@ export function TreasuryPage() {
     // Il sert de point de départ pour les projections mensuelles
 
     // Générer tous les mois dans la période
-    const current = new Date(startDate);
+    const startForProjectionRaw = projectionAnchorDate && projectionAnchorDate > startDate ? projectionAnchorDate : startDate;
+    const startForProjection = new Date(startForProjectionRaw);
+    startForProjection.setHours(0, 0, 0, 0);
+
+    const current = new Date(startForProjection);
     current.setDate(1);
     current.setHours(0, 0, 0, 0);
     const end = new Date(endDate);
@@ -502,7 +648,16 @@ export function TreasuryPage() {
         encaissementsReels: 0,
         decaissements: 0,
         decaissementsDepenses: 0, // Détail pour tooltip
-        taxes: 0
+        taxes: 0,
+        // Info optionnelle (tooltip) : mouvements AVANT l'ancre dans ce mois
+        anchorInfo: null as null | {
+          label: string;
+          encaissements: number;
+          encaissementsVentes: number;
+          encaissementsDebours: number;
+          decaissements: number;
+          taxes: number;
+        }
       };
       current.setMonth(current.getMonth() + 1);
     }
@@ -553,6 +708,8 @@ export function TreasuryPage() {
           console.warn('Date invalide pour note de débours:', debours.id, debours.expectedPaymentDate);
           return;
         }
+        // Ne pas compter le prévisionnel avant l'ancre de projection
+        if (paymentDate < startForProjection) return;
         
         const monthKey = `${paymentDate.getFullYear()}-${String(paymentDate.getMonth() + 1).padStart(2, '0')}`;
         if (monthlyData[monthKey]) {
@@ -566,9 +723,10 @@ export function TreasuryPage() {
       }
     });
 
-    // Ajouter les encaissements prévisionnels (opportunités sans paiement réel et non finalisées)
+    // Ajouter les encaissements prévisionnels (opportunités sans paiement réel et non finalisées, filtrées par étapes)
     (forecast?.opportunities || []).forEach(opp => {
       if (!opp.expectedPaymentDate || !opp.amount) return;
+      if (opp.stage && !selectedStages.has(opp.stage)) return;
       
       // Ignorer les opportunités finalisées (elles utilisent les données réelles)
       if (opp.stage === 'FINALIZED') {
@@ -588,6 +746,7 @@ export function TreasuryPage() {
           console.warn('Date invalide pour opportunité:', opp.id, opp.expectedPaymentDate);
           return;
         }
+        if (paymentDate < startForProjection) return;
         
         const monthKey = `${paymentDate.getFullYear()}-${String(paymentDate.getMonth() + 1).padStart(2, '0')}`;
         if (monthlyData[monthKey]) {
@@ -613,6 +772,8 @@ export function TreasuryPage() {
     // Ajouter les encaissements réels
     (payments || []).forEach(payment => {
       const paymentDate = new Date(payment.paymentDate);
+      if (isNaN(paymentDate.getTime())) return;
+      if (isBeforeDay(paymentDate, startForProjection)) return;
       const monthKey = `${paymentDate.getFullYear()}-${String(paymentDate.getMonth() + 1).padStart(2, '0')}`;
       if (monthlyData[monthKey]) {
         monthlyData[monthKey].encaissementsReels += payment.amount;
@@ -635,6 +796,8 @@ export function TreasuryPage() {
       }
       
       const expenseDate = new Date(expense.invoiceDate);
+      if (isNaN(expenseDate.getTime())) return;
+      if (isBeforeDay(expenseDate, startForProjection)) return;
       const monthKey = `${expenseDate.getFullYear()}-${String(expenseDate.getMonth() + 1).padStart(2, '0')}`;
       if (monthlyData[monthKey]) {
         const amount = expense.amountTTC || expense.amountHT || 0;
@@ -650,6 +813,7 @@ export function TreasuryPage() {
       // Les taxes sont imputées au 30 du mois suivant le paiement
       const taxMonth = new Date(paymentDate.getFullYear(), paymentDate.getMonth() + 1, 1);
       const monthKey = `${taxMonth.getFullYear()}-${String(taxMonth.getMonth() + 1).padStart(2, '0')}`;
+      // IMPORTANT: même si le paiement est avant l'ancre, la taxe peut tomber après l'ancre (cash out futur)
       // Inclure les taxes même si elles sont en dehors de la période initiale
       // (car elles impactent la période affichée)
       if (monthlyData[monthKey]) {
@@ -657,8 +821,68 @@ export function TreasuryPage() {
       }
     });
 
+    // Tooltip: si l'ancre (solde manuel) est au milieu d'un mois, afficher les mouvements avant ancre pour ce mois
+    if (projectionAnchorDate && !isNaN(projectionAnchorDate.getTime())) {
+      const anchorDay = new Date(projectionAnchorDate);
+      anchorDay.setHours(0, 0, 0, 0);
+      const anchorMonthKey = `${anchorDay.getFullYear()}-${String(anchorDay.getMonth() + 1).padStart(2, '0')}`;
+      if (monthlyData[anchorMonthKey]) {
+        const monthStart = new Date(anchorDay.getFullYear(), anchorDay.getMonth(), 1);
+        monthStart.setHours(0, 0, 0, 0);
+
+        let encAvant = 0;
+        let encAvantVentes = 0;
+        let encAvantDebours = 0;
+        let decAvant = 0;
+        let taxesAvant = 0;
+
+        // Encaissements réels avant ancre (même mois)
+        (payments || []).forEach((p: any) => {
+          const d = new Date(p.paymentDate);
+          if (isNaN(d.getTime())) return;
+          // Dans le mois et avant le jour d'ancre
+          if (d < monthStart) return;
+          if (toDateKey(d) >= toDateKey(anchorDay)) return;
+          const amt = Number(p.amount || 0);
+          encAvant += amt;
+          if (p.deboursNoteId) encAvantDebours += amt;
+          else encAvantVentes += amt;
+        });
+
+        // Décaissements avant ancre (dépenses, même mois)
+        (expenses || []).forEach((e: any) => {
+          if (!e.invoiceDate) return;
+          const d = new Date(e.invoiceDate);
+          if (isNaN(d.getTime())) return;
+          if (d < monthStart) return;
+          if (toDateKey(d) >= toDateKey(anchorDay)) return;
+          decAvant += Number(e.amountTTC || e.amountHT || 0);
+        });
+
+        // Taxes avant ancre : cash-out "taxDate" (mois+1 au 30). Rare, mais on l'affiche si ça tombe avant l'ancre.
+        (payments || []).forEach((p: any) => {
+          const pd = new Date(p.paymentDate);
+          if (isNaN(pd.getTime())) return;
+          const taxDate = new Date(pd.getFullYear(), pd.getMonth() + 1, 30);
+          taxDate.setHours(0, 0, 0, 0);
+          if (taxDate < monthStart) return;
+          if (toDateKey(taxDate) >= toDateKey(anchorDay)) return;
+          taxesAvant += Number(p.taxAmount || 0);
+        });
+
+        monthlyData[anchorMonthKey].anchorInfo = {
+          label: anchorDay.toLocaleDateString('fr-FR'),
+          encaissements: encAvant,
+          encaissementsVentes: encAvantVentes,
+          encaissementsDebours: encAvantDebours,
+          decaissements: decAvant,
+          taxes: taxesAvant
+        };
+      }
+    }
+
     // Calculer les soldes finaux
-    // Le solde initial du premier mois est le solde de référence (currentBalance)
+    // Le solde initial du premier mois est le solde au début de période (periodInitialBalance)
     const sortedMonths = Object.values(monthlyData).sort((a, b) => a.monthKey.localeCompare(b.monthKey));
     
     return sortedMonths.map((month, index, array) => {
@@ -667,9 +891,9 @@ export function TreasuryPage() {
       const totalDecaissements = month.decaissements + month.taxes;
       
       if (index === 0) {
-        // Premier mois : solde initial = solde de référence (currentBalance)
-        month.soldeInitial = currentBalance;
-        month.solde = currentBalance + totalEncaissements - totalDecaissements;
+        // Premier mois : solde initial = solde au début de période
+        month.soldeInitial = periodInitialBalance;
+        month.solde = periodInitialBalance + totalEncaissements - totalDecaissements;
       } else {
         // Mois suivants : solde initial = solde final du mois précédent
         month.soldeInitial = array[index - 1].solde;
@@ -680,7 +904,7 @@ export function TreasuryPage() {
       month.totalDecaissements = totalDecaissements;
       return month;
     });
-  }, [forecast, payments, expenses, currentBalance, startDate, endDate, viewGranularity, buildDailyData]);
+  }, [forecast, payments, expenses, periodInitialBalance, startDate, endDate, viewGranularity, buildDailyData, projectionAnchorDate, selectedStages]);
 
 
   // Opportunités avec paiement ou prévisionnel
@@ -711,6 +935,13 @@ export function TreasuryPage() {
     );
   }
 
+  const projectionCardIsDuplicateOfBalance =
+    balanceIsManual &&
+    projectionAnchorDate &&
+    balanceTodayDate &&
+    toDateKey(new Date(balanceTodayDate)) === toDateKey(projectionAnchorDate) &&
+    Math.abs(balanceToday - periodInitialBalance) < 0.005; // tolérance float
+
   return (
     <div className="p-6 space-y-6">
       {/* En-tête */}
@@ -727,38 +958,70 @@ export function TreasuryPage() {
         </div>
       </div>
 
-      {/* Solde actuel */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-sm font-medium text-slate-500">Solde de référence (à jour J)</h2>
-              {balanceIsManual ? (
-                <span className="px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded">
-                  Manuel
-                </span>
-              ) : (
-                <span className="px-2 py-0.5 text-xs font-medium bg-slate-100 text-slate-600 rounded">
-                  Calculé
-                </span>
-              )}
+      {/* Soldes */}
+      <div className={`grid grid-cols-1 ${projectionCardIsDuplicateOfBalance ? '' : 'md:grid-cols-2'} gap-4`}>
+        {/* Solde à jour J */}
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-medium text-slate-500">Solde à jour J</h2>
+                {balanceIsManual ? (
+                  <span className="px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded">
+                    Manuel
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 text-xs font-medium bg-slate-100 text-slate-600 rounded">
+                    Calculé
+                  </span>
+                )}
+                {projectionCardIsDuplicateOfBalance && (
+                  <span className="px-2 py-0.5 text-xs font-medium bg-slate-100 text-slate-700 rounded">
+                    Ancre de projection
+                  </span>
+                )}
+              </div>
+              <p className={`text-3xl font-bold mt-1 ${balanceToday < 0 ? 'text-red-600' : 'text-green-600'}`}>
+                {formatCurrency(balanceToday)}
+              </p>
+              <p className="text-xs text-slate-400 mt-1">
+                Solde de référence (manuel ou recalculé depuis le dernier manuel).
+              </p>
             </div>
-            <p className={`text-3xl font-bold mt-1 ${currentBalance < 0 ? 'text-red-600' : 'text-green-600'}`}>
-              {formatCurrency(currentBalance)}
-            </p>
-            <p className="text-xs text-slate-400 mt-1">
-              {balanceIsManual 
-                ? 'Ce solde manuel sert de point de départ pour les projections mensuelles'
-                : 'Ce solde calculé sert de point de départ pour les projections mensuelles'}
-            </p>
+            <CurrencyEuroIcon className="h-12 w-12 text-slate-300" />
           </div>
-          <CurrencyEuroIcon className="h-12 w-12 text-slate-300" />
         </div>
+
+        {/* Solde au début de période */}
+        {!projectionCardIsDuplicateOfBalance && (
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+              <h2 className="text-sm font-medium text-slate-500">
+                Solde au début de la projection
+                {projectionAnchorDate ? ` (${projectionAnchorDate.toLocaleDateString('fr-FR')})` : ''}
+              </h2>
+                <span className="px-2 py-0.5 text-xs font-medium bg-slate-100 text-slate-600 rounded">
+                  Projection
+                </span>
+              </div>
+              <p className={`text-3xl font-bold mt-1 ${periodInitialBalance < 0 ? 'text-red-600' : 'text-green-600'}`}>
+                {formatCurrency(periodInitialBalance)}
+              </p>
+              <p className="text-xs text-slate-400 mt-1">
+              Point de départ utilisé pour le graphique et le tableau (dernier solde manuel si disponible).
+              </p>
+            </div>
+            <ChartBarIcon className="h-12 w-12 text-slate-300" />
+          </div>
+        </div>
+        )}
       </div>
 
       {/* Filtres période */}
       <div className="bg-white rounded-lg shadow p-4">
-        <div className="flex items-center space-x-4">
+        <div className="flex flex-wrap items-center gap-4">
           <label className="text-sm font-medium text-slate-700">Période :</label>
           <button
             onClick={() => {
@@ -837,6 +1100,33 @@ export function TreasuryPage() {
               />
             </>
           )}
+
+          {/* Filtre étapes du tunnel (prévisionnel opportunités) */}
+          <div className="ml-auto flex flex-wrap items-center gap-3">
+            <span className="text-sm font-medium text-slate-700">Étapes :</span>
+            {[
+              { id: 'CLOSED_WON', label: 'Gagné' },
+              { id: 'FINALIZED', label: 'Finalisé' },
+              { id: 'PROPOSAL', label: 'Proposition' }
+            ].map((s) => (
+              <label key={s.id} className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                  checked={selectedStages.has(s.id)}
+                  onChange={(e) => {
+                    setSelectedStages((prev) => {
+                      const next = new Set(prev);
+                      if (e.target.checked) next.add(s.id);
+                      else next.delete(s.id);
+                      return next;
+                    });
+                  }}
+                />
+                <span>{s.label}</span>
+              </label>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -869,15 +1159,22 @@ export function TreasuryPage() {
         <ResponsiveContainer width="100%" height={300}>
           <ComposedChart data={chartData}>
             <CartesianGrid strokeDasharray="3 3" />
-            <XAxis 
-              dataKey={viewGranularity === 'day' ? 'day' : 'month'} 
-              angle={viewGranularity === 'day' ? -45 : 0} 
-              textAnchor={viewGranularity === 'day' ? 'end' : 'middle'} 
-              height={viewGranularity === 'day' ? 80 : 30}
-              interval={viewGranularity === 'day' ? 'preserveStartEnd' : 0}
-            />
+            {(() => {
+              const isDay = viewGranularity === 'day';
+              const shouldRotateMonths = !isDay && Array.isArray(chartData) && chartData.length > 9;
+              return (
+                <XAxis
+                  dataKey={isDay ? 'day' : 'month'}
+                  angle={isDay ? -45 : shouldRotateMonths ? -30 : 0}
+                  textAnchor={isDay ? 'end' : shouldRotateMonths ? 'end' : 'middle'}
+                  height={isDay ? 80 : shouldRotateMonths ? 55 : 30}
+                  interval={isDay ? 'preserveStartEnd' : 0}
+                  tickMargin={shouldRotateMonths ? 10 : 4}
+                />
+              );
+            })()}
             <YAxis />
-            <Tooltip content={<CustomTooltip />} />
+            <Tooltip content={<CustomTooltip />} wrapperStyle={{ zIndex: 50 }} />
             <Legend />
             <Bar dataKey="encaissementsPrevisionnels" fill="#10b981" name="Encaissements prévisionnels" />
             <Bar dataKey="encaissementsReels" fill="#059669" name="Encaissements réels" />
@@ -896,7 +1193,7 @@ export function TreasuryPage() {
         <TreasuryMonthlyView
           startDate={startDate}
           endDate={endDate}
-          currentBalance={currentBalance}
+          currentBalance={periodInitialBalance}
           forecast={forecast}
           payments={payments}
           expenses={expenses}
@@ -966,7 +1263,7 @@ export function TreasuryPage() {
       <BalanceEditor
         isOpen={showBalanceEditor}
         onClose={() => setShowBalanceEditor(false)}
-        currentBalance={currentBalance}
+        currentBalance={balanceToday}
         onSuccess={handleBalanceUpdate}
       />
 

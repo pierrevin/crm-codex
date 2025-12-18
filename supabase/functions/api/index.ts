@@ -4193,7 +4193,13 @@ serve(async (req) => {
               balance: Number(lastManualBalance.balance),
               isManual: true,
               date: lastManualBalance.date,
-              notes: lastManualBalance.notes || null
+              notes: lastManualBalance.notes || null,
+              // Pour la projection: exposer le dernier solde manuel même si on le renvoie déjà comme solde courant
+              lastManual: {
+                balance: Number(lastManualBalance.balance),
+                date: lastManualBalance.date,
+                notes: lastManualBalance.notes || null
+              }
             }),
             { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           )
@@ -4235,7 +4241,15 @@ serve(async (req) => {
         JSON.stringify({
           balance: currentBalance,
           isManual: false,
-          date: now.toISOString()
+          date: now.toISOString(),
+          // Exposer aussi le dernier solde manuel pour permettre au frontend de projeter depuis cette ancre
+          lastManual: lastManualBalance
+            ? {
+                balance: Number(lastManualBalance.balance),
+                date: lastManualBalance.date,
+                notes: lastManualBalance.notes || null
+              }
+            : null
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
@@ -4369,6 +4383,20 @@ serve(async (req) => {
       let deboursNotesWithExpenses: any[] = []
       if (deboursNotesForecast && deboursNotesForecast.length > 0) {
         const deboursNoteIds = deboursNotesForecast.map(n => n.id)
+
+        // IMPORTANT: une note de débours déjà payée ne doit plus apparaître en "à venir",
+        // même si le paiement est hors de la fenêtre [start; end] du forecast.
+        // On détecte l'existence d'au moins un paiement lié (deboursNoteId), sans filtre de dates.
+        const { data: deboursPayments } = await supabase
+          .from('Payment')
+          .select('deboursNoteId')
+          .in('deboursNoteId', deboursNoteIds)
+
+        const paidDeboursNoteIds = new Set(
+          (deboursPayments || [])
+            .map((p: any) => p?.deboursNoteId)
+            .filter((id: any) => typeof id === 'string' && id.length > 0)
+        )
         
         // Récupérer les relations
         const { data: relations } = await supabase
@@ -4384,7 +4412,10 @@ serve(async (req) => {
             .in('id', expenseIds)
           
           // Calculer le montant total des frais pour chaque note
-          deboursNotesWithExpenses = deboursNotesForecast.map(note => {
+          deboursNotesWithExpenses = deboursNotesForecast
+            // Exclure les notes déjà payées (ne plus afficher en prévisionnel)
+            .filter((note: any) => !paidDeboursNoteIds.has(note.id))
+            .map(note => {
             const noteExpenseIds = relations.filter(r => r.A === note.id).map(r => r.B)
             const noteExpenses = expenses?.filter(e => noteExpenseIds.includes(e.id)) || []
             // Utiliser les montants des dépenses (frais) et non le totalAmount
@@ -4400,10 +4431,12 @@ serve(async (req) => {
           })
         } else {
           // Si pas de dépenses liées, utiliser 0
-          deboursNotesWithExpenses = deboursNotesForecast.map(note => ({
-            ...note,
-            totalFrais: 0
-          }))
+          deboursNotesWithExpenses = deboursNotesForecast
+            .filter((note: any) => !paidDeboursNoteIds.has(note.id))
+            .map(note => ({
+              ...note,
+              totalFrais: 0
+            }))
         }
       }
       

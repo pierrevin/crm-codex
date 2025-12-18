@@ -5,6 +5,11 @@ export interface TreasuryBalance {
   isManual: boolean;
   date: string;
   notes?: string | null;
+  lastManual?: {
+    balance: number;
+    date: string;
+    notes?: string | null;
+  } | null;
 }
 
 export interface TreasuryForecast {
