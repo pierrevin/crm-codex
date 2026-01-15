@@ -24,3 +24,5 @@ export function Badge({ variant, children, className = '' }: BadgeProps) {
   return <span className={finalClassName}>{children}</span>;
 }
 
+
+

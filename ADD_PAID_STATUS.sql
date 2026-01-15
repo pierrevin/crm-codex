@@ -15,3 +15,5 @@ FROM pg_enum e
 JOIN pg_type t ON e.enumtypid = t.oid
 WHERE t.typname = 'ExpenseStatus'
 ORDER BY e.enumsortorder;
+
+

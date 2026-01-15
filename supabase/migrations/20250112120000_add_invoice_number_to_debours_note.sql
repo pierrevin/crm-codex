@@ -4,3 +4,5 @@
 
 ALTER TABLE "DeboursNote" 
 ADD COLUMN IF NOT EXISTS "invoiceNumber" TEXT;
+
+

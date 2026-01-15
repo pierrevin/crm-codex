@@ -18,3 +18,5 @@ BEGIN
         RAISE NOTICE 'Veuillez exécuter manuellement: ALTER TYPE "ExpenseStatus" ADD VALUE ''PAID'';';
     END IF;
 END $$;
+
+
