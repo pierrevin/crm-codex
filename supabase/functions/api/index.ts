@@ -1873,6 +1873,7 @@ serve(async (req) => {
 
     if (path === 'companies' && method === 'POST') {
       const body = await req.json()
+      const { tags, ...companyData } = body || {}
       const now = new Date().toISOString()
       const newId = crypto.randomUUID()
       
@@ -1880,7 +1881,7 @@ serve(async (req) => {
         .from('Company')
         .insert({ 
           id: newId, 
-          ...body,
+          ...companyData,
           createdAt: now,
           updatedAt: now
         })
@@ -1888,6 +1889,40 @@ serve(async (req) => {
         .single()
 
       if (error) throw error
+
+      // Gérer les tags si fournis (tableau de strings)
+      if (data && tags && Array.isArray(tags) && tags.length > 0) {
+        for (const tagName of tags) {
+          if (!tagName || typeof tagName !== 'string') continue
+
+          let { data: existingTag } = await supabase
+            .from('Tag')
+            .select('id')
+            .eq('name', tagName.trim())
+            .single()
+
+          let tagId: string
+
+          if (!existingTag) {
+            const slug = tagName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')
+            const { data: newTag, error: createError } = await supabase
+              .from('Tag')
+              .insert({ name: tagName.trim(), slug })
+              .select('id')
+              .single()
+
+            if (createError) {
+              console.error('Erreur création tag:', createError)
+              continue
+            }
+            tagId = newTag.id
+          } else {
+            tagId = existingTag.id
+          }
+
+          await supabase.from('_CompanyToTag').insert({ A: data.id, B: tagId })
+        }
+      }
 
       // Déclencher webhook company.created
       if (data) {

@@ -64,6 +64,7 @@ export function CompanyDetailPage() {
   const [editCodeNAF, setEditCodeNAF] = useState('');
   const [editLibelleNAF, setEditLibelleNAF] = useState('');
   const [editVat, setEditVat] = useState('');
+  const [editStatusSupplier, setEditStatusSupplier] = useState(false);
   const [editLinkedin, setEditLinkedin] = useState('');
   const [editSalesNav, setEditSalesNav] = useState('');
   const [editNotes, setEditNotes] = useState('');
@@ -318,6 +319,7 @@ export function CompanyDetailPage() {
       setEditCodeNAF(companyData.codeNAF || '');
       setEditLibelleNAF(companyData.libelleNAF || '');
       setEditVat(companyData.vatNumber || '');
+      setEditStatusSupplier(!!companyData.statusSupplier);
       setEditLinkedin(companyData.linkedinUrl || '');
       setEditSalesNav(companyData.salesNavigatorUrl || '');
       setEditNotes(companyData.notes || '');
@@ -355,6 +357,7 @@ export function CompanyDetailPage() {
         codeNAF: editCodeNAF || undefined,
         libelleNAF: editLibelleNAF || undefined,
         vatNumber: editVat || undefined,
+        statusSupplier: editStatusSupplier,
         linkedinUrl: editLinkedin || undefined,
         salesNavigatorUrl: editSalesNav || undefined,
         notes: editNotes || undefined,
@@ -639,6 +642,7 @@ export function CompanyDetailPage() {
           onSubmit={async (e) => {
             e.preventDefault();
             try {
+              const normalizedSiret = editSiret ? normalizeSiret(editSiret) : undefined;
               const { data } = await api.post('/api/companies', {
                 name: editName,
                 domain: editDomain || undefined,
@@ -647,10 +651,11 @@ export function CompanyDetailPage() {
                 addressZip: editAddressZip || undefined,
                 addressCity: editAddressCity || undefined,
                 addressCountry: editAddressCountry || undefined,
-                siret: editSiret || undefined,
+                siret: normalizedSiret || undefined,
                 codeNAF: editCodeNAF || undefined,
                 libelleNAF: editLibelleNAF || undefined,
                 vatNumber: editVat || undefined,
+                statusSupplier: editStatusSupplier,
                 linkedinUrl: editLinkedin || undefined,
                 salesNavigatorUrl: editSalesNav || undefined,
                 notes: editNotes || undefined,
@@ -662,7 +667,8 @@ export function CompanyDetailPage() {
               navigate(`/entreprises/${data.id}`);
             } catch (error) {
               console.error('Erreur création:', error);
-              alert('Erreur lors de la création');
+              const message = (error as any)?.response?.data?.message || 'Erreur lors de la création';
+              alert(message);
             }
           }}
           className="space-y-4 rounded-lg border border-slate-200 bg-white p-6 shadow-sm"
@@ -799,6 +805,12 @@ export function CompanyDetailPage() {
             <label className="inline-flex items-center gap-2 text-sm text-slate-700">
               <input type="checkbox" checked={editIsIndividual} onChange={(e) => setEditIsIndividual(e.target.checked)} />
               Particulier
+            </label>
+          </div>
+          <div>
+            <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" checked={editStatusSupplier} onChange={(e) => setEditStatusSupplier(e.target.checked)} />
+              Fournisseur
             </label>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -1054,6 +1066,10 @@ export function CompanyDetailPage() {
                   <input type="checkbox" checked={editIsIndividual} onChange={(e) => setEditIsIndividual(e.target.checked)} />
                   Particulier
                 </label>
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input type="checkbox" checked={editStatusSupplier} onChange={(e) => setEditStatusSupplier(e.target.checked)} />
+                  Fournisseur
+                </label>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Adresse</label>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -1273,7 +1289,12 @@ export function CompanyDetailPage() {
                     <>🔍 Rechercher dans Sirene</>
                   </button>
                   <button
-                    onClick={() => { setIsEditing(false); setEditName(company.name); setEditDomain(company.domain || ''); }}
+                    onClick={() => { 
+                      setIsEditing(false); 
+                      setEditName(company.name); 
+                      setEditDomain(company.domain || '');
+                      setEditStatusSupplier(!!company.statusSupplier);
+                    }}
                     className="rounded-md border border-slate-200 px-3 py-2 text-sm"
                   >
                     Annuler
