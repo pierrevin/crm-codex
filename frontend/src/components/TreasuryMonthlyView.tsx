@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { ChevronDownIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
 import { TreasuryForecast } from '../services/treasuryService';
+import api from '../services/apiClient';
 import { Payment } from '../services/paymentService';
 
 // Étendre l'interface pour inclure stage
@@ -24,6 +25,15 @@ interface TreasuryMonthlyViewProps {
     invoiceDate: string | null;
     opportunityId?: string;
   }>;
+  // Opportunités complètes (pour les libellés avec client)
+  opportunities?: Array<{
+    id: string;
+    title: string;
+    company?: { name: string } | null;
+    contact?: { firstName: string; lastName?: string } | null;
+  }>;
+  // Étapes sélectionnées (filtres de la page Trésorerie)
+  selectedStages?: Set<string>;
 }
 
 interface MonthlyData {
@@ -43,7 +53,9 @@ export function TreasuryMonthlyView({
   currentBalance,
   forecast,
   payments,
-  expenses
+  expenses,
+  opportunities = [],
+  selectedStages
 }: TreasuryMonthlyViewProps) {
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [filterType, setFilterType] = useState<'all' | 'encaissements' | 'decaissements'>('all');
@@ -111,35 +123,44 @@ export function TreasuryMonthlyView({
     // 2. Si elles n'ont pas de paiement mais une expectedPaymentDate, elles sont dans deboursNotesForecast
     // Les dépenses liées aux notes de débours sont déjà comptées dans les décaissements
 
-    // Traiter les encaissements prévisionnels (opportunités sans paiement réel et non finalisées)
+    // Traiter les encaissements prévisionnels (opportunités non finalisées)
+    // On calcule toujours le prévisionnel pour le reste à payer, même si des acomptes ont déjà été payés
     forecast?.opportunities.forEach(opp => {
       if (!opp.expectedPaymentDate || !opp.amount) return;
+      // Respecter le filtre d'étapes venant de la page Trésorerie
+      if (selectedStages && opp.stage && !selectedStages.has(opp.stage)) return;
       
       // Ignorer les opportunités finalisées (elles utilisent les données réelles)
       if (opp.stage === 'FINALIZED') {
         return;
       }
       
-      // Vérifier si cette opportunité a déjà un paiement réel
-      const realPayment = paymentsByOpportunity.get(opp.id);
-      if (realPayment) {
-        // Si un paiement réel existe, on l'utilise à la place du prévisionnel
-        return;
-      }
-      
       const paymentDate = new Date(opp.expectedPaymentDate);
       const monthKey = `${paymentDate.getFullYear()}-${String(paymentDate.getMonth() + 1).padStart(2, '0')}`;
       if (data[monthKey]) {
-        data[monthKey].encaissementsPrevisionnels += opp.amount;
+        let montantOpp = Number(opp.amount) || 0;
         
-        // Calculer les taxes pour les paiements prévisionnels (mois +1, au 30)
-        const taxRate = opp.taxRate ?? 0.27;
-        const taxAmount = opp.amount * taxRate;
-        // Les taxes sont imputées au 30 du mois suivant le paiement
-        const taxMonth = new Date(paymentDate.getFullYear(), paymentDate.getMonth() + 1, 1);
-        const taxMonthKey = `${taxMonth.getFullYear()}-${String(taxMonth.getMonth() + 1).padStart(2, '0')}`;
-        if (data[taxMonthKey]) {
-          data[taxMonthKey].taxes += taxAmount;
+        // Déduire les acomptes facturés du montant prévisionnel final
+        // advancePaymentsByOpportunity contient le montant total des factures d'acompte (pas seulement les paiements)
+        const advancePayments = forecast?.advancePaymentsByOpportunity?.[opp.id] || 0;
+        if (advancePayments > 0) {
+          montantOpp = Math.max(0, montantOpp - advancePayments);
+        }
+        
+        // Ne pas ajouter si le montant après déduction est 0 ou négatif
+        if (montantOpp > 0) {
+          data[monthKey].encaissementsPrevisionnels += montantOpp;
+          
+          // Calculer les taxes pour les paiements prévisionnels (mois +1, au 30)
+          // Les taxes sont calculées sur le montant après déduction des acomptes
+          const taxRate = opp.taxRate ?? 0.27;
+          const taxAmount = montantOpp * taxRate;
+          // Les taxes sont imputées au 30 du mois suivant le paiement
+          const taxMonth = new Date(paymentDate.getFullYear(), paymentDate.getMonth() + 1, 1);
+          const taxMonthKey = `${taxMonth.getFullYear()}-${String(taxMonth.getMonth() + 1).padStart(2, '0')}`;
+          if (data[taxMonthKey]) {
+            data[taxMonthKey].taxes += taxAmount;
+          }
         }
       }
     });
@@ -248,14 +269,28 @@ export function TreasuryMonthlyView({
     // Encaissements prévisionnels - opportunités
     forecast?.opportunities.forEach(opp => {
       if (!opp.expectedPaymentDate || !opp.amount || opp.stage === 'FINALIZED') return;
+      // Respecter le filtre d'étapes
+      if (selectedStages && opp.stage && !selectedStages.has(opp.stage)) return;
       const paymentDate = new Date(opp.expectedPaymentDate);
       if (paymentDate >= monthStart && paymentDate <= monthEnd) {
         const hasRealPayment = payments.some(p => p.opportunityId === opp.id && 
           new Date(p.paymentDate) >= monthStart && new Date(p.paymentDate) <= monthEnd);
         if (!hasRealPayment) {
+          // Construire un libellé riche : Opportunité – Client – Contact
+          const fullOpp = opportunities.find(o => o.id === opp.id);
+          const companyName = fullOpp?.company?.name;
+          const contactName = fullOpp?.contact
+            ? `${fullOpp.contact.firstName} ${fullOpp.contact.lastName ?? ''}`.trim()
+            : undefined;
+
+          const parts: string[] = [];
+          if (fullOpp?.title || opp.title) parts.push(fullOpp?.title || opp.title);
+          if (companyName) parts.push(companyName);
+          if (contactName) parts.push(contactName);
+
           details.encaissements.push({
             type: 'previsionnel',
-            label: opp.title || 'Opportunité',
+            label: parts.length > 0 ? parts.join(' – ') : (opp.title || 'Opportunité'),
             amount: Number(opp.amount)
           });
         }
@@ -263,7 +298,7 @@ export function TreasuryMonthlyView({
     });
 
     // Encaissements prévisionnels - notes de débours
-    forecast?.deboursNotesForecast.forEach(debours => {
+    (forecast?.deboursNotesForecast || []).forEach(debours => {
       if (!debours.expectedPaymentDate || !debours.totalFrais) return;
       const paymentDate = new Date(debours.expectedPaymentDate);
       if (paymentDate >= monthStart && paymentDate <= monthEnd) {

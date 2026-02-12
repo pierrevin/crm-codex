@@ -7,6 +7,7 @@ import { CompanySearchSelect } from '../components/CompanySearchSelect';
 import { ContactSearchSelect } from '../components/ContactSearchSelect';
 import { paymentService, Payment } from '../services/paymentService';
 import { PaymentModal } from '../components/PaymentModal';
+import { invoiceService, Invoice } from '../services/invoiceService';
 import { deboursNoteService, DeboursNote } from '../services/deboursNoteService';
 import { DeboursNoteModal } from '../components/DeboursNoteModal';
 import { expensesService, Expense, ExpenseStatus } from '../services/expensesService';
@@ -14,6 +15,8 @@ import { ExpenseUploadModal } from '../components/ExpenseUploadModal';
 import { OpportunityMetrics } from '../components/OpportunityMetrics';
 import { DocumentSection } from '../components/DocumentSection';
 import { RevenueTable } from '../components/RevenueTable';
+import { InvoiceList } from '../components/InvoiceList';
+import { PaymentSummary } from '../components/PaymentSummary';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
@@ -65,6 +68,7 @@ export function OpportunityDetailPage() {
   const [quotes, setQuotes] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [taxRate, setTaxRate] = useState<number | undefined>(undefined);
   const [deboursNotes, setDeboursNotes] = useState<DeboursNote[]>([]);
@@ -82,6 +86,7 @@ export function OpportunityDetailPage() {
       void loadOpportunity(id);
       void loadQuotes(id);
       void loadPayments(id);
+      void loadInvoices(id);
       void loadDeboursNotes(id);
       void loadExpenses(id);
     }
@@ -151,6 +156,22 @@ export function OpportunityDetailPage() {
     } catch (error) {
       console.error('Erreur chargement paiements:', error);
       setPayments([]);
+    }
+  };
+
+  const loadInvoices = async (opportunityId: string) => {
+    try {
+      const data = await invoiceService.getByOpportunity(opportunityId);
+      setInvoices(Array.isArray(data) ? data : []);
+    } catch (error: any) {
+      // Si l'API retourne 404 (table Invoice n'existe pas encore), ignorer silencieusement
+      if (error?.response?.status === 404) {
+        console.warn('API des factures non disponible (404), utilisation d\'un tableau vide');
+        setInvoices([]);
+      } else {
+        console.error('Erreur chargement factures:', error);
+        setInvoices([]);
+      }
     }
   };
 
@@ -289,10 +310,11 @@ export function OpportunityDetailPage() {
 
   const refreshAllData = async () => {
     if (!id) return;
-    await Promise.all([
+    await Promise.allSettled([
       loadOpportunity(id),
       loadQuotes(id),
       loadPayments(id),
+      loadInvoices(id),
       loadDeboursNotes(id),
       loadExpenses(id)
     ]);
@@ -694,15 +716,32 @@ export function OpportunityDetailPage() {
 
         {/* Colonne droite (5/7) */}
         <div className="lg:col-span-5 space-y-6">
+          {/* Liste des factures */}
+          <InvoiceList
+            opportunityId={id!}
+            opportunityTitle={opportunity.title}
+            opportunityTaxRate={taxRate}
+            onRefresh={refreshAllData}
+          />
+
+          {/* Récapitulatif des paiements */}
+          <PaymentSummary
+            opportunityAmount={opportunity.amount}
+            invoices={invoices}
+            payments={payments}
+          />
+
           {/* Tableau des recettes */}
           <RevenueTable
             quotes={quotes}
             invoiceUrls={invoiceUrls}
+            invoices={invoices}
             deboursNotes={deboursNotes}
             payments={payments}
             opportunityId={id!}
             opportunityTitle={opportunity.title}
             opportunityAmount={opportunity.amount}
+            opportunityExpectedPaymentDate={opportunity.expectedPaymentDate}
             opportunityTaxRate={taxRate}
             onRefresh={refreshAllData}
             onCreateQuote={() => navigate(`/quotes/new?opportunityId=${id}`)}

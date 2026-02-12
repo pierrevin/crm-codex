@@ -7,6 +7,10 @@ export class CreatePaymentDto {
 
   @IsOptional()
   @IsString()
+  invoiceId?: string;
+
+  @IsOptional()
+  @IsString()
   deboursNoteId?: string;
 
   @IsNumber()

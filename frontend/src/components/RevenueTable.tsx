@@ -8,9 +8,11 @@ import {
   ReceiptRefundIcon,
   BanknotesIcon,
   PencilIcon,
-  TrashIcon
+  TrashIcon,
+  ClockIcon
 } from '@heroicons/react/24/outline';
 import { Payment, paymentService } from '../services/paymentService';
+import { Invoice } from '../services/invoiceService';
 import { DeboursNote } from '../services/deboursNoteService';
 import { PaymentModal } from './PaymentModal';
 import { Button } from './ui/Button';
@@ -26,7 +28,7 @@ interface Quote {
 
 interface RevenueItem {
   id: string;
-  type: 'QUOTE' | 'INVOICE' | 'DEBOURS_NOTE';
+  type: 'QUOTE' | 'INVOICE' | 'DEBOURS_NOTE' | 'PROVISIONAL';
   title: string;
   amount: number;
   date: string;
@@ -34,17 +36,21 @@ interface RevenueItem {
   status?: string;
   deboursNoteId?: string;
   quoteId?: string; // ID du devis pour navigation
+  invoiceId?: string; // ID de la facture
   payments: Payment[];
+  isProvisional?: boolean; // Pour distinguer le prévisionnel
 }
 
 interface RevenueTableProps {
   quotes: Quote[];
   invoiceUrls: string[];
+  invoices?: Invoice[];
   deboursNotes: DeboursNote[];
   payments: Payment[];
   opportunityId: string;
   opportunityTitle: string;
   opportunityAmount?: number;
+  opportunityExpectedPaymentDate?: string;
   opportunityTaxRate?: number;
   onRefresh: () => void;
   onCreateQuote?: () => void;
@@ -56,11 +62,13 @@ interface RevenueTableProps {
 export function RevenueTable({
   quotes,
   invoiceUrls,
+  invoices = [],
   deboursNotes,
   payments,
   opportunityId,
   opportunityTitle,
   opportunityAmount,
+  opportunityExpectedPaymentDate,
   opportunityTaxRate,
   onRefresh,
   onCreateQuote,
@@ -80,7 +88,7 @@ export function RevenueTable({
 
     // Ajouter les devis
     quotes.forEach(quote => {
-      const quotePayments = payments.filter(p => !p.deboursNoteId);
+      const quotePayments = payments.filter(p => !p.deboursNoteId && !p.invoiceId);
       items.push({
         id: `quote-${quote.id}`,
         type: 'QUOTE',
@@ -93,11 +101,26 @@ export function RevenueTable({
       });
     });
 
-    // Ajouter les factures Tiime
-    invoiceUrls.forEach((url, index) => {
-      const invoicePayments = payments.filter(p => !p.deboursNoteId);
+    // Ajouter les factures (Invoice)
+    invoices.forEach(invoice => {
+      const invoicePayments = payments.filter(p => p.invoiceId === invoice.id);
       items.push({
-        id: `invoice-${index}`,
+        id: `invoice-${invoice.id}`,
+        type: 'INVOICE',
+        title: invoice.invoiceNumber || `Facture ${invoice.type === 'ACOMPTE' ? 'acompte' : 'finale'}`,
+        amount: Number(invoice.amountTTC),
+        date: invoice.issueDate,
+        invoiceId: invoice.id,
+        url: invoice.invoiceUrl,
+        payments: invoicePayments
+      });
+    });
+
+    // Ajouter les factures Tiime (anciennes)
+    invoiceUrls.forEach((url, index) => {
+      const invoicePayments = payments.filter(p => !p.deboursNoteId && !p.invoiceId);
+      items.push({
+        id: `invoice-tiime-${index}`,
         type: 'INVOICE',
         title: `Facture Tiime ${index + 1}`,
         amount: opportunityAmount || 0, // Utiliser le montant de l'opportunité comme approximation
@@ -122,6 +145,48 @@ export function RevenueTable({
         payments: notePayments
       });
     });
+
+    // Calculer le total facturé pour le paiement prévisionnel
+    const totalInvoiced = invoices.reduce((sum, inv) => sum + Number(inv.amountTTC || 0), 0);
+
+    // Ajouter le paiement prévisionnel si applicable
+    if (opportunityAmount && opportunityExpectedPaymentDate) {
+      const remainingAmount = opportunityAmount - totalInvoiced;
+      items.push({
+        id: 'provisional-payment',
+        type: 'PROVISIONAL',
+        title: 'Paiement prévisionnel',
+        amount: remainingAmount,
+        date: opportunityExpectedPaymentDate,
+        payments: [],
+        isProvisional: true
+      });
+    }
+
+    // Ajouter les paiements "orphelins" (sans facture, devis ou note de débours)
+    const usedPaymentIds = new Set<string>();
+    items.forEach(item => {
+      item.payments.forEach(p => usedPaymentIds.add(p.id));
+    });
+
+    const orphanPayments = payments.filter(p => 
+      !usedPaymentIds.has(p.id) && 
+      !p.deboursNoteId && 
+      !p.invoiceId
+    );
+
+    if (orphanPayments.length > 0) {
+      // Créer un item pour les paiements orphelins
+      const totalAmount = orphanPayments.reduce((sum, p) => sum + parseFloat(p.amount.toString()), 0);
+      items.push({
+        id: 'orphan-payments',
+        type: 'INVOICE' as const,
+        title: 'Paiements directs',
+        amount: totalAmount,
+        date: orphanPayments[0]?.paymentDate || new Date().toISOString(),
+        payments: orphanPayments
+      });
+    }
 
     return items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   };
@@ -186,6 +251,8 @@ export function RevenueTable({
         return <DocumentTextIcon className="h-5 w-5 text-amber-600" />;
       case 'DEBOURS_NOTE':
         return <ReceiptRefundIcon className="h-5 w-5 text-purple-600" />;
+      case 'PROVISIONAL':
+        return <ClockIcon className="h-5 w-5 text-blue-600" />;
     }
   };
 
@@ -197,6 +264,8 @@ export function RevenueTable({
         return 'Facture';
       case 'DEBOURS_NOTE':
         return 'Note de débours';
+      case 'PROVISIONAL':
+        return 'Paiement prévisionnel';
     }
   };
 
@@ -274,6 +343,19 @@ export function RevenueTable({
         
         <div className="flex flex-wrap items-center gap-2">
           {/* Boutons d'action */}
+          <Button
+            onClick={() => {
+              setSelectedRevenueItem(null);
+              setSelectedPayment(null);
+              setShowPaymentModal(true);
+            }}
+            variant="primary"
+            size="sm"
+            icon={<BanknotesIcon className="h-3.5 w-3.5" />}
+            className="bg-green-600 hover:bg-green-700"
+          >
+            Paiement
+          </Button>
           {onCreateQuote && (
             <Button
               onClick={onCreateQuote}
@@ -363,7 +445,7 @@ export function RevenueTable({
                                 ? 'text-indigo-600 hover:text-indigo-700 font-medium' 
                                 : 'text-slate-600'
                             }`}>
-                              {getTypeLabel(item.type)}
+                              {item.id === 'orphan-payments' || item.isProvisional ? item.title : getTypeLabel(item.type)}
                             </span>
                           </div>
                           <span className="text-xs text-slate-500 pl-6">
@@ -448,14 +530,35 @@ export function RevenueTable({
                               )}
                             </>
                           ) : (
-                            <Button
-                              onClick={() => handleAddPayment(item)}
-                              variant="primary"
-                              size="sm"
-                              icon={<PlusIcon className="h-3 w-3" />}
-                            >
-                              Paiement
-                            </Button>
+                            <>
+                              <Button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleAddPayment(item);
+                                }}
+                                variant="success"
+                                size="sm"
+                                icon={<PlusIcon className="h-3 w-3" />}
+                              >
+                                Paiement
+                              </Button>
+                              {item.id === 'orphan-payments' && (
+                                <Button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    // Pour les paiements orphelins, permettre d'ajouter un nouveau paiement direct
+                                    setSelectedRevenueItem(null);
+                                    setSelectedPayment(null);
+                                    setShowPaymentModal(true);
+                                  }}
+                                  variant="primary"
+                                  size="sm"
+                                  icon={<BanknotesIcon className="h-3 w-3" />}
+                                >
+                                  Ajouter
+                                </Button>
+                              )}
+                            </>
                           )}
                         </div>
                       </td>
@@ -523,10 +626,10 @@ export function RevenueTable({
             setSelectedPayment(null);
           }}
           payment={selectedPayment || undefined}
-          opportunityId={selectedPayment?.opportunityId || (selectedRevenueItem ? opportunityId : undefined)}
-          opportunityTitle={selectedPayment?.opportunity?.title || (selectedRevenueItem ? opportunityTitle : undefined)}
-          opportunityAmount={selectedRevenueItem ? opportunityAmount : undefined}
-          opportunityTaxRate={selectedRevenueItem ? opportunityTaxRate : undefined}
+          opportunityId={selectedPayment?.opportunityId || opportunityId}
+          opportunityTitle={selectedPayment?.opportunity?.title || opportunityTitle}
+          opportunityAmount={selectedRevenueItem ? opportunityAmount : opportunityAmount}
+          opportunityTaxRate={selectedRevenueItem ? opportunityTaxRate : opportunityTaxRate}
           deboursNoteId={selectedPayment?.deboursNoteId || selectedRevenueItem?.deboursNoteId}
           deboursNoteTitle={selectedPayment?.deboursNote?.title || (selectedRevenueItem?.deboursNoteId ? selectedRevenueItem.title : undefined)}
           deboursNoteAmount={selectedRevenueItem?.deboursNoteId ? selectedRevenueItem.amount : undefined}

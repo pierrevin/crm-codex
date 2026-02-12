@@ -18,6 +18,7 @@ interface MultiplePaymentsModalProps {
   opportunityTitle: string;
   opportunityAmount?: number;
   opportunityTaxRate?: number;
+  invoiceId?: string;
   onSuccess: () => void;
   markAsFullyPaid?: boolean;
 }
@@ -29,6 +30,7 @@ export function MultiplePaymentsModal({
   opportunityTitle,
   opportunityAmount,
   opportunityTaxRate,
+  invoiceId,
   onSuccess,
   markAsFullyPaid: initialMarkAsFullyPaid = false
 }: MultiplePaymentsModalProps) {
@@ -105,7 +107,8 @@ export function MultiplePaymentsModal({
       // Créer les paiements séquentiellement
       const paymentPromises = validRows.map(row => {
         const dto: CreatePaymentDto = {
-          opportunityId,
+          opportunityId: invoiceId ? undefined : opportunityId,
+          invoiceId,
           amount: parseFloat(row.amount),
           // IMPORTANT: on envoie une date en UTC minuit pour éviter les décalages timezone (ex: 23:00 en base)
           paymentDate: row.paymentDate ? `${row.paymentDate}T00:00:00.000Z` : undefined,

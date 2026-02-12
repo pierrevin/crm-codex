@@ -3,6 +3,7 @@ import api from './apiClient';
 export interface Payment {
   id: string;
   opportunityId?: string;
+  invoiceId?: string;
   deboursNoteId?: string;
   amount: number;
   paymentDate: string;
@@ -14,6 +15,12 @@ export interface Payment {
     title: string;
     company?: { id: string; name: string } | null;
     contact?: { id: string; firstName: string; lastName?: string } | null;
+  };
+  invoice?: {
+    id: string;
+    type: 'ACOMPTE' | 'FINAL';
+    amountTTC: number;
+    invoiceNumber?: string;
   };
   deboursNote?: {
     id: string;
@@ -30,6 +37,7 @@ export interface Payment {
 
 export interface CreatePaymentDto {
   opportunityId?: string;
+  invoiceId?: string;
   deboursNoteId?: string;
   amount: number;
   paymentDate?: string;

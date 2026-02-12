@@ -19,6 +19,7 @@ import { IntegrationsModule } from './integrations/integrations.module';
 import { ExpensesModule } from './expenses/expenses.module';
 import { TreasuryModule } from './treasury/treasury.module';
 import { DeboursNotesModule } from './debours-notes/debours-notes.module';
+import { InvoicesModule } from './invoices/invoices.module';
 
 @Module({
   imports: [
@@ -46,7 +47,8 @@ import { DeboursNotesModule } from './debours-notes/debours-notes.module';
     IntegrationsModule,
     ExpensesModule,
     TreasuryModule,
-    DeboursNotesModule
+    DeboursNotesModule,
+    InvoicesModule
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard }

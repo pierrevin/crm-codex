@@ -61,6 +61,11 @@ enum DeboursNoteStatus {
   PAID
 }
 
+enum InvoiceType {
+  ACOMPTE
+  FINAL
+}
+
 model User {
   id                 String          @id @default(cuid())
   email              String          @unique
@@ -180,6 +185,7 @@ model Opportunity {
   expenses    Expense[]
   deboursNotes DeboursNote[]
   recurringExpenses RecurringExpense[]
+  invoices    Invoice[]
   // Intégrations externes
   googleDriveFolderId String?
   tiimeQuoteId        String?
@@ -325,6 +331,8 @@ model Payment {
   id            String      @id @default(cuid())
   opportunity   Opportunity? @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
   opportunityId String?
+  invoice       Invoice?    @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  invoiceId     String?
   deboursNote   DeboursNote? @relation(fields: [deboursNoteId], references: [id], onDelete: Cascade)
   deboursNoteId String?
   amount        Decimal     @db.Decimal(18, 2) // Montant payé
@@ -334,6 +342,11 @@ model Payment {
   notes         String?
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
+
+  @@index([opportunityId])
+  @@index([invoiceId])
+  @@index([deboursNoteId])
+  @@index([paymentDate])
 }
 
 enum EffectiveSaleSource {
@@ -428,4 +441,22 @@ model RecurringExpense {
   expenses          Expense[]       // Dépenses générées à partir de ce modèle
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
+}
+
+model Invoice {
+  id            String      @id @default(cuid())
+  type          InvoiceType @default(FINAL)
+  amountTTC     Decimal     @db.Decimal(18, 2)
+  taxRate       Decimal     @db.Decimal(5, 4) @default(0.27)
+  invoiceUrl    String?
+  invoiceNumber String?
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  opportunityId String
+  issueDate     DateTime    @default(now())
+  notes         String?
+  payments      Payment[]
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([opportunityId])
 }

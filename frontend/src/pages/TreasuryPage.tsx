@@ -35,7 +35,7 @@ const isBeforeDay = (a: Date, b: Date) => {
 };
 
 // Composant Tooltip personnalisé pour afficher les détails
-const CustomTooltip = ({ active, payload, label }: TooltipProps<number, string>) => {
+const CustomTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload || !payload.length) {
     return null;
   }
@@ -734,20 +734,14 @@ export function TreasuryPage() {
       }
     });
 
-    // Ajouter les encaissements prévisionnels (opportunités sans paiement réel et non finalisées, filtrées par étapes)
+    // Ajouter les encaissements prévisionnels (opportunités non finalisées, filtrées par étapes)
+    // On calcule toujours le prévisionnel pour le reste à payer, même si des acomptes ont déjà été payés
     (forecast?.opportunities || []).forEach(opp => {
       if (!opp.expectedPaymentDate || !opp.amount) return;
       if (opp.stage && !selectedStages.has(opp.stage)) return;
       
       // Ignorer les opportunités finalisées (elles utilisent les données réelles)
       if (opp.stage === 'FINALIZED') {
-        return;
-      }
-      
-      // Vérifier si cette opportunité a déjà un paiement réel
-      const realPayment = paymentsByOpportunity.get(opp.id);
-      if (realPayment) {
-        // Si un paiement réel existe, on ne compte pas le prévisionnel
         return;
       }
       
@@ -761,18 +755,30 @@ export function TreasuryPage() {
         
         const monthKey = `${paymentDate.getFullYear()}-${String(paymentDate.getMonth() + 1).padStart(2, '0')}`;
         if (monthlyData[monthKey]) {
-          const montantOpp = Number(opp.amount) || 0;
-          monthlyData[monthKey].encaissementsPrevisionnels += montantOpp;
-          monthlyData[monthKey].encaissementsPrevisionnelOpportunites += montantOpp;
+          let montantOpp = Number(opp.amount) || 0;
           
-          // Calculer les taxes pour les paiements prévisionnels (mois +1, au 30)
-          const taxRate = opp.taxRate ?? 0.27;
-          const taxAmount = montantOpp * taxRate;
-          // Les taxes sont imputées au 30 du mois suivant le paiement
-          const taxMonth = new Date(paymentDate.getFullYear(), paymentDate.getMonth() + 1, 1);
-          const taxMonthKey = `${taxMonth.getFullYear()}-${String(taxMonth.getMonth() + 1).padStart(2, '0')}`;
-          if (monthlyData[taxMonthKey]) {
-            monthlyData[taxMonthKey].taxes += taxAmount;
+          // Déduire les acomptes facturés du montant prévisionnel final
+          // advancePaymentsByOpportunity contient le montant total des factures d'acompte (pas seulement les paiements)
+          const advancePayments = forecast?.advancePaymentsByOpportunity?.[opp.id] || 0;
+          if (advancePayments > 0) {
+            montantOpp = Math.max(0, montantOpp - advancePayments);
+          }
+          
+          // Ne pas ajouter si le montant après déduction est 0 ou négatif
+          if (montantOpp > 0) {
+            monthlyData[monthKey].encaissementsPrevisionnels += montantOpp;
+            monthlyData[monthKey].encaissementsPrevisionnelOpportunites += montantOpp;
+            
+            // Calculer les taxes pour les paiements prévisionnels (mois +1, au 30)
+            // Les taxes sont calculées sur le montant après déduction des acomptes
+            const taxRate = opp.taxRate ?? 0.27;
+            const taxAmount = montantOpp * taxRate;
+            // Les taxes sont imputées au 30 du mois suivant le paiement
+            const taxMonth = new Date(paymentDate.getFullYear(), paymentDate.getMonth() + 1, 1);
+            const taxMonthKey = `${taxMonth.getFullYear()}-${String(taxMonth.getMonth() + 1).padStart(2, '0')}`;
+            if (monthlyData[taxMonthKey]) {
+              monthlyData[taxMonthKey].taxes += taxAmount;
+            }
           }
         }
       } catch (error) {
@@ -1208,6 +1214,8 @@ export function TreasuryPage() {
           forecast={forecast}
           payments={payments}
           expenses={expenses}
+          opportunities={opportunities}
+          selectedStages={selectedStages}
         />
       </div>
 

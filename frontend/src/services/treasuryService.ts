@@ -62,6 +62,7 @@ export interface TreasuryForecast {
     opportunityId: string;
   }>;
   taxPayments: Record<string, number>;
+  advancePaymentsByOpportunity?: Record<string, number>; // Montants des acomptes payés par opportunité
 }
 
 export interface SetBalanceDto {

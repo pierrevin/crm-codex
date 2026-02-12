@@ -14,16 +14,29 @@ export class PaymentsService {
   ) {}
 
   async create(dto: CreatePaymentDto) {
-    // Valider qu'au moins un des deux est fourni
-    if (!dto.opportunityId && !dto.deboursNoteId) {
-      throw new NotFoundException('Either opportunityId or deboursNoteId must be provided');
+    // Valider qu'au moins un des identifiants est fourni
+    if (!dto.opportunityId && !dto.deboursNoteId && !dto.invoiceId) {
+      throw new NotFoundException('Either opportunityId, deboursNoteId, or invoiceId must be provided');
     }
 
     let taxRate = dto.taxRate ?? 0.27;
     let taxAmount = dto.amount * taxRate;
+    let opportunityId = dto.opportunityId;
 
-    // Si c'est une opportunité, récupérer le taux de taxe depuis l'opportunité
-    if (dto.opportunityId) {
+    // Si invoiceId est fourni, récupérer la facture et utiliser ses informations
+    if (dto.invoiceId) {
+      const invoice = await this.prisma.invoice.findUnique({
+        where: { id: dto.invoiceId },
+        include: { opportunity: true }
+      });
+      if (!invoice) {
+        throw new NotFoundException('Invoice not found');
+      }
+      taxRate = dto.taxRate ?? Number(invoice.taxRate);
+      taxAmount = dto.amount * Number(taxRate);
+      opportunityId = invoice.opportunityId;
+    } else if (dto.opportunityId) {
+      // Si c'est une opportunité, récupérer le taux de taxe depuis l'opportunité
       const opportunity = await this.prisma.opportunity.findUnique({
         where: { id: dto.opportunityId }
       });
@@ -32,10 +45,8 @@ export class PaymentsService {
       }
       taxRate = dto.taxRate ?? (opportunity.taxRate ? Number(opportunity.taxRate) : 0.27);
       taxAmount = dto.amount * taxRate;
-    }
-
-    // Si c'est une note de débours, les notes de débours ne sont généralement pas soumises à taxe
-    if (dto.deboursNoteId) {
+    } else if (dto.deboursNoteId) {
+      // Si c'est une note de débours, les notes de débours ne sont généralement pas soumises à taxe
       const deboursNote = await this.prisma.deboursNote.findUnique({
         where: { id: dto.deboursNoteId }
       });
@@ -51,7 +62,8 @@ export class PaymentsService {
 
     const payment = await this.prisma.payment.create({
       data: {
-        opportunityId: dto.opportunityId,
+        opportunityId,
+        invoiceId: dto.invoiceId,
         deboursNoteId: dto.deboursNoteId,
         amount: dto.amount,
         paymentDate,
@@ -121,6 +133,7 @@ export class PaymentsService {
             contact: true
           }
         },
+        invoice: true,
         deboursNote: {
           include: {
             opportunity: {
@@ -157,7 +170,8 @@ export class PaymentsService {
             company: true,
             contact: true
           }
-        }
+        },
+        invoice: true
       }
     });
   }
@@ -197,7 +211,8 @@ export class PaymentsService {
             company: true,
             contact: true
           }
-        }
+        },
+        invoice: true
       }
     });
   }
@@ -212,6 +227,7 @@ export class PaymentsService {
             contact: true
           }
         },
+        invoice: true,
         deboursNote: {
           include: {
             opportunity: {

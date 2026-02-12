@@ -2924,6 +2924,7 @@ serve(async (req) => {
       // Enrichir avec les relations séparément pour éviter les problèmes de cache de schéma
       const enrichedPayments = await Promise.all((payments || []).map(async (payment) => {
         let opportunity = null
+        let invoice = null
         let deboursNote = null
         
         if (payment.opportunityId) {
@@ -2933,6 +2934,15 @@ serve(async (req) => {
             .eq('id', payment.opportunityId)
             .single()
           opportunity = oppData
+        }
+        
+        if (payment.invoiceId) {
+          const { data: invoiceData } = await supabase
+            .from('Invoice')
+            .select('*')
+            .eq('id', payment.invoiceId)
+            .single()
+          invoice = invoiceData
         }
         
         const actualDeboursNoteId = getDeboursNoteId(payment)
@@ -2948,6 +2958,7 @@ serve(async (req) => {
         return {
           ...payment,
           opportunity,
+          invoice,
           deboursNote
         }
       }))
@@ -2960,21 +2971,40 @@ serve(async (req) => {
 
     if (path === 'payments' && method === 'POST') {
       const body = await req.json()
-      const { opportunityId, deboursNoteId, amount, paymentDate, taxRate, notes } = body
+      const { opportunityId, invoiceId, deboursNoteId, amount, paymentDate, taxRate, notes } = body
       
-      // Valider qu'au moins un des deux est fourni
-      if (!opportunityId && !deboursNoteId) {
+      // Valider qu'au moins un identifiant est fourni
+      if (!opportunityId && !deboursNoteId && !invoiceId) {
         return new Response(
-          JSON.stringify({ message: 'Either opportunityId or deboursNoteId must be provided' }),
+          JSON.stringify({ message: 'Either opportunityId, deboursNoteId, or invoiceId must be provided' }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
       
       let finalTaxRate = taxRate ?? 0.27
       let taxAmount = amount * finalTaxRate
+      let finalOpportunityId = opportunityId
       
-      // Si c'est une opportunité, récupérer le taux de taxe depuis l'opportunité
-      if (opportunityId) {
+      // Si invoiceId est fourni, récupérer la facture et utiliser ses informations
+      if (invoiceId) {
+        const { data: invoice, error: invoiceError } = await supabase
+          .from('Invoice')
+          .select('*, opportunity:Opportunity(id, taxRate)')
+          .eq('id', invoiceId)
+          .single()
+        
+        if (invoiceError || !invoice) {
+          return new Response(
+            JSON.stringify({ message: 'Invoice not found' }),
+            { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+        
+        finalTaxRate = taxRate ?? Number(invoice.taxRate)
+        taxAmount = amount * finalTaxRate
+        finalOpportunityId = invoice.opportunityId
+      } else if (opportunityId) {
+        // Si c'est une opportunité, récupérer le taux de taxe depuis l'opportunité
         const { data: opportunity, error: oppError } = await supabase
           .from('Opportunity')
           .select('id, taxRate')
@@ -2990,10 +3020,8 @@ serve(async (req) => {
         
         finalTaxRate = taxRate ?? (opportunity.taxRate ? Number(opportunity.taxRate) : 0.27)
         taxAmount = amount * finalTaxRate
-      }
-      
-      // Si c'est une note de débours, pas de taxe (0%)
-      if (deboursNoteId) {
+      } else if (deboursNoteId) {
+        // Si c'est une note de débours, pas de taxe (0%)
         const { data: deboursNote, error: deboursError } = await supabase
           .from('DeboursNote')
           .select('id')
@@ -3018,7 +3046,8 @@ serve(async (req) => {
       // Préparer les données d'insertion
       const insertData: any = {
         id: paymentId,
-        opportunityId: opportunityId || null,
+        opportunityId: finalOpportunityId || null,
+        invoiceId: invoiceId || null,
         deboursNoteId: deboursNoteId || null,
         amount,
         paymentDate: finalPaymentDate.toISOString(),
@@ -3042,6 +3071,7 @@ serve(async (req) => {
       
       // Récupérer les relations séparément pour éviter les problèmes de cache de schéma
       let opportunity = null
+      let invoice = null
       let deboursNote = null
       
       if (paymentData.opportunityId) {
@@ -3051,6 +3081,15 @@ serve(async (req) => {
           .eq('id', paymentData.opportunityId)
           .single()
         opportunity = oppData
+      }
+      
+      if (paymentData.invoiceId) {
+        const { data: invoiceData } = await supabase
+          .from('Invoice')
+          .select('*')
+          .eq('id', paymentData.invoiceId)
+          .single()
+        invoice = invoiceData
       }
       
       const actualDeboursNoteId = getDeboursNoteId(paymentData)
@@ -3066,6 +3105,7 @@ serve(async (req) => {
       const result = {
         ...paymentData,
         opportunity,
+        invoice,
         deboursNote
       }
       
@@ -3089,6 +3129,7 @@ serve(async (req) => {
         // Enrichir avec les relations
         const enrichedPayments = await Promise.all((payments || []).map(async (payment) => {
           let opportunity = null
+          let invoice = null
           let deboursNote = null
           
           if (payment.opportunityId) {
@@ -3098,6 +3139,15 @@ serve(async (req) => {
               .eq('id', payment.opportunityId)
               .single()
             opportunity = oppData
+          }
+          
+          if (payment.invoiceId) {
+            const { data: invoiceData } = await supabase
+              .from('Invoice')
+              .select('*')
+              .eq('id', payment.invoiceId)
+              .single()
+            invoice = invoiceData
           }
           
           if (payment.deboursNoteId) {
@@ -3112,6 +3162,7 @@ serve(async (req) => {
           return {
             ...payment,
             opportunity,
+            invoice,
             deboursNote
           }
         }))
@@ -3208,6 +3259,7 @@ serve(async (req) => {
       
       // Enrichir avec les relations
       let opportunity = null
+      let invoice = null
       let deboursNote = null
       
       if (paymentData.opportunityId) {
@@ -3217,6 +3269,15 @@ serve(async (req) => {
           .eq('id', paymentData.opportunityId)
           .single()
         opportunity = oppData
+      }
+      
+      if (paymentData.invoiceId) {
+        const { data: invoiceData } = await supabase
+          .from('Invoice')
+          .select('*')
+          .eq('id', paymentData.invoiceId)
+          .single()
+        invoice = invoiceData
       }
       
       const actualDeboursNoteId = getDeboursNoteId(paymentData)
@@ -3232,6 +3293,7 @@ serve(async (req) => {
       const result = {
         ...paymentData,
         opportunity,
+        invoice,
         deboursNote
       }
       
@@ -3250,6 +3312,218 @@ serve(async (req) => {
       if (error) throw error
       return new Response(
         JSON.stringify({ message: 'Payment deleted successfully' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // ===== INVOICES ROUTES =====
+    if (path === 'invoices' && method === 'GET') {
+      const opportunityId = url.searchParams.get('opportunityId')
+      
+      let query = supabase
+        .from('Invoice')
+        .select('*, opportunity:Opportunity(*, company:Company(*), contact:Contact(*)), payments:Payment(*)')
+        .order('issueDate', { ascending: false })
+      
+      if (opportunityId) {
+        query = query.eq('opportunityId', opportunityId)
+      }
+      
+      const { data: invoices, error } = await query
+      if (error) throw error
+      
+      return new Response(
+        JSON.stringify(invoices || []),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (path === 'invoices' && method === 'POST') {
+      const body = await req.json()
+      const { type, amountTTC, taxRate, invoiceUrl, invoiceNumber, opportunityId, issueDate, notes } = body
+      
+      if (!opportunityId) {
+        return new Response(
+          JSON.stringify({ message: 'opportunityId is required' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      // Vérifier que l'opportunité existe
+      const { data: opportunity, error: oppError } = await supabase
+        .from('Opportunity')
+        .select('id, taxRate')
+        .eq('id', opportunityId)
+        .single()
+      
+      if (oppError || !opportunity) {
+        return new Response(
+          JSON.stringify({ message: 'Opportunity not found' }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      const finalTaxRate = taxRate ?? (opportunity.taxRate ? Number(opportunity.taxRate) : 0.27)
+      const finalIssueDate = issueDate ? new Date(issueDate) : new Date()
+      const now = new Date().toISOString()
+      const invoiceId = crypto.randomUUID()
+      
+      const insertData: any = {
+        id: invoiceId,
+        type: type || 'FINAL',
+        amountTTC,
+        taxRate: finalTaxRate,
+        invoiceUrl: invoiceUrl || null,
+        invoiceNumber: invoiceNumber || null,
+        opportunityId,
+        issueDate: finalIssueDate.toISOString(),
+        notes: notes || null,
+        createdAt: now,
+        updatedAt: now
+      }
+      
+      const { data: invoiceData, error: insertError } = await supabase
+        .from('Invoice')
+        .insert(insertData)
+        .select('*, opportunity:Opportunity(*, company:Company(*), contact:Contact(*)), payments:Payment(*)')
+        .single()
+      
+      if (insertError) {
+        console.error('[INVOICE POST] Insert error:', insertError)
+        throw insertError
+      }
+      
+      return new Response(
+        JSON.stringify(invoiceData),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (path.startsWith('invoices/') && method === 'GET') {
+      const id = path.split('/')[1]
+      
+      if (id === 'opportunity') {
+        const opportunityId = path.split('/')[2]
+        const { data: invoices, error } = await supabase
+          .from('Invoice')
+          .select('*, opportunity:Opportunity(*, company:Company(*), contact:Contact(*)), payments:Payment(*)')
+          .eq('opportunityId', opportunityId)
+          .order('issueDate', { ascending: false })
+        
+        if (error) throw error
+        
+        return new Response(
+          JSON.stringify(invoices || []),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      const { data: invoiceData, error } = await supabase
+        .from('Invoice')
+        .select('*, opportunity:Opportunity(*, company:Company(*), contact:Contact(*)), payments:Payment(*)')
+        .eq('id', id)
+        .single()
+      
+      if (error) throw error
+      
+      if (!invoiceData) {
+        return new Response(
+          JSON.stringify({ message: 'Invoice not found' }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      return new Response(
+        JSON.stringify(invoiceData),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (path.startsWith('invoices/') && method === 'PATCH') {
+      const id = path.split('/')[1]
+      const body = await req.json()
+      const { type, amountTTC, taxRate, invoiceUrl, invoiceNumber, issueDate, notes } = body
+      
+      // Vérifier que la facture existe
+      const { data: existingInvoice, error: fetchError } = await supabase
+        .from('Invoice')
+        .select('*')
+        .eq('id', id)
+        .single()
+      
+      if (fetchError || !existingInvoice) {
+        return new Response(
+          JSON.stringify({ message: 'Invoice not found' }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      // Vérifier qu'aucun paiement n'est lié si on veut supprimer
+      const { data: payments, error: paymentsError } = await supabase
+        .from('Payment')
+        .select('id')
+        .eq('invoiceId', id)
+      
+      if (paymentsError) {
+        console.error('[INVOICE PATCH] Error checking payments:', paymentsError)
+      }
+      
+      const updateData: any = {
+        updatedAt: new Date().toISOString()
+      }
+      
+      if (type !== undefined) updateData.type = type
+      if (amountTTC !== undefined) updateData.amountTTC = amountTTC
+      if (taxRate !== undefined) updateData.taxRate = taxRate
+      if (invoiceUrl !== undefined) updateData.invoiceUrl = invoiceUrl
+      if (invoiceNumber !== undefined) updateData.invoiceNumber = invoiceNumber
+      if (issueDate !== undefined) updateData.issueDate = new Date(issueDate).toISOString()
+      if (notes !== undefined) updateData.notes = notes
+      
+      const { data: invoiceData, error } = await supabase
+        .from('Invoice')
+        .update(updateData)
+        .eq('id', id)
+        .select('*, opportunity:Opportunity(*, company:Company(*), contact:Contact(*)), payments:Payment(*)')
+        .single()
+      
+      if (error) throw error
+      
+      return new Response(
+        JSON.stringify(invoiceData),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (path.startsWith('invoices/') && method === 'DELETE') {
+      const id = path.split('/')[1]
+      
+      // Vérifier qu'aucun paiement n'est lié
+      const { data: payments, error: paymentsError } = await supabase
+        .from('Payment')
+        .select('id')
+        .eq('invoiceId', id)
+      
+      if (paymentsError) {
+        console.error('[INVOICE DELETE] Error checking payments:', paymentsError)
+      }
+      
+      if (payments && payments.length > 0) {
+        return new Response(
+          JSON.stringify({ message: 'Cannot delete invoice with linked payments' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      const { error } = await supabase
+        .from('Invoice')
+        .delete()
+        .eq('id', id)
+      
+      if (error) throw error
+      
+      return new Response(
+        JSON.stringify({ message: 'Invoice deleted successfully' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -4368,9 +4642,27 @@ serve(async (req) => {
       // Récupérer les paiements réels
       const { data: payments } = await supabase
         .from('Payment')
-        .select('amount, taxAmount, paymentDate, opportunityId, deboursNoteId')
+        .select('amount, taxAmount, paymentDate, opportunityId, deboursNoteId, invoiceId')
         .gte('paymentDate', start.toISOString())
         .lte('paymentDate', end.toISOString())
+      
+      // Récupérer les factures d'accomptes pour calculer le montant total des acomptes facturés
+      // On déduit le montant total des factures d'acompte (pas seulement les paiements),
+      // car une fois qu'une facture d'acompte est créée, elle réduit le montant prévisionnel restant
+      const { data: invoices } = await supabase
+        .from('Invoice')
+        .select('id, type, amountTTC, opportunityId')
+        .eq('type', 'ACOMPTE')
+      
+      // Calculer le montant total des factures d'acompte par opportunité
+      const advancePaymentsByOpportunity: Record<string, number> = {}
+      if (invoices && invoices.length > 0) {
+        invoices.forEach((inv: any) => {
+          if (inv.opportunityId) {
+            advancePaymentsByOpportunity[inv.opportunityId] = (advancePaymentsByOpportunity[inv.opportunityId] || 0) + Number(inv.amountTTC || 0)
+          }
+        })
+      }
       
       // Récupérer toutes les dépenses (y compris celles liées aux opportunités finalisées)
       const { data: expenses } = await supabase
@@ -4494,7 +4786,8 @@ serve(async (req) => {
           deboursNotesForecast: deboursNotesWithExpenses || [], // Notes de débours en prévisionnel avec montants calculés depuis les dépenses
           finalizedExpenses: finalizedExpenses || [],
           finalizedDeboursNotes: finalizedDeboursNotes || [],
-          taxPayments
+          taxPayments,
+          advancePaymentsByOpportunity // Montants des acomptes payés par opportunité
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
