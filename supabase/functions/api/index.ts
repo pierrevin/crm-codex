@@ -1510,6 +1510,62 @@ serve(async (req) => {
       )
     }
 
+    // ===== TAX RATES ROUTES =====
+    if (path === 'tax-rates' && method === 'GET') {
+      const { data, error } = await supabase
+        .from('TaxRateConfig')
+        .select('*')
+        .order('effectiveFrom', { ascending: false })
+
+      if (error) {
+        console.error('[TAX-RATES] Error fetching tax rates:', error)
+        return new Response(
+          JSON.stringify({ message: error.message }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      return new Response(
+        JSON.stringify(data ?? []),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (path === 'tax-rates' && method === 'POST') {
+      const body = await req.json()
+      const { rate, label, effectiveFrom } = body as { rate?: number; label?: string; effectiveFrom?: string }
+
+      if (typeof rate !== 'number' || !effectiveFrom) {
+        return new Response(
+          JSON.stringify({ message: 'rate (number) and effectiveFrom (ISO string) are required' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      const { data, error } = await supabase
+        .from('TaxRateConfig')
+        .insert({
+          rate,
+          label: label ?? null,
+          effectiveFrom
+        })
+        .select()
+        .single()
+
+      if (error) {
+        console.error('[TAX-RATES] Error inserting tax rate:', error)
+        return new Response(
+          JSON.stringify({ message: error.message }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      return new Response(
+        JSON.stringify(data),
+        { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     if (path === 'webhooks/events' && method === 'GET') {
       const events = [
         {

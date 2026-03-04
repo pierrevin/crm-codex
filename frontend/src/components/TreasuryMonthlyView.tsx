@@ -99,11 +99,12 @@ export function TreasuryMonthlyView({
       data[months[0]].soldeInitial = runningBalance;
     }
 
-    // Créer un map des paiements réels par opportunité
-    const paymentsByOpportunity = new Map<string, Payment>();
+    // Somme des paiements réels par opportunité (toutes dates confondues)
+    const totalPaidByOpportunity = new Map<string, number>();
     payments.forEach(payment => {
       if (payment.opportunityId) {
-        paymentsByOpportunity.set(payment.opportunityId, payment);
+        const prev = totalPaidByOpportunity.get(payment.opportunityId) || 0;
+        totalPaidByOpportunity.set(payment.opportunityId, prev + Number(payment.amount));
       }
     });
 
@@ -138,23 +139,19 @@ export function TreasuryMonthlyView({
       const paymentDate = new Date(opp.expectedPaymentDate);
       const monthKey = `${paymentDate.getFullYear()}-${String(paymentDate.getMonth() + 1).padStart(2, '0')}`;
       if (data[monthKey]) {
-        let montantOpp = Number(opp.amount) || 0;
-        
-        // Déduire les acomptes facturés du montant prévisionnel final
-        // advancePaymentsByOpportunity contient le montant total des factures d'acompte (pas seulement les paiements)
+        const montantTotal = Number(opp.amount) || 0;
         const advancePayments = forecast?.advancePaymentsByOpportunity?.[opp.id] || 0;
-        if (advancePayments > 0) {
-          montantOpp = Math.max(0, montantOpp - advancePayments);
-        }
+        const paidAmount = totalPaidByOpportunity.get(opp.id) || 0;
+        const montantRestant = montantTotal - advancePayments - paidAmount;
         
         // Ne pas ajouter si le montant après déduction est 0 ou négatif
-        if (montantOpp > 0) {
-          data[monthKey].encaissementsPrevisionnels += montantOpp;
+        if (montantRestant > 0) {
+          data[monthKey].encaissementsPrevisionnels += montantRestant;
           
           // Calculer les taxes pour les paiements prévisionnels (mois +1, au 30)
-          // Les taxes sont calculées sur le montant après déduction des acomptes
+          // Les taxes sont calculées sur le montant après déduction des acomptes et des paiements réels
           const taxRate = opp.taxRate ?? 0.27;
-          const taxAmount = montantOpp * taxRate;
+          const taxAmount = montantRestant * taxRate;
           // Les taxes sont imputées au 30 du mois suivant le paiement
           const taxMonth = new Date(paymentDate.getFullYear(), paymentDate.getMonth() + 1, 1);
           const taxMonthKey = `${taxMonth.getFullYear()}-${String(taxMonth.getMonth() + 1).padStart(2, '0')}`;
@@ -266,6 +263,15 @@ export function TreasuryMonthlyView({
       decaissements: [] as Array<{ type: string; label: string; amount: number }>
     };
 
+    // Somme des paiements réels par opportunité (toutes dates confondues)
+    const totalPaidByOpportunity = new Map<string, number>();
+    payments.forEach(payment => {
+      if (payment.opportunityId) {
+        const prev = totalPaidByOpportunity.get(payment.opportunityId) || 0;
+        totalPaidByOpportunity.set(payment.opportunityId, prev + Number(payment.amount));
+      }
+    });
+
     // Encaissements prévisionnels - opportunités
     forecast?.opportunities.forEach(opp => {
       if (!opp.expectedPaymentDate || !opp.amount || opp.stage === 'FINALIZED') return;
@@ -273,27 +279,29 @@ export function TreasuryMonthlyView({
       if (selectedStages && opp.stage && !selectedStages.has(opp.stage)) return;
       const paymentDate = new Date(opp.expectedPaymentDate);
       if (paymentDate >= monthStart && paymentDate <= monthEnd) {
-        const hasRealPayment = payments.some(p => p.opportunityId === opp.id && 
-          new Date(p.paymentDate) >= monthStart && new Date(p.paymentDate) <= monthEnd);
-        if (!hasRealPayment) {
-          // Construire un libellé riche : Opportunité – Client – Contact
-          const fullOpp = opportunities.find(o => o.id === opp.id);
-          const companyName = fullOpp?.company?.name;
-          const contactName = fullOpp?.contact
-            ? `${fullOpp.contact.firstName} ${fullOpp.contact.lastName ?? ''}`.trim()
-            : undefined;
+        const montantTotal = Number(opp.amount) || 0;
+        const advancePayments = forecast?.advancePaymentsByOpportunity?.[opp.id] || 0;
+        const paidAmount = totalPaidByOpportunity.get(opp.id) || 0;
+        const montantRestant = montantTotal - advancePayments - paidAmount;
+        if (montantRestant <= 0) return;
 
-          const parts: string[] = [];
-          if (fullOpp?.title || opp.title) parts.push(fullOpp?.title || opp.title);
-          if (companyName) parts.push(companyName);
-          if (contactName) parts.push(contactName);
+        // Construire un libellé riche : Opportunité – Client – Contact
+        const fullOpp = opportunities.find(o => o.id === opp.id);
+        const companyName = fullOpp?.company?.name;
+        const contactName = fullOpp?.contact
+          ? `${fullOpp.contact.firstName} ${fullOpp.contact.lastName ?? ''}`.trim()
+          : undefined;
 
-          details.encaissements.push({
-            type: 'previsionnel',
-            label: parts.length > 0 ? parts.join(' – ') : (opp.title || 'Opportunité'),
-            amount: Number(opp.amount)
-          });
-        }
+        const parts: string[] = [];
+        if (fullOpp?.title || opp.title) parts.push(fullOpp?.title || opp.title);
+        if (companyName) parts.push(companyName);
+        if (contactName) parts.push(contactName);
+
+        details.encaissements.push({
+          type: 'previsionnel',
+          label: parts.length > 0 ? parts.join(' – ') : (opp.title || 'Opportunité'),
+          amount: montantRestant
+        });
       }
     });
 

@@ -473,10 +473,12 @@ export function TreasuryPage() {
       current.setDate(current.getDate() + 1);
     }
 
-    const paymentsByOpportunity = new Map<string, Payment>();
+    // Somme des paiements réels par opportunité (toutes dates confondues)
+    const totalPaidByOpportunity = new Map<string, number>();
     (payments || []).forEach(payment => {
       if (payment.opportunityId) {
-        paymentsByOpportunity.set(payment.opportunityId, payment);
+        const prev = totalPaidByOpportunity.get(payment.opportunityId) || 0;
+        totalPaidByOpportunity.set(payment.opportunityId, prev + Number(payment.amount));
       }
     });
 
@@ -507,20 +509,25 @@ export function TreasuryPage() {
       if (!opp.expectedPaymentDate || !opp.amount) return;
       if (opp.stage && !selectedStages.has(opp.stage)) return;
       if (opp.stage === 'FINALIZED') return;
-      if (paymentsByOpportunity.has(opp.id)) return;
 
       try {
         const paymentDate = new Date(opp.expectedPaymentDate);
         paymentDate.setHours(0, 0, 0, 0);
         const dayKey = `${paymentDate.getFullYear()}-${String(paymentDate.getMonth() + 1).padStart(2, '0')}-${String(paymentDate.getDate()).padStart(2, '0')}`;
         if (dailyData[dayKey]) {
-          const montant = Number(opp.amount) || 0;
-          dailyData[dayKey].encaissementsPrevisionnels += montant;
-          dailyData[dayKey].encaissementsPrevisionnelOpportunites += montant;
+          const montantTotal = Number(opp.amount) || 0;
+          const advancePayments = forecast?.advancePaymentsByOpportunity?.[opp.id] || 0;
+          const paidAmount = totalPaidByOpportunity.get(opp.id) || 0;
+          const montantRestant = montantTotal - advancePayments - paidAmount;
+          if (montantRestant <= 0) {
+            return;
+          }
+          dailyData[dayKey].encaissementsPrevisionnels += montantRestant;
+          dailyData[dayKey].encaissementsPrevisionnelOpportunites += montantRestant;
 
           // Taxes sur encaissements prévisionnels (ventes uniquement), imputées au 30 du mois suivant
           const taxRate = opp.taxRate ?? 0.27;
-          const taxAmount = montant * taxRate;
+          const taxAmount = montantRestant * taxRate;
           const taxDate = new Date(paymentDate.getFullYear(), paymentDate.getMonth() + 1, 30);
           taxDate.setHours(0, 0, 0, 0);
           const taxDayKey = `${taxDate.getFullYear()}-${String(taxDate.getMonth() + 1).padStart(2, '0')}-${String(taxDate.getDate()).padStart(2, '0')}`;
@@ -673,11 +680,12 @@ export function TreasuryPage() {
       current.setMonth(current.getMonth() + 1);
     }
 
-    // Créer un map des paiements réels par opportunité pour éviter les doublons
-    const paymentsByOpportunity = new Map<string, Payment>();
+    // Somme des paiements réels par opportunité (toutes dates confondues)
+    const totalPaidByOpportunity = new Map<string, number>();
     (payments || []).forEach(payment => {
       if (payment.opportunityId) {
-        paymentsByOpportunity.set(payment.opportunityId, payment);
+        const prev = totalPaidByOpportunity.get(payment.opportunityId) || 0;
+        totalPaidByOpportunity.set(payment.opportunityId, prev + Number(payment.amount));
       }
     });
 
@@ -755,24 +763,20 @@ export function TreasuryPage() {
         
         const monthKey = `${paymentDate.getFullYear()}-${String(paymentDate.getMonth() + 1).padStart(2, '0')}`;
         if (monthlyData[monthKey]) {
-          let montantOpp = Number(opp.amount) || 0;
-          
-          // Déduire les acomptes facturés du montant prévisionnel final
-          // advancePaymentsByOpportunity contient le montant total des factures d'acompte (pas seulement les paiements)
+          const montantTotal = Number(opp.amount) || 0;
           const advancePayments = forecast?.advancePaymentsByOpportunity?.[opp.id] || 0;
-          if (advancePayments > 0) {
-            montantOpp = Math.max(0, montantOpp - advancePayments);
-          }
+          const paidAmount = totalPaidByOpportunity.get(opp.id) || 0;
+          const montantRestant = montantTotal - advancePayments - paidAmount;
           
           // Ne pas ajouter si le montant après déduction est 0 ou négatif
-          if (montantOpp > 0) {
-            monthlyData[monthKey].encaissementsPrevisionnels += montantOpp;
-            monthlyData[monthKey].encaissementsPrevisionnelOpportunites += montantOpp;
+          if (montantRestant > 0) {
+            monthlyData[monthKey].encaissementsPrevisionnels += montantRestant;
+            monthlyData[monthKey].encaissementsPrevisionnelOpportunites += montantRestant;
             
             // Calculer les taxes pour les paiements prévisionnels (mois +1, au 30)
-            // Les taxes sont calculées sur le montant après déduction des acomptes
+            // Les taxes sont calculées sur le montant après déduction des acomptes et des paiements réels
             const taxRate = opp.taxRate ?? 0.27;
-            const taxAmount = montantOpp * taxRate;
+            const taxAmount = montantRestant * taxRate;
             // Les taxes sont imputées au 30 du mois suivant le paiement
             const taxMonth = new Date(paymentDate.getFullYear(), paymentDate.getMonth() + 1, 1);
             const taxMonthKey = `${taxMonth.getFullYear()}-${String(taxMonth.getMonth() + 1).padStart(2, '0')}`;
