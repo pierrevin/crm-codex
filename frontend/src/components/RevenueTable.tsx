@@ -146,17 +146,23 @@ export function RevenueTable({
       });
     });
 
-    // Calculer le total facturé pour le paiement prévisionnel
+    // Calculer les totaux globaux pour le paiement prévisionnel
     const totalInvoiced = invoices.reduce((sum, inv) => sum + Number(inv.amountTTC || 0), 0);
+    const totalPaidOverall = payments.reduce(
+      (sum, p) => sum + parseFloat(p.amount.toString()),
+      0
+    );
+    const targetAmount = opportunityAmount || totalInvoiced || 0;
+    const remainingToCollect = Math.max(0, targetAmount - totalPaidOverall);
 
-    // Ajouter le paiement prévisionnel si applicable
-    if (opportunityAmount && opportunityExpectedPaymentDate) {
-      const remainingAmount = opportunityAmount - totalInvoiced;
+    // Ajouter le paiement prévisionnel si applicable :
+    // il représente le reste à encaisser sur l'opportunité, uniquement s'il reste un solde.
+    if (opportunityExpectedPaymentDate && remainingToCollect > 0) {
       items.push({
         id: 'provisional-payment',
         type: 'PROVISIONAL',
         title: 'Paiement prévisionnel',
-        amount: remainingAmount,
+        amount: remainingToCollect,
         date: opportunityExpectedPaymentDate,
         payments: [],
         isProvisional: true
