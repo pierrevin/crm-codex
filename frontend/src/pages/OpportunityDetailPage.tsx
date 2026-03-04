@@ -377,7 +377,7 @@ export function OpportunityDetailPage() {
             max="100"
             value={opportunity.taxRate !== undefined ? (opportunity.taxRate * 100) : ''}
             onChange={(event) => setOpportunity({ ...opportunity, taxRate: event.target.value ? parseFloat(event.target.value) / 100 : undefined })}
-            placeholder="27"
+            placeholder="28"
             className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
           />
           <p className="mt-1 text-xs text-slate-500">Par défaut : 27%</p>
@@ -619,7 +619,7 @@ export function OpportunityDetailPage() {
                     max="100"
                     value={opportunity.taxRate !== undefined ? (opportunity.taxRate * 100) : ''}
                     onChange={(event) => setOpportunity({ ...opportunity, taxRate: event.target.value ? parseFloat(event.target.value) / 100 : undefined })}
-                    placeholder="27"
+            placeholder="28"
                     className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
                   />
                 </div>

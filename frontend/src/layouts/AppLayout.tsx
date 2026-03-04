@@ -11,6 +11,7 @@ const navItems = [
   { to: '/opportunites', label: 'Opportunités' },
   { to: '/depenses', label: 'Dépenses' },
   { to: '/tresorerie', label: 'Trésorerie' },
+  { to: '/parametres/taxes', label: 'Taxes' },
   { to: '/webhooks', label: 'Webhooks' }
 ];
 

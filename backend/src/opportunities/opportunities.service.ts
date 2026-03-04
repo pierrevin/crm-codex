@@ -4,6 +4,7 @@ import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { WebhooksService } from '../webhooks/webhooks.service';
 import { GoogleService } from '../google/google.service';
+import { TaxRateService } from '../tax/tax-rate.service';
 
 import { CreateOpportunityDto } from './dto/create-opportunity.dto';
 import { UpdateOpportunityDto } from './dto/update-opportunity.dto';
@@ -14,7 +15,8 @@ export class OpportunitiesService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly webhooks: WebhooksService,
-    private readonly google: GoogleService
+    private readonly google: GoogleService,
+    private readonly taxRates: TaxRateService
   ) {}
 
   async list(cursor: string | undefined, limit: number) {
@@ -30,11 +32,17 @@ export class OpportunitiesService {
   }
 
   async create(dto: CreateOpportunityDto) {
+    const now = new Date();
+    const expectedDate = dto.expectedPaymentDate ? new Date(dto.expectedPaymentDate) : undefined;
+    const referenceDate = expectedDate ?? (dto.closeDate ? new Date(dto.closeDate) : now);
+    const resolvedTaxRate =
+      dto.taxRate !== undefined ? dto.taxRate : await this.taxRates.getRateForDate(referenceDate);
+
     const data = {
       ...dto,
       closeDate: dto.closeDate ? new Date(dto.closeDate) : undefined,
       expectedPaymentDate: dto.expectedPaymentDate ? new Date(dto.expectedPaymentDate) : undefined,
-      taxRate: dto.taxRate ?? 0.27 // Par défaut 27%
+      taxRate: resolvedTaxRate
     };
     const opportunity = await this.prisma.opportunity.create({ data });
     await this.audit.log('opportunity', opportunity.id, 'created');

@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 
 import { PrismaService } from '../common/prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { TaxRateService } from '../tax/tax-rate.service';
 
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { UpdateInvoiceDto } from './dto/update-invoice.dto';
@@ -10,7 +11,8 @@ import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 export class InvoicesService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly audit: AuditService
+    private readonly audit: AuditService,
+    private readonly taxRates: TaxRateService
   ) {}
 
   async create(dto: CreateInvoiceDto) {
@@ -23,8 +25,16 @@ export class InvoicesService {
       throw new NotFoundException('Opportunity not found');
     }
 
-    // Utiliser le taxRate de l'opportunité si non fourni
-    const taxRate = dto.taxRate ?? (opportunity.taxRate ? Number(opportunity.taxRate) : 0.27);
+    // Utiliser le taxRate de l'opportunité si non fourni, sinon résoudre via la config
+    let taxRate = dto.taxRate;
+    if (taxRate === undefined) {
+      if (opportunity.taxRate) {
+        taxRate = Number(opportunity.taxRate);
+      } else {
+        const referenceDate = dto.issueDate ? new Date(dto.issueDate) : new Date();
+        taxRate = await this.taxRates.getRateForDate(referenceDate);
+      }
+    }
     const issueDate = dto.issueDate ? new Date(dto.issueDate) : new Date();
 
     const invoice = await this.prisma.invoice.create({

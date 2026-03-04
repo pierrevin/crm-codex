@@ -50,8 +50,8 @@ export function PaymentModal({
         // Mode création : valeurs par défaut
         const amount = deboursNoteAmount || opportunityAmount;
         setAmount(amount?.toString() || '');
-        // Notes de débours : pas de taxe (0%), opportunités : taux par défaut ou 27%
-        setTaxRate(deboursNoteId ? '0' : (opportunityTaxRate ? (opportunityTaxRate * 100).toString() : '27'));
+        // Notes de débours : pas de taxe (0%), opportunités : taux par défaut ou 28%
+        setTaxRate(deboursNoteId ? '0' : (opportunityTaxRate ? (opportunityTaxRate * 100).toString() : '28'));
         setPaymentDate(new Date().toISOString().split('T')[0]);
         setNotes('');
       }
@@ -193,7 +193,7 @@ export function PaymentModal({
                       if (e.target.checked) {
                         setTaxRate('0');
                       } else {
-                        setTaxRate(opportunityTaxRate ? (opportunityTaxRate * 100).toString() : '27');
+                        setTaxRate(opportunityTaxRate ? (opportunityTaxRate * 100).toString() : '28');
                       }
                     }}
                     className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"

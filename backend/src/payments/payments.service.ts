@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { TaxRateService } from '../tax/tax-rate.service';
 
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { UpdatePaymentDto } from './dto/update-payment.dto';
@@ -10,7 +11,8 @@ import { UpdatePaymentDto } from './dto/update-payment.dto';
 export class PaymentsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly audit: AuditService
+    private readonly audit: AuditService,
+    private readonly taxRates: TaxRateService
   ) {}
 
   async create(dto: CreatePaymentDto) {
@@ -19,8 +21,8 @@ export class PaymentsService {
       throw new NotFoundException('Either opportunityId, deboursNoteId, or invoiceId must be provided');
     }
 
-    let taxRate = dto.taxRate ?? 0.27;
-    let taxAmount = dto.amount * taxRate;
+    let taxRate = dto.taxRate;
+    let taxAmount: number;
     let opportunityId = dto.opportunityId;
 
     // Si invoiceId est fourni, récupérer la facture et utiliser ses informations
@@ -32,7 +34,9 @@ export class PaymentsService {
       if (!invoice) {
         throw new NotFoundException('Invoice not found');
       }
-      taxRate = dto.taxRate ?? Number(invoice.taxRate);
+      if (taxRate === undefined) {
+        taxRate = Number(invoice.taxRate);
+      }
       taxAmount = dto.amount * Number(taxRate);
       opportunityId = invoice.opportunityId;
     } else if (dto.opportunityId) {
@@ -43,8 +47,15 @@ export class PaymentsService {
       if (!opportunity) {
         throw new NotFoundException('Opportunity not found');
       }
-      taxRate = dto.taxRate ?? (opportunity.taxRate ? Number(opportunity.taxRate) : 0.27);
-      taxAmount = dto.amount * taxRate;
+      if (taxRate === undefined) {
+        if (opportunity.taxRate) {
+          taxRate = Number(opportunity.taxRate);
+        } else {
+          const referenceDate = dto.paymentDate ? new Date(dto.paymentDate) : new Date();
+          taxRate = await this.taxRates.getRateForDate(referenceDate);
+        }
+      }
+      taxAmount = dto.amount * Number(taxRate);
     } else if (dto.deboursNoteId) {
       // Si c'est une note de débours, les notes de débours ne sont généralement pas soumises à taxe
       const deboursNote = await this.prisma.deboursNote.findUnique({
@@ -56,6 +67,13 @@ export class PaymentsService {
       // Notes de débours : pas de taxe (0%)
       taxRate = 0;
       taxAmount = 0;
+    } else {
+      // Aucun lien précis : résoudre via configuration si le taux n'est pas fourni
+      if (taxRate === undefined) {
+        const referenceDate = dto.paymentDate ? new Date(dto.paymentDate) : new Date();
+        taxRate = await this.taxRates.getRateForDate(referenceDate);
+      }
+      taxAmount = dto.amount * Number(taxRate);
     }
 
     const paymentDate = dto.paymentDate ? new Date(dto.paymentDate) : new Date();

@@ -390,6 +390,15 @@ model TreasuryBalance {
   updatedAt DateTime @updatedAt
 }
 
+model TaxRateConfig {
+  id           String   @id @default(cuid())
+  rate         Decimal  @db.Decimal(5, 4) // Taux de taxe (0.27 pour 27%, 0.28 pour 28%)
+  label        String?  // Libellé optionnel (ex: \"Taux standard France 2025\")
+  effectiveFrom DateTime // Date de début de validité du taux
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
 model DeboursNote {
   id                  String            @id @default(cuid())
   title               String            // Titre de la note de débours

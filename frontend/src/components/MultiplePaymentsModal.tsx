@@ -39,7 +39,7 @@ export function MultiplePaymentsModal({
       id: '1',
       amount: opportunityAmount?.toString() || '',
       paymentDate: new Date().toISOString().split('T')[0],
-      taxRate: opportunityTaxRate ? (opportunityTaxRate * 100).toString() : '27',
+      taxRate: opportunityTaxRate ? (opportunityTaxRate * 100).toString() : '28',
       notes: ''
     }
   ]);
@@ -54,7 +54,7 @@ export function MultiplePaymentsModal({
         id: '1',
         amount: opportunityAmount?.toString() || '',
         paymentDate: new Date().toISOString().split('T')[0],
-        taxRate: opportunityTaxRate ? (opportunityTaxRate * 100).toString() : '27',
+      taxRate: opportunityTaxRate ? (opportunityTaxRate * 100).toString() : '28',
         notes: ''
       }]);
       setMarkAsFullyPaid(false);
