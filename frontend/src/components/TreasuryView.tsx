@@ -94,7 +94,7 @@ export function TreasuryView({
       }
       
       const amountHT = Number(opp.amount) || 0;
-      const taxes = amountHT * 0.27; // 27% de taxes
+      const taxes = amountHT * 0.28; // 28% de taxes (valeur par défaut actuelle)
       const amountNet = amountHT * 0.73; // Montant net après taxes
       
       monthlyData[monthKey].caHT += amountHT;

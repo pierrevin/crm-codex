@@ -171,10 +171,10 @@ export function ExpenseUploadModal({ onClose, opportunityId }: ExpenseUploadModa
       if (!supplierName) {
         setSupplierName('Pierre');
       }
-      // Code compte pour salaires (641 = Rémunération personnel)
+      // Code compte pour salaires (6411 = Rémunérations du personnel)
       if (!accountCode) {
-        setAccountCode('641');
-        setAccountLabel('Rémunération personnel');
+        setAccountCode('6411');
+        setAccountLabel('Rémunérations du personnel');
       }
     }
   }, [expenseType]);
@@ -909,11 +909,11 @@ export function ExpenseUploadModal({ onClose, opportunityId }: ExpenseUploadModa
                     onChange={(e) => setAccountCode(e.target.value)}
                     required
                     className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 bg-slate-50"
-                    placeholder="641"
+                    placeholder="6411"
                     readOnly
                   />
                   <p className="mt-1 text-xs text-slate-500">
-                    Rémunération personnel (641)
+                    Rémunérations du personnel (6411)
                   </p>
                 </div>
               )}

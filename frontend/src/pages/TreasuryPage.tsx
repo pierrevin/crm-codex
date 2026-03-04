@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import { 
+import {
   AdjustmentsHorizontalIcon,
   CurrencyEuroIcon,
   ChartBarIcon
@@ -12,6 +12,12 @@ import { expensesService } from '../services/expensesService';
 import { TreasuryMonthlyView } from '../components/TreasuryMonthlyView';
 import { PaymentModal } from '../components/PaymentModal';
 import { BalanceEditor } from '../components/BalanceEditor';
+import {
+  buildDailyTreasuryData,
+  buildMonthlyTreasuryData,
+  toDateKey,
+  isBeforeDay
+} from '../domain/treasury/treasuryCalculations';
 
 const formatCurrency = (value: number) => {
   return new Intl.NumberFormat('fr-FR', {
@@ -20,18 +26,6 @@ const formatCurrency = (value: number) => {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0
   }).format(value);
-};
-
-const toDateKey = (d: Date) => {
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
-
-const isBeforeDay = (a: Date, b: Date) => {
-  // Compare uniquement sur le jour (pas l'heure), pour éviter les effets de timezone.
-  return toDateKey(a) < toDateKey(b);
 };
 
 // Composant Tooltip personnalisé pour afficher les détails
@@ -186,6 +180,7 @@ export function TreasuryPage() {
   const [periodInitialBalance, setPeriodInitialBalance] = useState<number>(0);
   // Date d'ancrage de projection (par défaut: dernier solde manuel si disponible)
   const [projectionAnchorDate, setProjectionAnchorDate] = useState<Date | null>(null);
+  const [anchorBalance, setAnchorBalance] = useState<number | null>(null);
   const [balanceIsManual, setBalanceIsManual] = useState<boolean>(false);
   const [forecast, setForecast] = useState<TreasuryForecast | null>(null);
   const [payments, setPayments] = useState<Payment[]>([]);
@@ -228,19 +223,22 @@ export function TreasuryPage() {
     }
     
     // Sinon, utiliser les périodes prédéfinies
+    // Point de départ : premier jour du MOIS PRÉCÉDENT (M-1)
     const start = new Date();
-    start.setDate(1); // Premier jour du mois
+    start.setDate(1);
+    start.setMonth(start.getMonth() - 1);
     start.setHours(0, 0, 0, 0);
     
     const end = new Date();
+    // Ajuster pour garder la même longueur de période tout en commençant à M-1
     if (period === 3) {
-      end.setMonth(end.getMonth() + 3);
+      end.setMonth(end.getMonth() + 2); // M-1 → M+1 = 3 mois
     } else if (period === 6) {
-      end.setMonth(end.getMonth() + 6);
+      end.setMonth(end.getMonth() + 5); // M-1 → M+4 = 6 mois
     } else if (period === 12) {
-      end.setMonth(end.getMonth() + 12);
+      end.setMonth(end.getMonth() + 11); // M-1 → M+10 = 12 mois
     } else {
-      end.setMonth(end.getMonth() + 6);
+      end.setMonth(end.getMonth() + 5);
     }
     // Dernier jour du mois de fin
     end.setMonth(end.getMonth() + 1);
@@ -325,8 +323,6 @@ export function TreasuryPage() {
       today.setHours(0, 0, 0, 0);
       const computedBalanceToday = balanceRes?.balance || 0;
       
-      // Mode par défaut: projeter depuis le dernier solde manuel disponible (ancre), et ignorer l'historique avant.
-      // Si aucun solde manuel n'existe, on retombe sur l'ancien comportement (reconstruction au startDate).
       // Ancre de projection:
       // - si l'API renvoie `lastManual`, on l'utilise
       // - sinon, si `isManual === true`, alors `balanceRes.balance` + `balanceRes.date` sont déjà le dernier manuel (récent)
@@ -340,21 +336,11 @@ export function TreasuryPage() {
       const anchor = lastManual?.date ? new Date(lastManual.date) : null;
       const hasAnchor = anchor && !isNaN(anchor.getTime());
 
-      // Date effective de début de projection = max(startDate, anchorDate) si ancre présente
-      const effectiveStart = hasAnchor
-        ? new Date(Math.max(startDate.getTime(), (anchor as Date).getTime()))
-        : new Date(startDate);
-      effectiveStart.setHours(0, 0, 0, 0);
-
       // Solde initial de projection:
-      // - si on a une ancre manuelle et qu'elle est >= startDate, le solde initial = solde manuel (ancre)
-      // - sinon on reconstruit au startDate depuis le solde à jour J (ancien mode)
+      // on reconstruit toujours le solde au startDate à partir du solde à jour J
+      // (manuel ou calculé), indépendamment de la présence d'une ancre.
       let calculatedPeriodInitialBalance = computedBalanceToday;
-      if (hasAnchor && (anchor as Date).getTime() >= startDate.getTime()) {
-        calculatedPeriodInitialBalance = Number(lastManual!.balance) || 0;
-      }
-      
-      if (!(hasAnchor && (anchor as Date).getTime() >= startDate.getTime()) && startDate < today) {
+      if (startDate < today) {
         // Date de début passée : il faut soustraire les mouvements entre startDate et aujourd'hui
         // pour retrouver le solde qu'on avait à startDate
         const pastPaymentsRes = await paymentService.getAll({
@@ -380,7 +366,7 @@ export function TreasuryPage() {
         //   + décaissements depuis startDate
         //   + taxes depuis startDate (car taxes diminuent le solde "aujourd'hui" dans l'API)
         calculatedPeriodInitialBalance = computedBalanceToday - pastEncaissements + pastDecaissements + pastTaxes;
-      } else if (!(hasAnchor && (anchor as Date).getTime() >= startDate.getTime()) && startDate >= today) {
+      } else if (startDate >= today) {
         // Date de début aujourd'hui ou future : le solde initial est le solde d'aujourd'hui
         calculatedPeriodInitialBalance = computedBalanceToday;
       }
@@ -389,6 +375,7 @@ export function TreasuryPage() {
       setBalanceTodayDate(balanceRes?.date ?? null);
       setPeriodInitialBalance(calculatedPeriodInitialBalance);
       setProjectionAnchorDate(hasAnchor ? (anchor as Date) : null);
+      setAnchorBalance(lastManual ? Number(lastManual.balance) || 0 : null);
       setBalanceIsManual(balanceRes?.isManual || false);
       setForecast(forecastRes || { opportunities: [], payments: [], expenses: [], taxPayments: {} });
       setPayments(allPayments);
@@ -440,193 +427,26 @@ export function TreasuryPage() {
     return viewGranularity === 'day' && exceedsThreeMonths;
   }, [viewGranularity, exceedsThreeMonths]);
 
-  // Fonction pour construire les données journalières
   const buildDailyData = useMemo(() => {
     if (!forecast || viewGranularity !== 'day') return [];
 
-    const dailyData: Record<string, any> = {};
-    const startForProjectionRaw = projectionAnchorDate && projectionAnchorDate > startDate ? projectionAnchorDate : startDate;
-    const startForProjection = new Date(startForProjectionRaw);
-    startForProjection.setHours(0, 0, 0, 0);
-
-    const current = new Date(startForProjection);
-    current.setHours(0, 0, 0, 0);
-    const end = new Date(endDate);
-    end.setHours(23, 59, 59, 999);
-
-    while (current <= end) {
-      const dayKey = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(current.getDate()).padStart(2, '0')}`;
-      dailyData[dayKey] = {
-        // Inclure l'année pour éviter toute ambiguïté sur les périodes longues (ex: 31 déc. 2025 vs 31 déc. 2026)
-        day: current.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' }),
-        dayKey: dayKey,
-        date: new Date(current),
-        solde: 0,
-        encaissementsPrevisionnels: 0,
-        encaissementsPrevisionnelOpportunites: 0,
-        encaissementsPrevisionnelDebours: 0,
-        encaissementsReels: 0,
-        decaissements: 0,
-        decaissementsDepenses: 0,
-        taxes: 0
-      };
-      current.setDate(current.getDate() + 1);
-    }
-
-    // Somme des paiements réels par opportunité (toutes dates confondues)
-    const totalPaidByOpportunity = new Map<string, number>();
-    (payments || []).forEach(payment => {
-      if (payment.opportunityId) {
-        const prev = totalPaidByOpportunity.get(payment.opportunityId) || 0;
-        totalPaidByOpportunity.set(payment.opportunityId, prev + Number(payment.amount));
-      }
-    });
-
-    // Pour les opportunités finalisées, utiliser les dépenses réelles (finalizedExpenses)
-    // et éviter de les compter deux fois avec `expenses`.
-    const finalizedExpenseIds = new Set(
-      (forecast?.finalizedExpenses || [])
-        .filter((e: any) => e.opportunityId && e.invoiceDate)
-        .map((e: any) => `${e.opportunityId!}-${e.invoiceDate!}`)
-    );
-
-    // Injecter d'abord les dépenses finalisées (réelles)
-    (forecast?.finalizedExpenses || []).forEach((expense: any) => {
-      if (!expense.invoiceDate) return;
-      const expenseDate = new Date(expense.invoiceDate);
-      if (isNaN(expenseDate.getTime())) return;
-      if (isBeforeDay(expenseDate, startForProjection)) return;
-      const dayKey = `${expenseDate.getFullYear()}-${String(expenseDate.getMonth() + 1).padStart(2, '0')}-${String(expenseDate.getDate()).padStart(2, '0')}`;
-      if (dailyData[dayKey]) {
-        const amount = expense.amountTTC || expense.amountHT || 0;
-        dailyData[dayKey].decaissements += amount;
-        dailyData[dayKey].decaissementsDepenses += amount;
-      }
-    });
-
-    // Opportunités prévisionnelles (filtrées par étapes)
-    (forecast?.opportunities || []).forEach(opp => {
-      if (!opp.expectedPaymentDate || !opp.amount) return;
-      if (opp.stage && !selectedStages.has(opp.stage)) return;
-      if (opp.stage === 'FINALIZED') return;
-
-      try {
-        const paymentDate = new Date(opp.expectedPaymentDate);
-        paymentDate.setHours(0, 0, 0, 0);
-        const dayKey = `${paymentDate.getFullYear()}-${String(paymentDate.getMonth() + 1).padStart(2, '0')}-${String(paymentDate.getDate()).padStart(2, '0')}`;
-        if (dailyData[dayKey]) {
-          const montantTotal = Number(opp.amount) || 0;
-          const advancePayments = forecast?.advancePaymentsByOpportunity?.[opp.id] || 0;
-          const paidAmount = totalPaidByOpportunity.get(opp.id) || 0;
-          const montantRestant = montantTotal - advancePayments - paidAmount;
-          if (montantRestant <= 0) {
-            return;
-          }
-          dailyData[dayKey].encaissementsPrevisionnels += montantRestant;
-          dailyData[dayKey].encaissementsPrevisionnelOpportunites += montantRestant;
-
-          // Taxes sur encaissements prévisionnels (ventes uniquement), imputées au 30 du mois suivant
-          const taxRate = opp.taxRate ?? 0.27;
-          const taxAmount = montantRestant * taxRate;
-          const taxDate = new Date(paymentDate.getFullYear(), paymentDate.getMonth() + 1, 30);
-          taxDate.setHours(0, 0, 0, 0);
-          const taxDayKey = `${taxDate.getFullYear()}-${String(taxDate.getMonth() + 1).padStart(2, '0')}-${String(taxDate.getDate()).padStart(2, '0')}`;
-          if (dailyData[taxDayKey]) {
-            dailyData[taxDayKey].taxes += taxAmount;
-          }
-        }
-      } catch (error) {
-        console.error('Erreur traitement opportunité prévisionnelle jour:', opp.id, error);
-      }
-    });
-
-    // Notes de débours prévisionnelles
-    (forecast?.deboursNotesForecast || []).forEach(debours => {
-      if (!debours.expectedPaymentDate || !debours.totalFrais) return;
-      if (payments.find(p => p.deboursNoteId === debours.id)) return;
-
-      try {
-        const paymentDate = new Date(debours.expectedPaymentDate);
-        paymentDate.setHours(0, 0, 0, 0);
-        const dayKey = `${paymentDate.getFullYear()}-${String(paymentDate.getMonth() + 1).padStart(2, '0')}-${String(paymentDate.getDate()).padStart(2, '0')}`;
-        if (dailyData[dayKey]) {
-          const montant = Number(debours.totalFrais) || 0;
-          dailyData[dayKey].encaissementsPrevisionnels += montant;
-          dailyData[dayKey].encaissementsPrevisionnelDebours += montant;
-        }
-      } catch (error) {
-        console.error('Erreur traitement note de débours jour:', debours.id, error);
-      }
-    });
-
-    // Encaissements réels
-    (payments || []).forEach(payment => {
-      const paymentDate = new Date(payment.paymentDate);
-      if (isNaN(paymentDate.getTime())) return;
-      // Ne compter le cash réel qu'après le début effectif de projection
-      if (isBeforeDay(paymentDate, startForProjection)) return;
-      const dayKey = `${paymentDate.getFullYear()}-${String(paymentDate.getMonth() + 1).padStart(2, '0')}-${String(paymentDate.getDate()).padStart(2, '0')}`;
-      if (dailyData[dayKey]) {
-        dailyData[dayKey].encaissementsReels += payment.amount;
-      }
-    });
-
-    // Décaissements (dépenses)
-    (expenses || []).forEach(expense => {
-      if (!expense.invoiceDate) return;
-      // Ne pas compter deux fois les dépenses des opportunités finalisées
-      if (expense.opportunityId && finalizedExpenseIds.has(`${expense.opportunityId}-${expense.invoiceDate}`)) {
-        return;
-      }
-      const expenseDate = new Date(expense.invoiceDate);
-      if (isNaN(expenseDate.getTime())) return;
-      if (isBeforeDay(expenseDate, startForProjection)) return;
-      const dayKey = `${expenseDate.getFullYear()}-${String(expenseDate.getMonth() + 1).padStart(2, '0')}-${String(expenseDate.getDate()).padStart(2, '0')}`;
-      if (dailyData[dayKey]) {
-        const amount = expense.amountTTC || expense.amountHT || 0;
-        dailyData[dayKey].decaissements += amount;
-        dailyData[dayKey].decaissementsDepenses += amount;
-      }
-    });
-
-    // Taxes (mois +1, au 30)
-    (payments || []).forEach(payment => {
-      const paymentDate = new Date(payment.paymentDate);
-      const taxDate = new Date(paymentDate.getFullYear(), paymentDate.getMonth() + 1, 30);
-      if (isNaN(taxDate.getTime())) return;
-      // IMPORTANT: même si le paiement est avant l'ancre, la taxe peut tomber après l'ancre (cash out futur)
-      if (isBeforeDay(taxDate, startForProjection)) return;
-      const dayKey = `${taxDate.getFullYear()}-${String(taxDate.getMonth() + 1).padStart(2, '0')}-${String(taxDate.getDate()).padStart(2, '0')}`;
-      if (dailyData[dayKey]) {
-        dailyData[dayKey].taxes += payment.taxAmount;
-      }
-    });
-
-    // Calculer les soldes
-    const sortedDays = Object.values(dailyData).sort((a, b) => a.dayKey.localeCompare(b.dayKey));
-    return sortedDays.map((day, index, array) => {
-      const totalEncaissements = day.encaissementsPrevisionnels + day.encaissementsReels;
-      const totalDecaissements = day.decaissements + day.taxes;
-
-      if (index === 0) {
-        day.soldeInitial = periodInitialBalance;
-        day.solde = periodInitialBalance + totalEncaissements - totalDecaissements;
-      } else {
-        day.soldeInitial = array[index - 1].solde;
-        day.solde = array[index - 1].solde + totalEncaissements - totalDecaissements;
-      }
-      return day;
+    return buildDailyTreasuryData({
+      startDate,
+      endDate,
+      periodInitialBalance,
+      projectionAnchorDate,
+      forecast,
+      payments: payments || [],
+      expenses: expenses || [],
+      selectedStages
     });
   }, [forecast, payments, expenses, periodInitialBalance, startDate, endDate, viewGranularity, projectionAnchorDate, selectedStages]);
 
-  // Préparer les données pour le graphique (mensuel)
   const chartData = useMemo(() => {
-    // Si vue jour, utiliser buildDailyData
     if (viewGranularity === 'day') {
       return buildDailyData;
     }
 
-    // Sinon, construire les données mensuelles
     if (!forecast) {
       console.log('TreasuryPage: forecast is null');
       return [];
@@ -637,295 +457,18 @@ export function TreasuryPage() {
       payments: forecast.payments?.length || 0,
       expenses: forecast.expenses?.length || 0
     });
-    
-    const monthlyData: Record<string, any> = {};
-    // Le solde de référence est le solde actuel (currentBalance)
-    // C'est le solde à jour J calculé automatiquement ou défini manuellement
-    // Il sert de point de départ pour les projections mensuelles
-
-    // Générer tous les mois dans la période
-    const startForProjectionRaw = projectionAnchorDate && projectionAnchorDate > startDate ? projectionAnchorDate : startDate;
-    const startForProjection = new Date(startForProjectionRaw);
-    startForProjection.setHours(0, 0, 0, 0);
-
-    const current = new Date(startForProjection);
-    current.setDate(1);
-    current.setHours(0, 0, 0, 0);
-    const end = new Date(endDate);
-    end.setHours(23, 59, 59, 999);
-    
-    while (current <= end) {
-      const monthKey = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}`;
-      monthlyData[monthKey] = {
-        month: current.toLocaleDateString('fr-FR', { month: 'short', year: 'numeric' }),
-        monthKey: monthKey,
-        solde: 0, // Sera calculé plus tard
-        encaissementsPrevisionnels: 0,
-        encaissementsPrevisionnelOpportunites: 0, // Détail pour tooltip
-        encaissementsPrevisionnelDebours: 0, // Détail pour tooltip
-        encaissementsReels: 0,
-        decaissements: 0,
-        decaissementsDepenses: 0, // Détail pour tooltip
-        taxes: 0,
-        // Info optionnelle (tooltip) : mouvements AVANT l'ancre dans ce mois
-        anchorInfo: null as null | {
-          label: string;
-          encaissements: number;
-          encaissementsVentes: number;
-          encaissementsDebours: number;
-          decaissements: number;
-          taxes: number;
-        }
-      };
-      current.setMonth(current.getMonth() + 1);
-    }
-
-    // Somme des paiements réels par opportunité (toutes dates confondues)
-    const totalPaidByOpportunity = new Map<string, number>();
-    (payments || []).forEach(payment => {
-      if (payment.opportunityId) {
-        const prev = totalPaidByOpportunity.get(payment.opportunityId) || 0;
-        totalPaidByOpportunity.set(payment.opportunityId, prev + Number(payment.amount));
-      }
+    return buildMonthlyTreasuryData({
+      startDate,
+      endDate,
+      periodInitialBalance,
+      projectionAnchorDate,
+      anchorBalance,
+      forecast,
+      payments: payments || [],
+      expenses: expenses || [],
+      selectedStages
     });
-
-    // Créer un set des opportunités finalisées
-    const finalizedOppIds = new Set(
-      (forecast?.opportunities || [])
-        .filter(opp => opp.stage === 'FINALIZED' && opp.id)
-        .map(opp => opp.id!)
-    );
-
-    // Pour les opportunités finalisées, utiliser les dépenses et notes de débours réelles
-    // au lieu des prévisionnels
-    (forecast?.finalizedExpenses || []).forEach(expense => {
-      if (!expense.invoiceDate || !expense.opportunityId) return;
-      const expenseDate = new Date(expense.invoiceDate);
-      const monthKey = `${expenseDate.getFullYear()}-${String(expenseDate.getMonth() + 1).padStart(2, '0')}`;
-      if (monthlyData[monthKey]) {
-        const amount = expense.amountTTC || expense.amountHT || 0;
-        monthlyData[monthKey].decaissements += amount;
-        monthlyData[monthKey].decaissementsDepenses += amount;
-      }
-    });
-
-    // Ajouter les notes de débours en prévisionnel comme encaissements (comme les opportunités)
-    // Utiliser le montant totalFrais (calculé depuis les dépenses) et non totalAmount
-    (forecast?.deboursNotesForecast || []).forEach(debours => {
-      if (!debours.expectedPaymentDate || !debours.totalFrais) return;
-      
-      // Vérifier si cette note de débours a déjà un paiement réel
-      const realPayment = payments.find(p => p.deboursNoteId === debours.id);
-      if (realPayment) {
-        // Si un paiement réel existe, on ne compte pas le prévisionnel (il sera compté dans encaissements réels)
-        return;
-      }
-      
-      try {
-        const paymentDate = new Date(debours.expectedPaymentDate);
-        if (isNaN(paymentDate.getTime())) {
-          console.warn('Date invalide pour note de débours:', debours.id, debours.expectedPaymentDate);
-          return;
-        }
-        // Ne pas compter le prévisionnel avant l'ancre de projection
-        if (paymentDate < startForProjection) return;
-        
-        const monthKey = `${paymentDate.getFullYear()}-${String(paymentDate.getMonth() + 1).padStart(2, '0')}`;
-        if (monthlyData[monthKey]) {
-          // Utiliser totalFrais (montant des dépenses récupérées) et non totalAmount
-          const montantDebours = Number(debours.totalFrais) || 0;
-          monthlyData[monthKey].encaissementsPrevisionnels += montantDebours;
-          monthlyData[monthKey].encaissementsPrevisionnelDebours += montantDebours;
-        }
-      } catch (error) {
-        console.error('Erreur traitement note de débours prévisionnelle:', debours.id, error);
-      }
-    });
-
-    // Ajouter les encaissements prévisionnels (opportunités non finalisées, filtrées par étapes)
-    // On calcule toujours le prévisionnel pour le reste à payer, même si des acomptes ont déjà été payés
-    (forecast?.opportunities || []).forEach(opp => {
-      if (!opp.expectedPaymentDate || !opp.amount) return;
-      if (opp.stage && !selectedStages.has(opp.stage)) return;
-      
-      // Ignorer les opportunités finalisées (elles utilisent les données réelles)
-      if (opp.stage === 'FINALIZED') {
-        return;
-      }
-      
-      try {
-        const paymentDate = new Date(opp.expectedPaymentDate);
-        if (isNaN(paymentDate.getTime())) {
-          console.warn('Date invalide pour opportunité:', opp.id, opp.expectedPaymentDate);
-          return;
-        }
-        if (paymentDate < startForProjection) return;
-        
-        const monthKey = `${paymentDate.getFullYear()}-${String(paymentDate.getMonth() + 1).padStart(2, '0')}`;
-        if (monthlyData[monthKey]) {
-          const montantTotal = Number(opp.amount) || 0;
-          const advancePayments = forecast?.advancePaymentsByOpportunity?.[opp.id] || 0;
-          const paidAmount = totalPaidByOpportunity.get(opp.id) || 0;
-          const montantRestant = montantTotal - advancePayments - paidAmount;
-          
-          // Ne pas ajouter si le montant après déduction est 0 ou négatif
-          if (montantRestant > 0) {
-            monthlyData[monthKey].encaissementsPrevisionnels += montantRestant;
-            monthlyData[monthKey].encaissementsPrevisionnelOpportunites += montantRestant;
-            
-            // Calculer les taxes pour les paiements prévisionnels (mois +1, au 30)
-            // Les taxes sont calculées sur le montant après déduction des acomptes et des paiements réels
-            const taxRate = opp.taxRate ?? 0.27;
-            const taxAmount = montantRestant * taxRate;
-            // Les taxes sont imputées au 30 du mois suivant le paiement
-            const taxMonth = new Date(paymentDate.getFullYear(), paymentDate.getMonth() + 1, 1);
-            const taxMonthKey = `${taxMonth.getFullYear()}-${String(taxMonth.getMonth() + 1).padStart(2, '0')}`;
-            if (monthlyData[taxMonthKey]) {
-              monthlyData[taxMonthKey].taxes += taxAmount;
-            }
-          }
-        }
-      } catch (error) {
-        console.error('Erreur traitement opportunité prévisionnelle:', opp.id, error);
-      }
-    });
-
-    // Ajouter les encaissements réels
-    (payments || []).forEach(payment => {
-      const paymentDate = new Date(payment.paymentDate);
-      if (isNaN(paymentDate.getTime())) return;
-      if (isBeforeDay(paymentDate, startForProjection)) return;
-      const monthKey = `${paymentDate.getFullYear()}-${String(paymentDate.getMonth() + 1).padStart(2, '0')}`;
-      if (monthlyData[monthKey]) {
-        monthlyData[monthKey].encaissementsReels += payment.amount;
-      }
-    });
-
-    // Ajouter les décaissements (exclure ceux déjà comptés pour les opportunités finalisées)
-    const finalizedExpenseIds = new Set(
-      (forecast?.finalizedExpenses || [])
-        .filter(e => e.opportunityId && e.invoiceDate)
-        .map(e => `${e.opportunityId!}-${e.invoiceDate!}`)
-    );
-    
-    (expenses || []).forEach(expense => {
-      if (!expense.invoiceDate) return;
-      
-      // Ne pas compter deux fois les dépenses des opportunités finalisées
-      if (expense.opportunityId && finalizedExpenseIds.has(`${expense.opportunityId}-${expense.invoiceDate}`)) {
-        return;
-      }
-      
-      const expenseDate = new Date(expense.invoiceDate);
-      if (isNaN(expenseDate.getTime())) return;
-      if (isBeforeDay(expenseDate, startForProjection)) return;
-      const monthKey = `${expenseDate.getFullYear()}-${String(expenseDate.getMonth() + 1).padStart(2, '0')}`;
-      if (monthlyData[monthKey]) {
-        const amount = expense.amountTTC || expense.amountHT || 0;
-        monthlyData[monthKey].decaissements += amount;
-        monthlyData[monthKey].decaissementsDepenses += amount;
-      }
-    });
-
-    // Ajouter les taxes des paiements réels (mois +1, au 30)
-    // Inclure tous les paiements (y compris ceux du mois précédent) pour calculer les taxes
-    (payments || []).forEach(payment => {
-      const paymentDate = new Date(payment.paymentDate);
-      // Les taxes sont imputées au 30 du mois suivant le paiement
-      const taxMonth = new Date(paymentDate.getFullYear(), paymentDate.getMonth() + 1, 1);
-      const monthKey = `${taxMonth.getFullYear()}-${String(taxMonth.getMonth() + 1).padStart(2, '0')}`;
-      // IMPORTANT: même si le paiement est avant l'ancre, la taxe peut tomber après l'ancre (cash out futur)
-      // Inclure les taxes même si elles sont en dehors de la période initiale
-      // (car elles impactent la période affichée)
-      if (monthlyData[monthKey]) {
-        monthlyData[monthKey].taxes += payment.taxAmount;
-      }
-    });
-
-    // Tooltip: si l'ancre (solde manuel) est au milieu d'un mois, afficher les mouvements avant ancre pour ce mois
-    if (projectionAnchorDate && !isNaN(projectionAnchorDate.getTime())) {
-      const anchorDay = new Date(projectionAnchorDate);
-      anchorDay.setHours(0, 0, 0, 0);
-      const anchorMonthKey = `${anchorDay.getFullYear()}-${String(anchorDay.getMonth() + 1).padStart(2, '0')}`;
-      if (monthlyData[anchorMonthKey]) {
-        const monthStart = new Date(anchorDay.getFullYear(), anchorDay.getMonth(), 1);
-        monthStart.setHours(0, 0, 0, 0);
-
-        let encAvant = 0;
-        let encAvantVentes = 0;
-        let encAvantDebours = 0;
-        let decAvant = 0;
-        let taxesAvant = 0;
-
-        // Encaissements réels avant ancre (même mois)
-        (payments || []).forEach((p: any) => {
-          const d = new Date(p.paymentDate);
-          if (isNaN(d.getTime())) return;
-          // Dans le mois et avant le jour d'ancre
-          if (d < monthStart) return;
-          if (toDateKey(d) >= toDateKey(anchorDay)) return;
-          const amt = Number(p.amount || 0);
-          encAvant += amt;
-          if (p.deboursNoteId) encAvantDebours += amt;
-          else encAvantVentes += amt;
-        });
-
-        // Décaissements avant ancre (dépenses, même mois)
-        (expenses || []).forEach((e: any) => {
-          if (!e.invoiceDate) return;
-          const d = new Date(e.invoiceDate);
-          if (isNaN(d.getTime())) return;
-          if (d < monthStart) return;
-          if (toDateKey(d) >= toDateKey(anchorDay)) return;
-          decAvant += Number(e.amountTTC || e.amountHT || 0);
-        });
-
-        // Taxes avant ancre : cash-out "taxDate" (mois+1 au 30). Rare, mais on l'affiche si ça tombe avant l'ancre.
-        (payments || []).forEach((p: any) => {
-          const pd = new Date(p.paymentDate);
-          if (isNaN(pd.getTime())) return;
-          const taxDate = new Date(pd.getFullYear(), pd.getMonth() + 1, 30);
-          taxDate.setHours(0, 0, 0, 0);
-          if (taxDate < monthStart) return;
-          if (toDateKey(taxDate) >= toDateKey(anchorDay)) return;
-          taxesAvant += Number(p.taxAmount || 0);
-        });
-
-        monthlyData[anchorMonthKey].anchorInfo = {
-          label: anchorDay.toLocaleDateString('fr-FR'),
-          encaissements: encAvant,
-          encaissementsVentes: encAvantVentes,
-          encaissementsDebours: encAvantDebours,
-          decaissements: decAvant,
-          taxes: taxesAvant
-        };
-      }
-    }
-
-    // Calculer les soldes finaux
-    // Le solde initial du premier mois est le solde au début de période (periodInitialBalance)
-    const sortedMonths = Object.values(monthlyData).sort((a, b) => a.monthKey.localeCompare(b.monthKey));
-    
-    return sortedMonths.map((month, index, array) => {
-      const totalEncaissements = month.encaissementsPrevisionnels + month.encaissementsReels;
-      // Les taxes sont des décaissements, donc on les soustrait
-      const totalDecaissements = month.decaissements + month.taxes;
-      
-      if (index === 0) {
-        // Premier mois : solde initial = solde au début de période
-        month.soldeInitial = periodInitialBalance;
-        month.solde = periodInitialBalance + totalEncaissements - totalDecaissements;
-      } else {
-        // Mois suivants : solde initial = solde final du mois précédent
-        month.soldeInitial = array[index - 1].solde;
-        month.solde = array[index - 1].solde + totalEncaissements - totalDecaissements;
-      }
-      
-      // Pour l'affichage dans le graphique, on garde taxes séparé mais on peut aussi créer un total décaissements
-      month.totalDecaissements = totalDecaissements;
-      return month;
-    });
-  }, [forecast, payments, expenses, periodInitialBalance, startDate, endDate, viewGranularity, buildDailyData, projectionAnchorDate, selectedStages]);
+  }, [forecast, payments, expenses, periodInitialBalance, startDate, endDate, viewGranularity, buildDailyData, projectionAnchorDate, selectedStages, anchorBalance]);
 
 
   // Opportunités avec paiement ou prévisionnel
@@ -1220,6 +763,8 @@ export function TreasuryPage() {
           expenses={expenses}
           opportunities={opportunities}
           selectedStages={selectedStages}
+          projectionAnchorDate={projectionAnchorDate}
+          anchorBalance={anchorBalance}
         />
       </div>
 

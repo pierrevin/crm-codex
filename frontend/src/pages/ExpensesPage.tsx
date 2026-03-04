@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { PlusIcon, MagnifyingGlassIcon, CheckIcon, PencilIcon, TrashIcon, XMarkIcon, ChevronUpIcon, ChevronDownIcon, EyeIcon } from '@heroicons/react/24/outline';
 import { expensesService, Expense, ExpenseStatus, ExpenseFilters, UpdateExpenseDto } from '../services/expensesService';
 import { recurringExpensesService, RecurringExpense, RecurrenceType, UpdateRecurringExpenseDto } from '../services/recurringExpensesService';
@@ -11,15 +11,18 @@ import { Badge } from '../components/ui/Badge';
 
 const STATUS_LABELS: Record<ExpenseStatus, string> = {
   PENDING: 'En attente',
-  PROCESSED: 'Traité',
+  PROCESSED: 'En attente',
   VERIFIED: 'Vérifié',
   PAID: 'Réglé',
   REJECTED: 'Rejeté'
 };
 
+// Statuts proposés à l'utilisateur dans les listes déroulantes
+const DISPLAY_STATUSES: ExpenseStatus[] = ['PENDING', 'VERIFIED', 'PAID', 'REJECTED'];
+
 const STATUS_TO_BADGE_VARIANT: Record<ExpenseStatus, 'pending' | 'processed' | 'verified' | 'paid' | 'rejected'> = {
   PENDING: 'pending',
-  PROCESSED: 'processed',
+  PROCESSED: 'pending',
   VERIFIED: 'verified',
   PAID: 'paid',
   REJECTED: 'rejected'
@@ -38,8 +41,14 @@ interface ColumnFilter {
   status?: ExpenseStatus | '';
 }
 
+function isStaffCompensationRecurring(recurring: RecurringExpense): boolean {
+  const code = recurring.accountCode || '';
+  return code.startsWith('641') || code.startsWith('645');
+}
+
 export function ExpensesPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>([]);
   const [loading, setLoading] = useState(true);
@@ -59,6 +68,12 @@ export function ExpensesPage() {
   
   // Sélection multiple
   const [selectedExpenseIds, setSelectedExpenseIds] = useState<Set<string>>(new Set());
+
+  const [recurringFilterId, setRecurringFilterId] = useState<string | undefined>(() => {
+    const params = new URLSearchParams(location.search);
+    const id = params.get('recurringExpenseId');
+    return id || undefined;
+  });
 
   useEffect(() => {
     void loadExpenses();
@@ -97,6 +112,40 @@ export function ExpensesPage() {
       console.error('Erreur chargement dépenses récurrentes:', error);
     }
   };
+
+  const staffRecurringExpenses = useMemo(
+    () => recurringExpenses.filter(isStaffCompensationRecurring),
+    [recurringExpenses]
+  );
+
+  const otherRecurringExpenses = useMemo(
+    () => recurringExpenses.filter((r) => !isStaffCompensationRecurring(r)),
+    [recurringExpenses]
+  );
+
+  const currentMonthStaffExpenseInfo = useMemo(() => {
+    if (staffRecurringExpenses.length === 0) {
+      return { model: null as RecurringExpense | null, expense: null as Expense | null };
+    }
+    const model = staffRecurringExpenses.find((m) => m.isActive) || staffRecurringExpenses[0];
+    if (!model) return { model: null, expense: null };
+
+    const now = new Date();
+    const month = now.getMonth();
+    const year = now.getFullYear();
+
+    const isSameMonth = (dateString?: string) => {
+      if (!dateString) return false;
+      const d = new Date(dateString);
+      return d.getFullYear() === year && d.getMonth() === month;
+    };
+
+    const expense = expenses.find(
+      (e) => e.recurringExpenseId === model.id && isSameMonth(e.invoiceDate)
+    ) || null;
+
+    return { model, expense };
+  }, [expenses, staffRecurringExpenses]);
 
   const handleDeleteRecurring = async (id: string) => {
     if (!confirm('Êtes-vous sûr de vouloir supprimer cette dépense récurrente ? Les dépenses prévisionnelles existantes ne seront pas supprimées.')) {
@@ -250,6 +299,10 @@ export function ExpensesPage() {
       filtered = filtered.filter(e => e.status === columnFilters.status);
     }
 
+    if (recurringFilterId) {
+      filtered = filtered.filter((e) => e.recurringExpenseId === recurringFilterId);
+    }
+
     // Appliquer le tri (toujours appliqué, y compris au chargement initial)
     // Tri par date du plus récent au plus ancien (ordre chronologique inverse)
     filtered.sort((a, b) => {
@@ -326,7 +379,7 @@ export function ExpensesPage() {
     });
 
     return filtered;
-  }, [expenses, columnFilters, sortField, sortDirection]);
+  }, [expenses, columnFilters, sortField, sortDirection, recurringFilterId]);
 
   const formatCurrency = (amount?: number) => {
     if (!amount) return '-';
@@ -401,6 +454,62 @@ export function ExpensesPage() {
       setSelectedExpenseIds(new Set());
     } else {
       setSelectedExpenseIds(new Set(filteredAndSortedExpenses.map(e => e.id)));
+    }
+  };
+
+  const handleFilterByRecurring = (recurringId: string) => {
+    setRecurringFilterId(recurringId);
+    const params = new URLSearchParams(location.search);
+    params.set('recurringExpenseId', recurringId);
+    navigate({
+      pathname: '/depenses',
+      search: params.toString()
+    });
+  };
+
+  const handleClearRecurringFilter = () => {
+    setRecurringFilterId(undefined);
+    const params = new URLSearchParams(location.search);
+    params.delete('recurringExpenseId');
+    navigate({
+      pathname: '/depenses',
+      search: params.toString()
+    });
+  };
+
+  const handleCreateCurrentMonthStaffExpense = async () => {
+    const { model } = currentMonthStaffExpenseInfo;
+    if (!model) return;
+
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+
+    try {
+      const generated = await recurringExpensesService.generateForecast(
+        model.id,
+        start.toISOString(),
+        end.toISOString()
+      );
+
+      await loadExpenses();
+
+      const created: Expense | undefined =
+        (generated as any[] | undefined)?.find?.((e: any) => e.recurringExpenseId === model.id) ||
+        expenses.find(
+          (e) =>
+            e.recurringExpenseId === model.id &&
+            e.invoiceDate &&
+            new Date(e.invoiceDate).getMonth() === now.getMonth() &&
+            new Date(e.invoiceDate).getFullYear() === now.getFullYear()
+        );
+
+      if (created) {
+        navigate(`/depenses/${created.id}`);
+      }
+    } catch (error) {
+      console.error('Erreur génération dépense de rémunération du mois:', error);
+      alert('Erreur lors de la génération de la dépense de rémunération du mois');
     }
   };
 
@@ -527,8 +636,8 @@ export function ExpensesPage() {
               className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm"
             >
               <option value="">Tous</option>
-              {Object.entries(STATUS_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
+              {DISPLAY_STATUSES.map((value) => (
+                <option key={value} value={value}>{STATUS_LABELS[value]}</option>
               ))}
             </select>
           </div>
@@ -557,47 +666,200 @@ export function ExpensesPage() {
         </div>
       </div>
 
+      {/* Bloc Rémunération du mois */}
+      {currentMonthStaffExpenseInfo.model && (
+        <div className="bg-gradient-to-r from-indigo-50 to-sky-50 border border-indigo-100 rounded-lg p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase text-indigo-700 mb-1">
+              Rémunération du personnel
+            </p>
+            <p className="text-sm text-slate-700">
+              Mois en cours :{' '}
+              <span className="font-semibold">
+                {new Date().toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
+              </span>
+            </p>
+            {currentMonthStaffExpenseInfo.expense ? (
+              <p className="text-sm text-slate-600 mt-1">
+                Montant :{' '}
+                <span className="font-semibold">
+                  {formatCurrency(currentMonthStaffExpenseInfo.expense.amountTTC)}
+                </span>{' '}
+                – Statut :{' '}
+                <span className="font-semibold">
+                  {STATUS_LABELS[currentMonthStaffExpenseInfo.expense.status]}
+                  {currentMonthStaffExpenseInfo.expense.isForecast ? ' (prévisionnel)' : ''}
+                </span>
+              </p>
+            ) : (
+              <p className="text-sm text-slate-600 mt-1">
+                Aucune dépense de rémunération créée pour ce mois.
+              </p>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {currentMonthStaffExpenseInfo.expense ? (
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => navigate(`/depenses/${currentMonthStaffExpenseInfo.expense!.id}`)}
+              >
+                Ouvrir la dépense
+              </Button>
+            ) : (
+              <Button variant="primary" size="sm" onClick={handleCreateCurrentMonthStaffExpense}>
+                Créer la dépense de ce mois
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Section Dépenses récurrentes */}
       {recurringExpenses.length > 0 && (
         <div className="bg-white rounded-lg border border-slate-200 p-4">
           <h2 className="text-lg font-semibold text-slate-900 mb-4">Dépenses récurrentes</h2>
-          <div className="space-y-2">
-            {recurringExpenses.map((recurring) => (
-              <div key={recurring.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
-                <div className="flex-1">
-                  <div className="font-medium text-slate-900">{recurring.supplierName || 'Sans nom'}</div>
-                  <div className="text-sm text-slate-500">
-                    {recurring.amountTTC ? new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(recurring.amountTTC) : '-'} 
-                    {' • '}
-                    {recurring.recurrenceType === 'MONTHLY' ? 'Mensuel' : 
-                     recurring.recurrenceType === 'WEEKLY' ? 'Hebdomadaire' :
-                     recurring.recurrenceType === 'QUARTERLY' ? 'Trimestriel' : 'Annuel'}
-                    {' • Jour '}{recurring.paymentDay}
-                    {recurring.isActive ? '' : ' • Inactif'}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    onClick={() => setEditingRecurring(recurring)}
-                    variant="secondary"
-                    size="sm"
-                    icon={<PencilIcon className="w-4 h-4" />}
-                    title="Modifier cette dépense récurrente"
-                  >
-                    Modifier
-                  </Button>
-                  <Button
-                    onClick={() => handleDeleteRecurring(recurring.id)}
-                    variant="danger"
-                    size="sm"
-                    icon={<TrashIcon className="w-4 h-4" />}
-                    title="Supprimer cette dépense récurrente"
-                  >
-                    Supprimer
-                  </Button>
+          <div className="space-y-4">
+            {staffRecurringExpenses.length > 0 && (
+              <div>
+                <h3 className="text-sm font-semibold text-slate-800 mb-2">
+                  Rémunération du personnel
+                </h3>
+                <div className="space-y-2">
+                  {staffRecurringExpenses.map((recurring) => (
+                    <div
+                      key={recurring.id}
+                      className="flex items-center justify-between p-3 bg-slate-50 rounded-lg"
+                    >
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <div className="font-medium text-slate-900">
+                            {recurring.supplierName || 'Sans nom'}
+                          </div>
+                          <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                            Rémunération personnel
+                          </span>
+                        </div>
+                        <div className="text-sm text-slate-500">
+                          {recurring.amountTTC
+                            ? new Intl.NumberFormat('fr-FR', {
+                                style: 'currency',
+                                currency: 'EUR'
+                              }).format(recurring.amountTTC)
+                            : '-'}
+                          {' • '}
+                          {recurring.recurrenceType === 'MONTHLY'
+                            ? 'Mensuel'
+                            : recurring.recurrenceType === 'WEEKLY'
+                            ? 'Hebdomadaire'
+                            : recurring.recurrenceType === 'QUARTERLY'
+                            ? 'Trimestriel'
+                            : 'Annuel'}
+                          {' • Jour '}
+                          {recurring.paymentDay}
+                          {recurring.isActive ? '' : ' • Inactif'}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          onClick={() => handleFilterByRecurring(recurring.id)}
+                          variant="secondary"
+                          size="sm"
+                        >
+                          Voir les échéances
+                        </Button>
+                        <Button
+                          onClick={() => setEditingRecurring(recurring)}
+                          variant="secondary"
+                          size="sm"
+                          icon={<PencilIcon className="w-4 h-4" />}
+                          title="Modifier cette dépense récurrente"
+                        >
+                          Modifier
+                        </Button>
+                        <Button
+                          onClick={() => handleDeleteRecurring(recurring.id)}
+                          variant="danger"
+                          size="sm"
+                          icon={<TrashIcon className="w-4 h-4" />}
+                          title="Supprimer cette dépense récurrente"
+                        >
+                          Supprimer
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
-            ))}
+            )}
+
+            {otherRecurringExpenses.length > 0 && (
+              <div>
+                <h3 className="text-sm font-semibold text-slate-800 mb-2">
+                  Autres dépenses récurrentes
+                </h3>
+                <div className="space-y-2">
+                  {otherRecurringExpenses.map((recurring) => (
+                    <div
+                      key={recurring.id}
+                      className="flex items-center justify-between p-3 bg-slate-50 rounded-lg"
+                    >
+                      <div className="flex-1">
+                        <div className="font-medium text-slate-900">
+                          {recurring.supplierName || 'Sans nom'}
+                        </div>
+                        <div className="text-sm text-slate-500">
+                          {recurring.amountTTC
+                            ? new Intl.NumberFormat('fr-FR', {
+                                style: 'currency',
+                                currency: 'EUR'
+                              }).format(recurring.amountTTC)
+                            : '-'}
+                          {' • '}
+                          {recurring.recurrenceType === 'MONTHLY'
+                            ? 'Mensuel'
+                            : recurring.recurrenceType === 'WEEKLY'
+                            ? 'Hebdomadaire'
+                            : recurring.recurrenceType === 'QUARTERLY'
+                            ? 'Trimestriel'
+                            : 'Annuel'}
+                          {' • Jour '}
+                          {recurring.paymentDay}
+                          {recurring.isActive ? '' : ' • Inactif'}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          onClick={() => handleFilterByRecurring(recurring.id)}
+                          variant="secondary"
+                          size="sm"
+                        >
+                          Voir les échéances
+                        </Button>
+                        <Button
+                          onClick={() => setEditingRecurring(recurring)}
+                          variant="secondary"
+                          size="sm"
+                          icon={<PencilIcon className="w-4 h-4" />}
+                          title="Modifier cette dépense récurrente"
+                        >
+                          Modifier
+                        </Button>
+                        <Button
+                          onClick={() => handleDeleteRecurring(recurring.id)}
+                          variant="danger"
+                          size="sm"
+                          icon={<TrashIcon className="w-4 h-4" />}
+                          title="Supprimer cette dépense récurrente"
+                        >
+                          Supprimer
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -612,14 +874,14 @@ export function ExpensesPage() {
               </span>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm text-indigo-700 font-medium">Statut:</span>
-                {Object.entries(STATUS_LABELS).map(([value, label]) => (
+                {DISPLAY_STATUSES.map((value) => (
                   <Button
                     key={value}
-                    onClick={() => handleBulkUpdateStatus(value as ExpenseStatus)}
+                    onClick={() => handleBulkUpdateStatus(value)}
                     variant="secondary"
                     size="sm"
                   >
-                    {label}
+                    {STATUS_LABELS[value]}
                   </Button>
                 ))}
               </div>
@@ -663,6 +925,23 @@ export function ExpensesPage() {
 
       {/* Tableau éditable */}
       <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+        {recurringFilterId && (
+          <div className="px-4 pt-4">
+            <div className="inline-flex items-center gap-2 rounded-full bg-indigo-50 border border-indigo-200 px-3 py-1 text-xs text-indigo-800">
+              <span>
+                Filtré sur le modèle récurrent{' '}
+                <span className="font-semibold">{recurringFilterId}</span>
+              </span>
+              <button
+                type="button"
+                onClick={handleClearRecurringFilter}
+                className="ml-1 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold hover:bg-indigo-200"
+              >
+                Effacer
+              </button>
+            </div>
+          </div>
+        )}
         {loading ? (
           <div className="p-8 text-center text-slate-500">Chargement...</div>
         ) : filteredAndSortedExpenses.length === 0 ? (
@@ -770,8 +1049,8 @@ export function ExpensesPage() {
                         className="w-full px-2 py-1 text-xs border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
                       >
                         <option value="">Tous</option>
-                        {Object.entries(STATUS_LABELS).map(([value, label]) => (
-                          <option key={value} value={value}>{label}</option>
+                        {DISPLAY_STATUSES.map((value) => (
+                          <option key={value} value={value}>{STATUS_LABELS[value]}</option>
                         ))}
                       </select>
                     </div>

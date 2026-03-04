@@ -1,8 +1,14 @@
 import { useMemo, useState } from 'react';
 import { ChevronDownIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
+import { useNavigate } from 'react-router-dom';
 import { TreasuryForecast } from '../services/treasuryService';
 import api from '../services/apiClient';
 import { Payment } from '../services/paymentService';
+import {
+  buildMonthlyTreasuryData,
+  SelectedStages,
+  TreasuryExpense
+} from '../domain/treasury/treasuryCalculations';
 
 // Étendre l'interface pour inclure stage
 interface OpportunityWithStage {
@@ -19,12 +25,7 @@ interface TreasuryMonthlyViewProps {
   currentBalance: number;
   forecast: TreasuryForecast | null;
   payments: Payment[];
-  expenses: Array<{
-    amountTTC: number | null;
-    amountHT: number | null;
-    invoiceDate: string | null;
-    opportunityId?: string;
-  }>;
+  expenses: TreasuryExpense[];
   // Opportunités complètes (pour les libellés avec client)
   opportunities?: Array<{
     id: string;
@@ -33,7 +34,11 @@ interface TreasuryMonthlyViewProps {
     contact?: { firstName: string; lastName?: string } | null;
   }>;
   // Étapes sélectionnées (filtres de la page Trésorerie)
-  selectedStages?: Set<string>;
+  selectedStages?: SelectedStages;
+  // Date d'ancre de projection (même logique que le graphique)
+  projectionAnchorDate?: Date | null;
+  // Solde manuel au jour d'ancre (pour rebasage éventuel)
+  anchorBalance?: number | null;
 }
 
 interface MonthlyData {
@@ -47,6 +52,26 @@ interface MonthlyData {
   soldeFinal: number;
 }
 
+type EncaissementDetailType = 'previsionnel' | 'reel' | 'debours';
+type DecaissementDetailType = 'depense' | 'taxe';
+
+interface EncaissementDetail {
+  type: EncaissementDetailType;
+  label: string;
+  amount: number;
+  opportunityId?: string;
+  paymentId?: string;
+  deboursNoteId?: string;
+}
+
+interface DecaissementDetail {
+  type: DecaissementDetailType;
+  label: string;
+  amount: number;
+  expenseId?: string;
+  paymentId?: string;
+}
+
 export function TreasuryMonthlyView({
   startDate,
   endDate,
@@ -55,10 +80,17 @@ export function TreasuryMonthlyView({
   payments,
   expenses,
   opportunities = [],
-  selectedStages
+  selectedStages,
+  projectionAnchorDate,
+  anchorBalance
 }: TreasuryMonthlyViewProps) {
+  const navigate = useNavigate();
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [filterType, setFilterType] = useState<'all' | 'encaissements' | 'decaissements'>('all');
+  const [detailModal, setDetailModal] = useState<{
+    kind: 'encaissement' | 'decaissement';
+    item: EncaissementDetail | DecaissementDetail;
+  } | null>(null);
 
   const toggleRow = (monthKey: string) => {
     const newExpanded = new Set(expandedRows);
@@ -71,173 +103,29 @@ export function TreasuryMonthlyView({
   };
 
   const monthlyData = useMemo(() => {
-    const data: Record<string, MonthlyData> = {};
-    let runningBalance = currentBalance;
-
-    // Générer tous les mois dans la période
-    const months: string[] = [];
-    const current = new Date(startDate);
-    current.setDate(1); // Premier jour du mois
-    while (current <= endDate) {
-      const monthKey = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}`;
-      months.push(monthKey);
-      data[monthKey] = {
-        month: current.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }),
-        monthKey,
-        soldeInitial: 0,
-        encaissementsPrevisionnels: 0,
-        encaissementsReels: 0,
-        decaissements: 0,
-        taxes: 0,
-        soldeFinal: 0
-      };
-      current.setMonth(current.getMonth() + 1);
-    }
-
-    // Calculer le solde initial du premier mois
-    if (months.length > 0) {
-      data[months[0]].soldeInitial = runningBalance;
-    }
-
-    // Somme des paiements réels par opportunité (toutes dates confondues)
-    const totalPaidByOpportunity = new Map<string, number>();
-    payments.forEach(payment => {
-      if (payment.opportunityId) {
-        const prev = totalPaidByOpportunity.get(payment.opportunityId) || 0;
-        totalPaidByOpportunity.set(payment.opportunityId, prev + Number(payment.amount));
-      }
+    const data = buildMonthlyTreasuryData({
+      startDate,
+      endDate,
+      periodInitialBalance: currentBalance,
+      projectionAnchorDate: projectionAnchorDate ?? null,
+      anchorBalance: anchorBalance ?? null,
+      forecast,
+      payments,
+      expenses,
+      selectedStages: selectedStages ?? new Set<string>(['CLOSED_WON', 'FINALIZED'])
     });
 
-    // Pour les opportunités finalisées, utiliser les dépenses et notes de débours réelles
-    (forecast?.finalizedExpenses || []).forEach(expense => {
-      if (!expense.invoiceDate || !expense.opportunityId) return;
-      const expenseDate = new Date(expense.invoiceDate);
-      const monthKey = `${expenseDate.getFullYear()}-${String(expenseDate.getMonth() + 1).padStart(2, '0')}`;
-      if (data[monthKey]) {
-        const amount = expense.amountTTC || expense.amountHT || 0;
-        data[monthKey].decaissements += amount;
-      }
-    });
-
-    // Les notes de débours finalisées ne doivent PAS être comptées ici car :
-    // 1. Si elles ont un paiement réel, celui-ci est déjà compté dans encaissements réels
-    // 2. Si elles n'ont pas de paiement mais une expectedPaymentDate, elles sont dans deboursNotesForecast
-    // Les dépenses liées aux notes de débours sont déjà comptées dans les décaissements
-
-    // Traiter les encaissements prévisionnels (opportunités non finalisées)
-    // On calcule toujours le prévisionnel pour le reste à payer, même si des acomptes ont déjà été payés
-    forecast?.opportunities.forEach(opp => {
-      if (!opp.expectedPaymentDate || !opp.amount) return;
-      // Respecter le filtre d'étapes venant de la page Trésorerie
-      if (selectedStages && opp.stage && !selectedStages.has(opp.stage)) return;
-      
-      // Ignorer les opportunités finalisées (elles utilisent les données réelles)
-      if (opp.stage === 'FINALIZED') {
-        return;
-      }
-      
-      const paymentDate = new Date(opp.expectedPaymentDate);
-      const monthKey = `${paymentDate.getFullYear()}-${String(paymentDate.getMonth() + 1).padStart(2, '0')}`;
-      if (data[monthKey]) {
-        const montantTotal = Number(opp.amount) || 0;
-        const advancePayments = forecast?.advancePaymentsByOpportunity?.[opp.id] || 0;
-        const paidAmount = totalPaidByOpportunity.get(opp.id) || 0;
-        const montantRestant = montantTotal - advancePayments - paidAmount;
-        
-        // Ne pas ajouter si le montant après déduction est 0 ou négatif
-        if (montantRestant > 0) {
-          data[monthKey].encaissementsPrevisionnels += montantRestant;
-          
-          // Calculer les taxes pour les paiements prévisionnels (mois +1, au 30)
-          // Les taxes sont calculées sur le montant après déduction des acomptes et des paiements réels
-          const taxRate = opp.taxRate ?? 0.27;
-          const taxAmount = montantRestant * taxRate;
-          // Les taxes sont imputées au 30 du mois suivant le paiement
-          const taxMonth = new Date(paymentDate.getFullYear(), paymentDate.getMonth() + 1, 1);
-          const taxMonthKey = `${taxMonth.getFullYear()}-${String(taxMonth.getMonth() + 1).padStart(2, '0')}`;
-          if (data[taxMonthKey]) {
-            data[taxMonthKey].taxes += taxAmount;
-          }
-        }
-      }
-    });
-
-    // Traiter les notes de débours en prévisionnel (comme les opportunités)
-    // Utiliser le montant totalFrais (calculé depuis les dépenses) et non totalAmount
-    (forecast?.deboursNotesForecast || []).forEach(debours => {
-      if (!debours.expectedPaymentDate || !debours.totalFrais) return;
-      
-      // Vérifier si cette note de débours a déjà un paiement réel
-      const realPayment = payments.find(p => p.deboursNoteId === debours.id);
-      if (realPayment) {
-        // Si un paiement réel existe, on ne compte pas le prévisionnel (il sera compté dans encaissements réels)
-        return;
-      }
-      
-      const paymentDate = new Date(debours.expectedPaymentDate);
-      const monthKey = `${paymentDate.getFullYear()}-${String(paymentDate.getMonth() + 1).padStart(2, '0')}`;
-      if (data[monthKey]) {
-        // Utiliser totalFrais (montant des dépenses récupérées) et non totalAmount
-        data[monthKey].encaissementsPrevisionnels += debours.totalFrais;
-      }
-    });
-
-    // Traiter les encaissements réels (paiements)
-    payments.forEach(payment => {
-      const paymentDate = new Date(payment.paymentDate);
-      const monthKey = `${paymentDate.getFullYear()}-${String(paymentDate.getMonth() + 1).padStart(2, '0')}`;
-      if (data[monthKey]) {
-        data[monthKey].encaissementsReels += payment.amount;
-      }
-    });
-
-    // Traiter les décaissements (dépenses, exclure ceux déjà comptés pour les opportunités finalisées)
-    const finalizedExpenseIds = new Set(
-      (forecast?.finalizedExpenses || [])
-        .filter(e => e.opportunityId && e.invoiceDate)
-        .map(e => `${e.opportunityId!}-${e.invoiceDate!}`)
-    );
-    
-    expenses.forEach(expense => {
-      if (!expense.invoiceDate) return;
-      
-      // Ne pas compter deux fois les dépenses des opportunités finalisées
-      if (expense.opportunityId && finalizedExpenseIds.has(`${expense.opportunityId}-${expense.invoiceDate}`)) {
-        return;
-      }
-      
-      const expenseDate = new Date(expense.invoiceDate);
-      const monthKey = `${expenseDate.getFullYear()}-${String(expenseDate.getMonth() + 1).padStart(2, '0')}`;
-      if (data[monthKey]) {
-        const amount = expense.amountTTC || expense.amountHT || 0;
-        data[monthKey].decaissements += amount;
-      }
-    });
-
-    // Traiter les taxes (mois +1, au 30)
-    payments.forEach(payment => {
-      const paymentDate = new Date(payment.paymentDate);
-      // Les taxes sont imputées au 30 du mois suivant le paiement
-      const taxMonth = new Date(paymentDate.getFullYear(), paymentDate.getMonth() + 1, 1);
-      const monthKey = `${taxMonth.getFullYear()}-${String(taxMonth.getMonth() + 1).padStart(2, '0')}`;
-      if (data[monthKey]) {
-        data[monthKey].taxes += payment.taxAmount;
-      }
-    });
-
-    // Calculer les soldes finaux
-    months.forEach(monthKey => {
-      const month = data[monthKey];
-      month.soldeFinal = month.soldeInitial + month.encaissementsPrevisionnels + month.encaissementsReels - month.decaissements - month.taxes;
-      // Le solde final devient le solde initial du mois suivant
-      const nextIndex = months.indexOf(monthKey) + 1;
-      if (nextIndex < months.length) {
-        data[months[nextIndex]].soldeInitial = month.soldeFinal;
-      }
-    });
-
-    return Object.values(data);
-  }, [startDate, endDate, currentBalance, forecast, payments, expenses]);
+    return data.map((month: any) => ({
+      month: new Date(`${month.monthKey}-01`).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }),
+      monthKey: month.monthKey,
+      soldeInitial: month.soldeInitial,
+      encaissementsPrevisionnels: month.encaissementsPrevisionnels,
+      encaissementsReels: month.encaissementsReels,
+      decaissements: month.decaissements,
+      taxes: month.taxes,
+      soldeFinal: month.solde
+    })) as MonthlyData[];
+  }, [startDate, endDate, currentBalance, forecast, payments, expenses, selectedStages, projectionAnchorDate, anchorBalance]);
 
   // Filtrer les données selon le filtre de type
   const filteredMonthlyData = useMemo(() => {
@@ -259,8 +147,8 @@ export function TreasuryMonthlyView({
     const monthEnd = new Date(year, month, 0, 23, 59, 59, 999);
 
     const details = {
-      encaissements: [] as Array<{ type: string; label: string; amount: number }>,
-      decaissements: [] as Array<{ type: string; label: string; amount: number }>
+      encaissements: [] as EncaissementDetail[],
+      decaissements: [] as DecaissementDetail[]
     };
 
     // Somme des paiements réels par opportunité (toutes dates confondues)
@@ -300,7 +188,8 @@ export function TreasuryMonthlyView({
         details.encaissements.push({
           type: 'previsionnel',
           label: parts.length > 0 ? parts.join(' – ') : (opp.title || 'Opportunité'),
-          amount: montantRestant
+          amount: montantRestant,
+          opportunityId: opp.id
         });
       }
     });
@@ -315,8 +204,10 @@ export function TreasuryMonthlyView({
         if (!hasRealPayment) {
           details.encaissements.push({
             type: 'debours',
-            label: 'Note de débours',
-            amount: Number(debours.totalFrais)
+            label: debours.title || 'Note de débours',
+            amount: Number(debours.totalFrais),
+            deboursNoteId: debours.id,
+            opportunityId: debours.opportunityId
           });
         }
       }
@@ -329,7 +220,10 @@ export function TreasuryMonthlyView({
         details.encaissements.push({
           type: 'reel',
           label: payment.opportunity?.title || payment.deboursNote?.title || 'Paiement',
-          amount: payment.amount
+          amount: payment.amount,
+          opportunityId: payment.opportunityId,
+          paymentId: payment.id,
+          deboursNoteId: payment.deboursNoteId
         });
       }
     });
@@ -343,7 +237,8 @@ export function TreasuryMonthlyView({
         details.decaissements.push({
           type: 'depense',
           label: 'Dépense',
-          amount: Number(amount)
+          amount: Number(amount),
+          expenseId: (expense as any).id
         });
       }
     });
@@ -356,12 +251,26 @@ export function TreasuryMonthlyView({
         details.decaissements.push({
           type: 'taxe',
           label: `Taxes (paiement ${new Date(payment.paymentDate).toLocaleDateString('fr-FR')})`,
-          amount: payment.taxAmount
+          amount: payment.taxAmount,
+          paymentId: payment.id,
+          opportunityId: payment.opportunityId
         });
       }
     });
 
     return details;
+  };
+
+  const handleEncaissementClick = (item: EncaissementDetail) => {
+    if (item.opportunityId || item.deboursNoteId) {
+      setDetailModal({ kind: 'encaissement', item });
+    }
+  };
+
+  const handleDecaissementClick = (item: DecaissementDetail) => {
+    if (item.expenseId || item.paymentId) {
+      setDetailModal({ kind: 'decaissement', item });
+    }
   };
 
   const formatCurrency = (value: number) => {
@@ -371,6 +280,48 @@ export function TreasuryMonthlyView({
       minimumFractionDigits: 0,
       maximumFractionDigits: 0
     }).format(value);
+  };
+
+  const handleNavigateFromModal = () => {
+    if (!detailModal) return;
+    const { kind, item } = detailModal;
+
+    if (kind === 'encaissement') {
+      const enc = item as EncaissementDetail;
+      if (enc.opportunityId) {
+        navigate(`/opportunites/${enc.opportunityId}`);
+        setDetailModal(null);
+        return;
+      }
+      if (enc.deboursNoteId) {
+        // Pas encore de route dédiée notes de débours
+        return;
+      }
+    } else {
+      const dec = item as DecaissementDetail;
+      if (dec.expenseId) {
+        navigate(`/depenses/${dec.expenseId}`);
+        setDetailModal(null);
+        return;
+      }
+      if (dec.paymentId) {
+        const payment = payments.find((p) => p.id === dec.paymentId);
+        if (payment?.opportunityId) {
+          navigate(`/opportunites/${payment.opportunityId}`);
+          setDetailModal(null);
+          return;
+        }
+      }
+    }
+  };
+
+  const hasNavigationTarget = (item: EncaissementDetail | DecaissementDetail, kind: 'encaissement' | 'decaissement') => {
+    if (kind === 'encaissement') {
+      const enc = item as EncaissementDetail;
+      return !!(enc.opportunityId || enc.deboursNoteId);
+    }
+    const dec = item as DecaissementDetail;
+    return !!(dec.expenseId || dec.paymentId);
   };
 
   return (
@@ -482,12 +433,25 @@ export function TreasuryMonthlyView({
                           <h4 className="font-semibold text-green-700 mb-2">Encaissements</h4>
                           <div className="space-y-1 text-sm">
                             {details.encaissements.length > 0 ? (
-                              details.encaissements.map((item, idx) => (
-                                <div key={idx} className="flex justify-between">
-                                  <span className="text-slate-600">{item.label}</span>
-                                  <span className="font-medium text-green-600">{formatCurrency(item.amount)}</span>
-                                </div>
-                              ))
+                              details.encaissements.map((item, idx) => {
+                                const clickable = hasNavigationTarget(item, 'encaissement');
+                                return (
+                                  <div key={idx} className="flex justify-between">
+                                    {clickable ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleEncaissementClick(item)}
+                                        className="text-left text-slate-600 hover:underline hover:text-indigo-700"
+                                      >
+                                        {item.label}
+                                      </button>
+                                    ) : (
+                                      <span className="text-slate-600">{item.label}</span>
+                                    )}
+                                    <span className="font-medium text-green-600">{formatCurrency(item.amount)}</span>
+                                  </div>
+                                );
+                              })
                             ) : (
                               <p className="text-slate-400 italic">Aucun encaissement</p>
                             )}
@@ -498,12 +462,25 @@ export function TreasuryMonthlyView({
                           <h4 className="font-semibold text-red-700 mb-2">Décaissements</h4>
                           <div className="space-y-1 text-sm">
                             {details.decaissements.length > 0 ? (
-                              details.decaissements.map((item, idx) => (
-                                <div key={idx} className="flex justify-between">
-                                  <span className="text-slate-600">{item.label}</span>
-                                  <span className="font-medium text-red-600">{formatCurrency(item.amount)}</span>
-                                </div>
-                              ))
+                              details.decaissements.map((item, idx) => {
+                                const clickable = hasNavigationTarget(item, 'decaissement');
+                                return (
+                                  <div key={idx} className="flex justify-between">
+                                    {clickable ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDecaissementClick(item)}
+                                        className="text-left text-slate-600 hover:underline hover:text-indigo-700"
+                                      >
+                                        {item.label}
+                                      </button>
+                                    ) : (
+                                      <span className="text-slate-600">{item.label}</span>
+                                    )}
+                                    <span className="font-medium text-red-600">{formatCurrency(item.amount)}</span>
+                                  </div>
+                                );
+                              })
                             ) : (
                               <p className="text-slate-400 italic">Aucun décaissement</p>
                             )}
@@ -519,6 +496,58 @@ export function TreasuryMonthlyView({
         </tbody>
       </table>
       </div>
+
+      {detailModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-md rounded-lg bg-white shadow-lg p-5">
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-900">
+                  {detailModal.kind === 'encaissement' ? 'Détail encaissement' : 'Détail décaissement'}
+                </h3>
+                <p className="mt-1 text-sm text-slate-600">
+                  {detailModal.item.label}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDetailModal(null)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="mb-4 text-sm text-slate-700">
+              <p className="flex justify-between">
+                <span>Montant</span>
+                <span className="font-semibold">
+                  {formatCurrency(detailModal.item.amount)}
+                </span>
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setDetailModal(null)}
+                className="rounded-md border border-slate-200 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+              >
+                Fermer
+              </button>
+              {hasNavigationTarget(detailModal.item, detailModal.kind) && (
+                <button
+                  type="button"
+                  onClick={handleNavigateFromModal}
+                  className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"
+                >
+                  Ouvrir la fiche liée
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

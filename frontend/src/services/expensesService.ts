@@ -51,6 +51,13 @@ export interface Expense {
   updatedAt: string;
 }
 
+function normalizeExpenseStatus<T extends { status: ExpenseStatus }>(expense: T): T {
+  if (expense.status === 'PROCESSED') {
+    return { ...expense, status: 'PENDING' };
+  }
+  return expense;
+}
+
 export interface ExpenseFilters {
   userId?: string;
   status?: ExpenseStatus;
@@ -132,17 +139,17 @@ export const expensesService = {
     const { data } = await expensesApi.get<Expense[]>('/api/expenses', {
       params,
     });
-    return data;
+    return data.map(normalizeExpenseStatus);
   },
 
   async getById(id: string): Promise<Expense> {
     const { data } = await expensesApi.get<Expense>(`/api/expenses/${id}`);
-    return data;
+    return normalizeExpenseStatus(data);
   },
 
   async update(id: string, dto: UpdateExpenseDto): Promise<Expense> {
     const { data } = await expensesApi.put<Expense>(`/api/expenses/${id}`, dto);
-    return data;
+    return normalizeExpenseStatus(data);
   },
 
   async delete(id: string): Promise<void> {
@@ -151,7 +158,7 @@ export const expensesService = {
 
   async create(dto: CreateExpenseDto): Promise<Expense> {
     const { data } = await expensesApi.post<Expense>('/api/expenses', dto);
-    return data;
+    return normalizeExpenseStatus(data);
   },
 
   async validateForecast(id: string): Promise<Expense> {

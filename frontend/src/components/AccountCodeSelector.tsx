@@ -26,6 +26,8 @@ const ACCOUNT_CODES: AccountCode[] = [
   { code: '6243', label: 'Transports de déménagement' },
   
   // Frais de personnel
+  { code: '6411', label: 'Rémunérations du personnel' },
+  { code: '6451', label: 'Charges sociales sur salaires' },
   { code: '6251', label: 'Frais de restauration du personnel' },
   { code: '6252', label: 'Frais de réception' },
   { code: '6253', label: 'Frais de représentation' },

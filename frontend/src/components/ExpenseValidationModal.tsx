@@ -84,7 +84,7 @@ export function ExpenseValidationModal({
         accountCode: accountCode || undefined,
         accountLabel: accountLabel || undefined,
         notes: notes || undefined,
-        status: 'PROCESSED'
+        status: 'PENDING'
       };
 
       await expensesService.update(expense.id, updateData);
