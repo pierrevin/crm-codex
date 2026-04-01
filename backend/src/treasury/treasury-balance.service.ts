@@ -6,6 +6,31 @@ import { PrismaService } from '../common/prisma/prisma.service';
 export class TreasuryBalanceService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private toDateKey(date: Date): string {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  private getTaxImputationDate(paymentDate: Date): Date {
+    const taxDate = new Date(paymentDate.getFullYear(), paymentDate.getMonth() + 2, 5);
+    taxDate.setHours(0, 0, 0, 0);
+    return taxDate;
+  }
+
+  private getRecognizedTaxes(payments: Array<{ paymentDate: Date; taxAmount: unknown }>, cutoffDate: Date): number {
+    const cutoffKey = this.toDateKey(cutoffDate);
+    return payments.reduce((sum, payment) => {
+      const paymentDate = new Date(payment.paymentDate);
+      if (isNaN(paymentDate.getTime())) return sum;
+      const taxDate = this.getTaxImputationDate(paymentDate);
+      const taxKey = this.toDateKey(taxDate);
+      if (taxKey > cutoffKey) return sum;
+      return sum + Number(payment.taxAmount ?? 0);
+    }, 0);
+  }
+
   async getCurrentBalance(): Promise<{ balance: number; isManual: boolean; date: Date }> {
     // Récupérer le dernier solde manuel
     const lastManualBalance = await this.prisma.treasuryBalance.findFirst({
@@ -34,10 +59,10 @@ export class TreasuryBalanceService {
         }
       }
     });
-    const totalPayments = payments.reduce((sum, p) => sum + Number(p.amount), 0);
+    const totalPayments = payments.reduce((sum: number, p: { amount: unknown }) => sum + Number(p.amount), 0);
 
-    // Somme des taxes payées (calculées à partir des paiements)
-    const totalTaxes = payments.reduce((sum, p) => sum + Number(p.taxAmount), 0);
+    // Somme des taxes reconnues à la date du calcul (imputation au 5 de M+2)
+    const totalTaxes = this.getRecognizedTaxes(payments, now);
 
     // Somme des dépenses vérifiées depuis la date de base
     const expenses = await this.prisma.expense.findMany({
@@ -49,7 +74,10 @@ export class TreasuryBalanceService {
         }
       }
     });
-    const totalExpenses = expenses.reduce((sum, e) => sum + Number(e.amountTTC || e.amountHT || 0), 0);
+    const totalExpenses = expenses.reduce(
+      (sum: number, e: { amountTTC: unknown; amountHT: unknown }) => sum + Number(e.amountTTC || e.amountHT || 0),
+      0
+    );
 
     // Calcul du solde actuel
     const currentBalance = baseBalance + totalPayments - totalExpenses - totalTaxes;
@@ -102,7 +130,7 @@ export class TreasuryBalanceService {
       return null;
     }
 
-    let baseBalance = Number(manualBalance.balance);
+    const baseBalance = Number(manualBalance.balance);
     const baseDate = manualBalance.date;
 
     // Calculer les mouvements entre baseDate et date
@@ -114,8 +142,8 @@ export class TreasuryBalanceService {
         }
       }
     });
-    const totalPayments = payments.reduce((sum, p) => sum + Number(p.amount), 0);
-    const totalTaxes = payments.reduce((sum, p) => sum + Number(p.taxAmount), 0);
+    const totalPayments = payments.reduce((sum: number, p: { amount: unknown }) => sum + Number(p.amount), 0);
+    const totalTaxes = this.getRecognizedTaxes(payments, date);
 
     const expenses = await this.prisma.expense.findMany({
       where: {
@@ -126,7 +154,10 @@ export class TreasuryBalanceService {
         }
       }
     });
-    const totalExpenses = expenses.reduce((sum, e) => sum + Number(e.amountTTC || e.amountHT || 0), 0);
+    const totalExpenses = expenses.reduce(
+      (sum: number, e: { amountTTC: unknown; amountHT: unknown }) => sum + Number(e.amountTTC || e.amountHT || 0),
+      0
+    );
 
     return baseBalance + totalPayments - totalExpenses - totalTaxes;
   }

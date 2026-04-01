@@ -6,6 +6,7 @@ import api from '../services/apiClient';
 import { Payment } from '../services/paymentService';
 import {
   buildMonthlyTreasuryData,
+  getTaxImputationDate,
   SelectedStages,
   TreasuryExpense
 } from '../domain/treasury/treasuryCalculations';
@@ -70,6 +71,7 @@ interface DecaissementDetail {
   amount: number;
   expenseId?: string;
   paymentId?: string;
+  opportunityId?: string;
 }
 
 export function TreasuryMonthlyView({
@@ -204,7 +206,7 @@ export function TreasuryMonthlyView({
         if (!hasRealPayment) {
           details.encaissements.push({
             type: 'debours',
-            label: debours.title || 'Note de débours',
+            label: 'Note de débours',
             amount: Number(debours.totalFrais),
             deboursNoteId: debours.id,
             opportunityId: debours.opportunityId
@@ -243,10 +245,10 @@ export function TreasuryMonthlyView({
       }
     });
 
-    // Taxes (du mois suivant les paiements)
+    // Taxes (imputées le 5 de M+2)
     payments.forEach(payment => {
       const paymentDate = new Date(payment.paymentDate);
-      const taxDate = new Date(paymentDate.getFullYear(), paymentDate.getMonth() + 1, 30);
+      const taxDate = getTaxImputationDate(paymentDate);
       if (taxDate >= monthStart && taxDate <= monthEnd) {
         details.decaissements.push({
           type: 'taxe',

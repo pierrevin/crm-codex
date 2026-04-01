@@ -45,13 +45,18 @@ export const isBeforeDay = (a: Date, b: Date) => {
   return toDateKey(a) < toDateKey(b);
 };
 
+export const getTaxImputationDate = (paymentDate: Date) => {
+  const taxDate = new Date(paymentDate.getFullYear(), paymentDate.getMonth() + 2, 5);
+  taxDate.setHours(0, 0, 0, 0);
+  return taxDate;
+};
+
 export function buildDailyTreasuryData(input: DailyCalculationInput) {
   const {
     startDate,
     endDate,
     periodInitialBalance,
     projectionAnchorDate,
-    anchorBalance,
     forecast,
     payments,
     expenses,
@@ -143,8 +148,7 @@ export function buildDailyTreasuryData(input: DailyCalculationInput) {
 
         const taxRate = opp.taxRate ?? 0.28;
         const taxAmount = montantRestant * taxRate;
-        const taxDate = new Date(paymentDate.getFullYear(), paymentDate.getMonth() + 1, 30);
-        taxDate.setHours(0, 0, 0, 0);
+        const taxDate = getTaxImputationDate(paymentDate);
         const taxDayKey = `${taxDate.getFullYear()}-${String(taxDate.getMonth() + 1).padStart(2, '0')}-${String(
           taxDate.getDate()
         ).padStart(2, '0')}`;
@@ -209,7 +213,7 @@ export function buildDailyTreasuryData(input: DailyCalculationInput) {
 
   (payments || []).forEach((payment) => {
     const paymentDate = new Date(payment.paymentDate);
-    const taxDate = new Date(paymentDate.getFullYear(), paymentDate.getMonth() + 1, 30);
+    const taxDate = getTaxImputationDate(paymentDate);
     if (isNaN(taxDate.getTime())) return;
     if (isBeforeDay(taxDate, startDate)) return;
     const dayKey = `${taxDate.getFullYear()}-${String(taxDate.getMonth() + 1).padStart(2, '0')}-${String(
@@ -363,7 +367,7 @@ export function buildMonthlyTreasuryData(input: MonthlyCalculationInput) {
 
           const taxRate = opp.taxRate ?? 0.28;
           const taxAmount = montantRestant * taxRate;
-          const taxMonth = new Date(paymentDate.getFullYear(), paymentDate.getMonth() + 1, 1);
+          const taxMonth = getTaxImputationDate(paymentDate);
           const taxMonthKey = `${taxMonth.getFullYear()}-${String(taxMonth.getMonth() + 1).padStart(2, '0')}`;
           if (monthlyData[taxMonthKey]) {
             monthlyData[taxMonthKey].taxes += taxAmount;
@@ -411,7 +415,7 @@ export function buildMonthlyTreasuryData(input: MonthlyCalculationInput) {
 
   (payments || []).forEach((payment) => {
     const paymentDate = new Date(payment.paymentDate);
-    const taxMonth = new Date(paymentDate.getFullYear(), paymentDate.getMonth() + 1, 1);
+    const taxMonth = getTaxImputationDate(paymentDate);
     const monthKey = `${taxMonth.getFullYear()}-${String(taxMonth.getMonth() + 1).padStart(2, '0')}`;
     if (monthlyData[monthKey]) {
       monthlyData[monthKey].taxes += Number(payment.taxAmount ?? 0);
@@ -457,8 +461,7 @@ export function buildMonthlyTreasuryData(input: MonthlyCalculationInput) {
       (payments || []).forEach((p: any) => {
         const pd = new Date(p.paymentDate);
         if (isNaN(pd.getTime())) return;
-        const taxDate = new Date(pd.getFullYear(), pd.getMonth() + 1, 30);
-        taxDate.setHours(0, 0, 0, 0);
+        const taxDate = getTaxImputationDate(pd);
         if (taxDate < monthStart) return;
         if (toDateKey(taxDate) >= toDateKey(anchorDay)) return;
         taxesAvant += Number(p.taxAmount || 0);

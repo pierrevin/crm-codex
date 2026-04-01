@@ -15,6 +15,7 @@ import { BalanceEditor } from '../components/BalanceEditor';
 import {
   buildDailyTreasuryData,
   buildMonthlyTreasuryData,
+  getTaxImputationDate,
   toDateKey,
   isBeforeDay
 } from '../domain/treasury/treasuryCalculations';
@@ -112,7 +113,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
             )}
             {taxes > 0 && (
               <p className="text-slate-600">
-                &nbsp;&nbsp;Taxes m-1 : {formatCurrency(taxes)}
+                &nbsp;&nbsp;Taxes (imputation M+2) : {formatCurrency(taxes)}
               </p>
             )}
             {totalDecaissements === 0 && (
@@ -357,14 +358,21 @@ export function TreasuryPage() {
         // et on ajoute les décaissements (qui diminuent le solde), taxes incluses.
         // Taxes: uniquement sur les ventes (opportunités). Les notes de débours ont taxAmount=0 côté backend.
         const pastEncaissements = pastPaymentsRes.reduce((sum: number, p: Payment) => sum + parseFloat(p.amount.toString()), 0);
-        const pastTaxes = pastPaymentsRes.reduce((sum: number, p: Payment) => sum + parseFloat((p.taxAmount ?? 0).toString()), 0);
+        const todayKey = toDateKey(today);
+        const pastTaxes = pastPaymentsRes.reduce((sum: number, p: Payment) => {
+          const paymentDate = new Date(p.paymentDate);
+          if (isNaN(paymentDate.getTime())) return sum;
+          const taxDate = getTaxImputationDate(paymentDate);
+          if (toDateKey(taxDate) > todayKey) return sum;
+          return sum + parseFloat((p.taxAmount ?? 0).toString());
+        }, 0);
         const pastDecaissements = pastExpensesRes.reduce((sum: number, e: any) => sum + parseFloat((e.amountTTC || e.amountHT || 0).toString()), 0);
         
         // Remonter dans le temps :
         // solde à startDate = solde aujourd'hui
         //   - encaissements depuis startDate
         //   + décaissements depuis startDate
-        //   + taxes depuis startDate (car taxes diminuent le solde "aujourd'hui" dans l'API)
+        //   + taxes déjà imputées depuis startDate (M+2) car elles diminuent le solde "aujourd'hui" dans l'API
         calculatedPeriodInitialBalance = computedBalanceToday - pastEncaissements + pastDecaissements + pastTaxes;
       } else if (startDate >= today) {
         // Date de début aujourd'hui ou future : le solde initial est le solde d'aujourd'hui
