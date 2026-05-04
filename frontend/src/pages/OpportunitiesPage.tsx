@@ -491,67 +491,106 @@ export function OpportunitiesPage() {
 
                 {!collapsed && (
                   <div className="flex-1 space-y-2 p-2 sm:p-3">
-                    {opportunitiesByStage[stageKey]?.map((opp) => {
-                      const hasPayment = payments.some(p => p.opportunityId === opp.id);
-                      return (
-                        <div
-                          key={opp.id}
-                          draggable
-                          onDragStart={() => handleDragStart(opp)}
-                          className={`w-full rounded-lg border border-slate-200 bg-white p-2 sm:p-3 shadow-sm hover:shadow-md transition-all text-left ${draggedOpp?.id === opp.id ? 'opacity-50' : ''}`}
-                        >
+                    {(() => {
+                      const stageOpps = opportunitiesByStage[stageKey] || [];
+                      // Grouper par client, en préservant l'ordre croissant de closeDate
+                      const groupMap = new Map<string, { companyName: string; companyId?: string; opps: Opportunity[] }>();
+                      for (const opp of stageOpps) {
+                        const key = opp.company?.id || (opp as any).companyId || '__none__';
+                        const name = opp.company?.name ?? 'Sans client';
+                        if (!groupMap.has(key)) groupMap.set(key, { companyName: name, companyId: opp.company?.id, opps: [] });
+                        groupMap.get(key)!.opps.push(opp);
+                      }
+                      // Trier les groupes par la date la plus proche de leur première opportunité
+                      const groups = Array.from(groupMap.values()).sort((a, b) => {
+                        const da = a.opps[0]?.closeDate;
+                        const db = b.opps[0]?.closeDate;
+                        if (!da && !db) return 0;
+                        if (!da) return 1;
+                        if (!db) return -1;
+                        return new Date(da).getTime() - new Date(db).getTime();
+                      });
+
+                      return groups.map(({ companyName, companyId, opps: groupOpps }) => (
+                        <div key={companyId || companyName} className="space-y-1.5">
+                          {/* En-tête client */}
                           <div
-                            onClick={() => window.location.href = `/opportunites/${opp.id}`}
-                            className="cursor-pointer"
+                            className="flex items-center gap-1.5 px-1 pt-1 cursor-pointer group"
+                            onClick={() => companyId && (window.location.href = `/entreprises/${companyId}`)}
                           >
-                            <div className="flex items-start justify-between gap-2">
-                              <h4 className="font-medium text-slate-900 text-xs sm:text-sm line-clamp-2">{opp.title}</h4>
-                              {opp.amount && (
-                                <div className="text-xs sm:text-sm font-semibold text-indigo-600 whitespace-nowrap">
-                                  {Number(opp.amount).toFixed(0)} €
+                            <BuildingOfficeIcon className="h-3 w-3 text-slate-400 shrink-0" />
+                            <span className={`text-xs font-semibold truncate ${companyId ? 'text-slate-600 group-hover:text-indigo-600' : 'text-slate-400'}`}>
+                              {companyName}
+                            </span>
+                            <span className="ml-auto text-xs text-slate-400 shrink-0">
+                              {groupOpps.length > 1 ? `${groupOpps.length}` : ''}
+                            </span>
+                          </div>
+                          {/* Cartes d'opportunités */}
+                          {groupOpps.map((opp) => {
+                            const hasPayment = payments.some(p => p.opportunityId === opp.id);
+                            return (
+                              <div
+                                key={opp.id}
+                                draggable
+                                onDragStart={() => handleDragStart(opp)}
+                                className={`w-full rounded-lg border border-slate-200 bg-white p-2 sm:p-3 shadow-sm hover:shadow-md transition-all text-left ${draggedOpp?.id === opp.id ? 'opacity-50' : ''}`}
+                              >
+                                <div
+                                  onClick={() => window.location.href = `/opportunites/${opp.id}`}
+                                  className="cursor-pointer"
+                                >
+                                  <div className="flex items-start justify-between gap-2">
+                                    <h4 className="font-medium text-slate-900 text-xs sm:text-sm line-clamp-2">{opp.title}</h4>
+                                    {opp.amount && (
+                                      <div className="text-xs sm:text-sm font-semibold text-indigo-600 whitespace-nowrap">
+                                        {Number(opp.amount).toFixed(0)} €
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+                                    {opp.closeDate && (
+                                      <span className="whitespace-nowrap">
+                                        📅 {new Date(opp.closeDate).toLocaleDateString('fr-FR', { month: 'short', day: 'numeric' })}
+                                      </span>
+                                    )}
+                                    {opp.expectedPaymentDate && (
+                                      <span className="whitespace-nowrap">
+                                        💰 {new Date(opp.expectedPaymentDate).toLocaleDateString('fr-FR', { month: 'short', day: 'numeric' })}
+                                      </span>
+                                    )}
+                                    {hasPayment && (
+                                      <span className="whitespace-nowrap text-green-600 font-semibold">
+                                        ✅ Payé
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  {opp.contact && (
+                                    <div className="mt-1 text-xs text-slate-400 truncate">
+                                      {opp.contact.firstName} {opp.contact.lastName ?? ''}
+                                    </div>
+                                  )}
                                 </div>
-                              )}
-                            </div>
-
-                            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
-                              {opp.closeDate && (
-                                <span className="whitespace-nowrap">
-                                  📅 {new Date(opp.closeDate).toLocaleDateString('fr-FR', { month: 'short', day: 'numeric' })}
-                                </span>
-                              )}
-                              {opp.expectedPaymentDate && (
-                                <span className="whitespace-nowrap">
-                                  💰 {new Date(opp.expectedPaymentDate).toLocaleDateString('fr-FR', { month: 'short', day: 'numeric' })}
-                                </span>
-                              )}
-                              {hasPayment && (
-                                <span className="whitespace-nowrap text-green-600 font-semibold">
-                                  ✅ Payé
-                                </span>
-                              )}
-                            </div>
-
-                            <div className="mt-1 text-xs text-slate-500 truncate">
-                              {opp.contact
-                                ? `${opp.contact.firstName} ${opp.contact.lastName ?? ''}`
-                                : opp.company?.name ?? 'Sans client'}
-                            </div>
-                          </div>
-                          <div className="mt-2 pt-2 border-t border-slate-100">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleMarkAsPaid(opp);
-                              }}
-                              className="w-full flex items-center justify-center gap-1 px-2 py-1 text-xs bg-indigo-50 text-indigo-700 rounded hover:bg-indigo-100"
-                            >
-                              <CurrencyEuroIcon className="h-3 w-3" />
-                              {hasPayment ? 'Ajouter paiement' : 'Marquer comme payé'}
-                            </button>
-                          </div>
+                                <div className="mt-2 pt-2 border-t border-slate-100">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleMarkAsPaid(opp);
+                                    }}
+                                    className="w-full flex items-center justify-center gap-1 px-2 py-1 text-xs bg-indigo-50 text-indigo-700 rounded hover:bg-indigo-100"
+                                  >
+                                    <CurrencyEuroIcon className="h-3 w-3" />
+                                    {hasPayment ? 'Ajouter paiement' : 'Marquer comme payé'}
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
-                      );
-                    })}
+                      ));
+                    })()}
                     {count === 0 && (
                       <div className="rounded-lg border border-dashed border-slate-200 bg-white/60 p-4 text-center text-xs text-slate-500">
                         Colonne vide
