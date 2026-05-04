@@ -528,7 +528,12 @@ export function OpportunitiesPage() {
                           </div>
                           {/* Cartes d'opportunités */}
                           {groupOpps.map((opp) => {
-                            const hasPayment = payments.some(p => p.opportunityId === opp.id);
+                            const oppPayments = payments.filter(p => p.opportunityId === opp.id);
+                            const hasPayment = oppPayments.length > 0;
+                            const totalPaid = oppPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+                            const totalAmount = Number(opp.amount || 0);
+                            const remaining = totalAmount - totalPaid;
+                            const fullyPaid = hasPayment && remaining <= 0;
                             return (
                               <div
                                 key={opp.id}
@@ -542,9 +547,22 @@ export function OpportunitiesPage() {
                                 >
                                   <div className="flex items-start justify-between gap-2">
                                     <h4 className="font-medium text-slate-900 text-xs sm:text-sm line-clamp-2">{opp.title}</h4>
-                                    {opp.amount && (
-                                      <div className="text-xs sm:text-sm font-semibold text-indigo-600 whitespace-nowrap">
-                                        {Number(opp.amount).toFixed(0)} €
+                                    {totalAmount > 0 && (
+                                      <div className="text-right shrink-0">
+                                        {hasPayment && !fullyPaid ? (
+                                          <>
+                                            <div className="text-xs sm:text-sm font-semibold text-amber-600 whitespace-nowrap">
+                                              {remaining.toFixed(0)} € restant
+                                            </div>
+                                            <div className="text-xs text-slate-400 whitespace-nowrap">
+                                              / {totalAmount.toFixed(0)} €
+                                            </div>
+                                          </>
+                                        ) : (
+                                          <div className={`text-xs sm:text-sm font-semibold whitespace-nowrap ${fullyPaid ? 'text-green-600' : 'text-indigo-600'}`}>
+                                            {totalAmount.toFixed(0)} €
+                                          </div>
+                                        )}
                                       </div>
                                     )}
                                   </div>
@@ -560,9 +578,14 @@ export function OpportunitiesPage() {
                                         💰 {new Date(opp.expectedPaymentDate).toLocaleDateString('fr-FR', { month: 'short', day: 'numeric' })}
                                       </span>
                                     )}
-                                    {hasPayment && (
+                                    {fullyPaid && (
                                       <span className="whitespace-nowrap text-green-600 font-semibold">
-                                        ✅ Payé
+                                        ✅ Soldé
+                                      </span>
+                                    )}
+                                    {hasPayment && !fullyPaid && (
+                                      <span className="whitespace-nowrap text-amber-600 font-semibold">
+                                        ⏳ Partiel
                                       </span>
                                     )}
                                   </div>
