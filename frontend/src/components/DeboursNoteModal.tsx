@@ -53,6 +53,18 @@ export function DeboursNoteModal({
     accountLabel: ''
   });
   const [companyInfo, setCompanyInfo] = useState<{ id: string; name: string } | null>(null);
+  const [showCreateForfait, setShowCreateForfait] = useState(false);
+  const [creatingForfait, setCreatingForfait] = useState(false);
+  const [newForfait, setNewForfait] = useState({
+    typeId: 'km',
+    description: '',
+    date: new Date().toISOString().split('T')[0],
+    quantity: '',
+    unitRate: '0.63',
+    amountTTC: '',
+    accountCode: '6254',
+    accountLabel: 'Frais de déplacement'
+  });
 
   useEffect(() => {
     if (isOpen) {
@@ -86,6 +98,7 @@ export function DeboursNoteModal({
         }
         setError(null);
         setShowCreateExpense(false);
+        setShowCreateForfait(false);
         setSelectedSupplierId('');
         setNewExpense({
           supplierName: '',
@@ -271,6 +284,67 @@ export function DeboursNoteModal({
       }
     }
   }, [selectedSupplierId, newExpense.supplierName, showCreateExpense]);
+
+  const FORFAIT_TYPES = [
+    { id: 'km',    label: 'Indemnités kilométriques', emoji: '🚗', unit: 'km',       defaultRate: '0.63', accountCode: '6254', accountLabel: 'Frais de déplacement' },
+    { id: 'train', label: 'Transport ferroviaire',    emoji: '🚂', unit: 'trajet(s)', defaultRate: '',     accountCode: '6242', accountLabel: 'Transports de personnes' },
+    { id: 'avion', label: 'Transport aérien',         emoji: '✈️', unit: 'trajet(s)', defaultRate: '',     accountCode: '6242', accountLabel: 'Transports de personnes' },
+    { id: 'taxi',  label: 'Taxi / VTC',               emoji: '🚕', unit: 'trajet(s)', defaultRate: '',     accountCode: '6242', accountLabel: 'Transports de personnes' },
+    { id: 'hotel', label: 'Hébergement',              emoji: '🏨', unit: 'nuit(s)',   defaultRate: '',     accountCode: '6255', accountLabel: 'Frais de logement' },
+    { id: 'repas', label: 'Repas en déplacement',     emoji: '🍽️', unit: 'repas',    defaultRate: '20',   accountCode: '6251', accountLabel: 'Frais de restauration du personnel' },
+    { id: 'autre', label: 'Autre frais forfaitaire',  emoji: '📋', unit: 'unité(s)', defaultRate: '',     accountCode: '6254', accountLabel: 'Frais de déplacement' },
+  ];
+
+  const selectedForfaitType = FORFAIT_TYPES.find(t => t.id === newForfait.typeId) || FORFAIT_TYPES[0];
+
+  const handleCreateForfait = async (e: FormEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setCreatingForfait(true);
+    setError(null);
+
+    try {
+      const notes = [
+        newForfait.description,
+        newForfait.quantity
+          ? `${newForfait.quantity} ${selectedForfaitType.unit}${newForfait.unitRate ? ` × ${newForfait.unitRate} €/${selectedForfaitType.unit}` : ''}`
+          : null
+      ].filter(Boolean).join(' — ');
+
+      const expenseDto: CreateExpenseDto = {
+        supplierName: selectedForfaitType.label,
+        invoiceDate: newForfait.date || undefined,
+        amountTTC: newForfait.amountTTC ? parseFloat(newForfait.amountTTC) : undefined,
+        amountHT: newForfait.amountTTC ? parseFloat(newForfait.amountTTC) : undefined,
+        vatRate: 0,
+        accountCode: newForfait.accountCode || undefined,
+        accountLabel: newForfait.accountLabel || undefined,
+        notes: notes || undefined,
+        opportunityId,
+        status: 'VERIFIED'
+      };
+
+      const createdExpense = await expensesService.create(expenseDto);
+      await loadAvailableExpenses();
+      setSelectedExpenseIds(prev => [...prev, createdExpense.id]);
+
+      setNewForfait({
+        typeId: 'km',
+        description: '',
+        date: new Date().toISOString().split('T')[0],
+        quantity: '',
+        unitRate: '0.63',
+        amountTTC: '',
+        accountCode: '6254',
+        accountLabel: 'Frais de déplacement'
+      });
+      setShowCreateForfait(false);
+    } catch (err: any) {
+      setError(err.response?.data?.message || err.message || 'Erreur lors de la création des frais forfaitaires');
+    } finally {
+      setCreatingForfait(false);
+    }
+  };
 
   const handleCreateExpense = async (e: FormEvent) => {
     e.preventDefault();
@@ -497,15 +571,26 @@ export function DeboursNoteModal({
                 <label className="block text-sm font-medium text-slate-700">
                   Dépenses à inclure (optionnel)
                 </label>
-                {!showCreateExpense && (
-                  <button
-                    type="button"
-                    onClick={() => setShowCreateExpense(true)}
-                    className="flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-700 font-medium"
-                  >
-                    <PlusIcon className="h-4 w-4" />
-                    Créer une dépense
-                  </button>
+                {!showCreateExpense && !showCreateForfait && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowCreateExpense(true)}
+                      className="flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+                    >
+                      <PlusIcon className="h-4 w-4" />
+                      Dépense sur facture
+                    </button>
+                    <span className="text-slate-300">|</span>
+                    <button
+                      type="button"
+                      onClick={() => setShowCreateForfait(true)}
+                      className="flex items-center gap-1 text-sm text-amber-600 hover:text-amber-700 font-medium"
+                    >
+                      <PlusIcon className="h-4 w-4" />
+                      Frais forfaitaires
+                    </button>
+                  </div>
                 )}
               </div>
               
@@ -709,6 +794,176 @@ export function DeboursNoteModal({
                 </div>
               )}
 
+              {showCreateForfait && (
+                <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-semibold text-amber-900">Frais forfaitaires de déplacement</h3>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowCreateForfait(false);
+                        setNewForfait({ typeId: 'km', description: '', date: new Date().toISOString().split('T')[0], quantity: '', unitRate: '0.63', amountTTC: '', accountCode: '6254', accountLabel: 'Frais de déplacement' });
+                      }}
+                      className="text-amber-600 hover:text-amber-700"
+                    >
+                      <XMarkIcon className="h-5 w-5" />
+                    </button>
+                  </div>
+
+                  <form
+                    onSubmit={(e) => { e.preventDefault(); e.stopPropagation(); void handleCreateForfait(e); }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="space-y-3"
+                    onKeyDown={(e) => { if (e.key === 'Enter' && e.target instanceof HTMLInputElement) e.stopPropagation(); }}
+                  >
+                    {/* Type */}
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Type de frais *</label>
+                      <select
+                        value={newForfait.typeId}
+                        onChange={(e) => {
+                          const t = FORFAIT_TYPES.find(f => f.id === e.target.value)!;
+                          setNewForfait(prev => ({
+                            ...prev,
+                            typeId: t.id,
+                            unitRate: t.defaultRate,
+                            accountCode: t.accountCode,
+                            accountLabel: t.accountLabel,
+                            amountTTC: t.defaultRate && prev.quantity
+                              ? (parseFloat(prev.quantity) * parseFloat(t.defaultRate)).toFixed(2)
+                              : prev.amountTTC
+                          }));
+                        }}
+                        className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none bg-white"
+                      >
+                        {FORFAIT_TYPES.map(t => (
+                          <option key={t.id} value={t.id}>{t.emoji} {t.label}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Description + date */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">Description</label>
+                        <input
+                          type="text"
+                          value={newForfait.description}
+                          onChange={(e) => setNewForfait(prev => ({ ...prev, description: e.target.value }))}
+                          placeholder={selectedForfaitType.id === 'km' ? 'ex: Paris → Lyon' : 'ex: Déplacement client'}
+                          className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">Date *</label>
+                        <input
+                          type="date"
+                          value={newForfait.date}
+                          onChange={(e) => setNewForfait(prev => ({ ...prev, date: e.target.value }))}
+                          required
+                          className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Quantité + tarif */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          Quantité ({selectedForfaitType.unit})
+                        </label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          min="0"
+                          value={newForfait.quantity}
+                          onChange={(e) => {
+                            const qty = e.target.value;
+                            const total = qty && newForfait.unitRate && !isNaN(parseFloat(qty)) && !isNaN(parseFloat(newForfait.unitRate))
+                              ? (parseFloat(qty) * parseFloat(newForfait.unitRate)).toFixed(2)
+                              : newForfait.amountTTC;
+                            setNewForfait(prev => ({ ...prev, quantity: qty, amountTTC: total }));
+                          }}
+                          placeholder="0"
+                          className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          Tarif (€/{selectedForfaitType.unit})
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={newForfait.unitRate}
+                          onChange={(e) => {
+                            const rate = e.target.value;
+                            const total = rate && newForfait.quantity && !isNaN(parseFloat(rate)) && !isNaN(parseFloat(newForfait.quantity))
+                              ? (parseFloat(newForfait.quantity) * parseFloat(rate)).toFixed(2)
+                              : newForfait.amountTTC;
+                            setNewForfait(prev => ({ ...prev, unitRate: rate, amountTTC: total }));
+                          }}
+                          placeholder="0.00"
+                          className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Montant total */}
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Montant total (€) *</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={newForfait.amountTTC}
+                        onChange={(e) => setNewForfait(prev => ({ ...prev, amountTTC: e.target.value }))}
+                        required
+                        placeholder="0.00"
+                        className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm font-semibold focus:border-amber-500 focus:outline-none"
+                      />
+                      {newForfait.quantity && newForfait.unitRate && (
+                        <p className="mt-1 text-xs text-amber-700">
+                          = {newForfait.quantity} {selectedForfaitType.unit} × {newForfait.unitRate} €/{selectedForfaitType.unit}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Code compte */}
+                    <div>
+                      <AccountCodeSelector
+                        value={newForfait.accountCode}
+                        onChange={(code, label) => setNewForfait(prev => ({ ...prev, accountCode: code, accountLabel: label }))}
+                        label="Code compte"
+                        required
+                        className="text-xs"
+                      />
+                    </div>
+
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowCreateForfait(false);
+                          setNewForfait({ typeId: 'km', description: '', date: new Date().toISOString().split('T')[0], quantity: '', unitRate: '0.63', amountTTC: '', accountCode: '6254', accountLabel: 'Frais de déplacement' });
+                        }}
+                        className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 rounded-md hover:bg-slate-200"
+                      >
+                        Annuler
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={creatingForfait || !newForfait.amountTTC || !newForfait.accountCode}
+                        className="px-3 py-1.5 text-xs font-medium text-white bg-amber-600 rounded-md hover:bg-amber-700 disabled:opacity-50"
+                      >
+                        {creatingForfait ? 'Création...' : 'Ajouter'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
+
               <div className="border border-slate-200 rounded-md max-h-48 overflow-y-auto">
                 {availableExpenses.length === 0 && !showCreateExpense ? (
                   <div className="p-4 text-center">
@@ -737,12 +992,16 @@ export function DeboursNoteModal({
                           className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
                         />
                         <div className="ml-3 flex-1">
-                          <div className="text-sm font-medium text-slate-900">
+                          <div className="text-sm font-medium text-slate-900 flex items-center gap-1.5">
+                            {expense.vatRate === 0 && expense.accountCode?.startsWith('62') && (
+                              <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium">Forfait</span>
+                            )}
                             {expense.supplierName || 'Sans nom'}
                           </div>
                           <div className="text-xs text-slate-500">
                             {expense.invoiceDate ? new Date(expense.invoiceDate).toLocaleDateString('fr-FR') : ''}
                             {expense.amountTTC && ` • ${parseFloat(expense.amountTTC.toString()).toFixed(2)} € TTC`}
+                            {expense.notes && ` • ${expense.notes}`}
                           </div>
                         </div>
                       </label>
