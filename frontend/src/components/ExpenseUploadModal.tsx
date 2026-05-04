@@ -82,10 +82,7 @@ export function ExpenseUploadModal({ onClose, opportunityId }: ExpenseUploadModa
   // Créer un nouveau fournisseur
   const handleCreateSupplier = async (name: string, companyData?: any) => {
     try {
-      const dataToSend = companyData || { name, statusSupplier: true };
-      if (!companyData) {
-        dataToSend.statusSupplier = true;
-      }
+      const dataToSend = { name, ...(companyData || { statusSupplier: true }) };
       const { data } = await api.post('/api/companies', dataToSend);
       return data;
     } catch (error) {

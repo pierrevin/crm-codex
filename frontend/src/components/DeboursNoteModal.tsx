@@ -560,10 +560,7 @@ export function DeboursNoteModal({
                         }}
                         onCreateSupplier={async (name: string, companyData?: any) => {
                           try {
-                            const dataToSend = companyData || { name, statusSupplier: true };
-                            if (!companyData) {
-                              dataToSend.statusSupplier = true;
-                            }
+                            const dataToSend = { name, ...(companyData || { statusSupplier: true }) };
                             const { data } = await api.post('/api/companies', dataToSend);
                             setSelectedSupplierId(data.id);
                             setNewExpense({ ...newExpense, supplierName: data.name });
