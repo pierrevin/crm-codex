@@ -97,7 +97,7 @@ export const expensesService = {
     }
 
     // Utiliser la fonction expenses dédiée pour le scan
-    const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
+    const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://oecbrtyeqatieeybjvhj.supabase.co';
     const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
     const accessToken = localStorage.getItem('accessToken');
     
