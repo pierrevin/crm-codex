@@ -235,7 +235,14 @@ export function OpportunitiesPage() {
   };
 
   const opportunitiesByStage = Object.keys(STAGES).reduce((acc, stage) => {
-    acc[stage as keyof typeof STAGES] = opportunities.filter((o: any) => o.stage === stage);
+    acc[stage as keyof typeof STAGES] = opportunities
+      .filter((o: any) => o.stage === stage)
+      .sort((a, b) => {
+        if (!a.closeDate && !b.closeDate) return 0;
+        if (!a.closeDate) return 1;
+        if (!b.closeDate) return -1;
+        return new Date(a.closeDate).getTime() - new Date(b.closeDate).getTime();
+      });
     return acc;
   }, {} as Record<string, Opportunity[]>);
 
