@@ -18,6 +18,7 @@ import {
   computeDashboardStats,
   type RawDashboardData
 } from '../utils/computeDashboardStats';
+import { formatPeriodLabel } from '../utils/dateRange';
 
 type DashboardPreset = 'MONTH' | 'QUARTER' | 'YEAR' | 'LAST_12_MONTHS' | 'ALL' | 'CUSTOM';
 
@@ -186,6 +187,21 @@ export function DashboardPage() {
   const paidGross = revenueStats?.paid?.gross ?? 0;
   const paidNet = revenueStats?.paid?.net ?? 0;
 
+  const globalPeriodLabel =
+    filterPreset === 'ALL'
+      ? 'Tout l\'historique'
+      : filterPreset === 'MONTH'
+        ? 'Mois en cours'
+        : filterPreset === 'QUARTER'
+          ? 'Trimestre en cours'
+          : filterPreset === 'YEAR'
+            ? 'Année en cours'
+            : filterPreset === 'LAST_12_MONTHS'
+              ? '12 derniers mois'
+              : filterDateFrom && filterDateTo
+                ? formatPeriodLabel(filterDateFrom, filterDateTo)
+                : undefined;
+
   if (initialLoading) {
     return <div className="p-8 text-center text-slate-500">Chargement du tableau de bord...</div>;
   }
@@ -257,12 +273,11 @@ export function DashboardPage() {
           {/* Filtres globaux : KPI, tunnel, étapes pour toute la page */}
           <div className="flex flex-col gap-3 p-3 rounded-lg bg-white border border-slate-200 shadow-sm">
             <p className="text-xs text-slate-500">
-              Ces filtres s&apos;appliquent aux indicateurs, au tunnel et aux graphiques (étapes).
-              Chaque graphique a sa propre période ci-dessous.
+              Période et étapes communes à toute la page (indicateurs, tunnel et graphiques).
             </p>
             <div className="flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-slate-700">Période des indicateurs :</span>
+              <span className="text-sm font-medium text-slate-700">Période :</span>
               <select
                 value={filterPreset}
                 onChange={(e) => {
@@ -611,11 +626,17 @@ export function DashboardPage() {
         </div>
       </div>
 
-      <ProjectionView opportunities={stats.stageFilteredOpportunities as any} />
+      <ProjectionView
+        opportunities={stats.filteredOpportunities as any}
+        dateFrom={filterDateFrom}
+        dateTo={filterDateTo}
+        periodLabel={globalPeriodLabel}
+      />
 
       <PipelineByStageView
-        opportunities={stats.stageFilteredOpportunities as any}
+        opportunities={stats.filteredOpportunities as any}
         visibleStages={filterStages}
+        periodLabel={globalPeriodLabel}
       />
     </div>
   );

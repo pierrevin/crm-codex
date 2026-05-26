@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import {
   Bar,
   XAxis,
@@ -11,13 +11,7 @@ import {
   ComposedChart
 } from 'recharts';
 
-import { DateRangeFilter } from './DateRangeFilter';
-import {
-  formatPeriodLabel,
-  getCalendarYearRange,
-  getMonthKeysInRange,
-  isInDateRange
-} from '../utils/dateRange';
+import { getMonthKeysInRange } from '../utils/dateRange';
 
 type Opportunity = {
   id: string;
@@ -30,15 +24,31 @@ type Opportunity = {
   company?: { id: string; name: string } | null;
 };
 
-export function ProjectionView({ opportunities }: { opportunities: Opportunity[] }) {
-  const defaultRange = getCalendarYearRange();
-  const [dateFrom, setDateFrom] = useState(defaultRange.from);
-  const [dateTo, setDateTo] = useState(defaultRange.to);
+export function ProjectionView({
+  opportunities,
+  dateFrom,
+  dateTo,
+  periodLabel
+}: {
+  opportunities: Opportunity[];
+  dateFrom?: string;
+  dateTo?: string;
+  periodLabel?: string;
+}) {
+  const { projectionData, totals } = useMemo(() => {
+    const relevantOpps = opportunities.filter(opp => opp.closeDate);
 
-  const { projectionData, totals, periodLabel } = useMemo(() => {
-    const relevantOpps = opportunities.filter(
-      opp => opp.closeDate && isInDateRange(opp.closeDate, dateFrom, dateTo)
-    );
+    const monthKeysFromData = [
+      ...new Set(
+        relevantOpps.map(opp => {
+          const date = new Date(opp.closeDate!);
+          return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+        })
+      )
+    ].sort();
+
+    const monthKeys =
+      dateFrom && dateTo ? getMonthKeysInRange(dateFrom, dateTo) : monthKeysFromData;
 
     const monthlyData: Record<
       string,
@@ -50,7 +60,7 @@ export function ProjectionView({ opportunities }: { opportunities: Opportunity[]
       }
     > = {};
 
-    for (const monthKey of getMonthKeysInRange(dateFrom, dateTo)) {
+    for (const monthKey of monthKeys) {
       monthlyData[monthKey] = { caPrev: 0, caNet: 0, wonCount: 0, pipelineCount: 0 };
     }
 
@@ -111,43 +121,29 @@ export function ProjectionView({ opportunities }: { opportunities: Opportunity[]
       { caPrev: 0, caNet: 0, wonCount: 0, pipelineCount: 0, totalCount: 0 }
     );
 
-    return {
-      projectionData: data,
-      totals: agg,
-      periodLabel: formatPeriodLabel(dateFrom, dateTo)
-    };
+    return { projectionData: data, totals: agg };
   }, [opportunities, dateFrom, dateTo]);
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="text-lg font-semibold text-slate-900">📊 Projection CA</h2>
-          <p className="text-sm text-slate-500 mt-1">
-            {periodLabel} · étapes selon le filtre en haut de page
-          </p>
+          {periodLabel && <p className="text-sm text-slate-500 mt-1">{periodLabel}</p>}
         </div>
 
-        <div className="flex flex-col gap-4 lg:items-end">
-          <DateRangeFilter
-            dateFrom={dateFrom}
-            dateTo={dateTo}
-            onDateFromChange={setDateFrom}
-            onDateToChange={setDateTo}
-          />
-          <div className="flex gap-6 text-sm">
-            <div className="text-right">
-              <p className="text-slate-500">CA Prévu Total</p>
-              <p className="text-xl font-bold text-indigo-600">
-                {totals.caPrev.toLocaleString()} €
-              </p>
-            </div>
-            <div className="text-right">
-              <p className="text-slate-500">CA Net Total (-27%)</p>
-              <p className="text-xl font-bold text-emerald-600">
-                {totals.caNet.toLocaleString()} €
-              </p>
-            </div>
+        <div className="flex gap-6 text-sm">
+          <div className="text-right">
+            <p className="text-slate-500">CA Prévu Total</p>
+            <p className="text-xl font-bold text-indigo-600">
+              {totals.caPrev.toLocaleString()} €
+            </p>
+          </div>
+          <div className="text-right">
+            <p className="text-slate-500">CA Net Total (-27%)</p>
+            <p className="text-xl font-bold text-emerald-600">
+              {totals.caNet.toLocaleString()} €
+            </p>
           </div>
         </div>
       </div>
@@ -234,7 +230,8 @@ export function ProjectionView({ opportunities }: { opportunities: Opportunity[]
           <div className="text-center py-12 text-slate-500">
             <p>Aucune donnée de projection sur cette période</p>
             <p className="text-sm mt-2">
-              Ajustez les dates ou ajoutez des opportunités avec une date de clôture
+              Modifiez les filtres en haut de page ou ajoutez des opportunités avec une date de
+              clôture
             </p>
           </div>
         )}

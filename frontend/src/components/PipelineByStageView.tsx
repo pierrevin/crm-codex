@@ -1,11 +1,4 @@
-import { useMemo, useState } from 'react';
-
-import { DateRangeFilter } from './DateRangeFilter';
-import {
-  formatPeriodLabel,
-  getCalendarYearRange,
-  isInDateRange
-} from '../utils/dateRange';
+import { useMemo } from 'react';
 
 const STAGES = {
   QUALIFICATION: { label: 'Qualification', color: 'bg-blue-500' },
@@ -19,31 +12,22 @@ type Opportunity = {
   id: string;
   stage: string;
   amount?: number;
-  closeDate?: string;
-  createdAt?: string;
 };
 
 export function PipelineByStageView({
   opportunities,
-  visibleStages
+  visibleStages,
+  periodLabel
 }: {
   opportunities: Opportunity[];
   visibleStages: Set<string>;
+  periodLabel?: string;
 }) {
-  const defaultRange = getCalendarYearRange();
-  const [dateFrom, setDateFrom] = useState(defaultRange.from);
-  const [dateTo, setDateTo] = useState(defaultRange.to);
-
-  const { filteredOpps, pipelineValue, byStage } = useMemo(() => {
-    const filtered = opportunities.filter(opp => {
-      const rawDate = opp.closeDate || opp.createdAt;
-      return isInDateRange(rawDate, dateFrom, dateTo);
-    });
-
+  const { pipelineValue, byStage } = useMemo(() => {
     const byStageMap: Record<string, { count: number; value: number }> = {};
     let total = 0;
 
-    for (const opp of filtered) {
+    for (const opp of opportunities) {
       const stage = opp.stage;
       const amount = Number(opp.amount) || 0;
       if (!byStageMap[stage]) {
@@ -56,32 +40,14 @@ export function PipelineByStageView({
       }
     }
 
-    return {
-      filteredOpps: filtered,
-      pipelineValue: total,
-      byStage: byStageMap
-    };
-  }, [opportunities, dateFrom, dateTo]);
-
-  const periodLabel = formatPeriodLabel(dateFrom, dateTo);
+    return { pipelineValue: total, byStage: byStageMap };
+  }, [opportunities]);
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm space-y-4">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-900">
-            💰 Valeur du pipeline par étape
-          </h2>
-          <p className="text-sm text-slate-500 mt-1">
-            {periodLabel} · étapes selon le filtre en haut de page
-          </p>
-        </div>
-        <DateRangeFilter
-          dateFrom={dateFrom}
-          dateTo={dateTo}
-          onDateFromChange={setDateFrom}
-          onDateToChange={setDateTo}
-        />
+      <div>
+        <h2 className="text-lg font-semibold text-slate-900">💰 Valeur du pipeline par étape</h2>
+        {periodLabel && <p className="text-sm text-slate-500 mt-1">{periodLabel}</p>}
       </div>
 
       <div className="space-y-4">
@@ -127,7 +93,7 @@ export function PipelineByStageView({
           </span>
         </div>
         <p className="text-xs text-slate-500 mt-1">
-          {filteredOpps.length} opportunité{filteredOpps.length > 1 ? 's' : ''} sur la période
+          {opportunities.length} opportunité{opportunities.length > 1 ? 's' : ''} sur la période
         </p>
       </div>
     </div>
