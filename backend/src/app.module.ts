@@ -21,6 +21,7 @@ import { TreasuryModule } from './treasury/treasury.module';
 import { DeboursNotesModule } from './debours-notes/debours-notes.module';
 import { InvoicesModule } from './invoices/invoices.module';
 import { TaxRateModule } from './tax/tax-rate.module';
+import { StatsModule } from './stats/stats.module';
 
 @Module({
   imports: [
@@ -50,7 +51,8 @@ import { TaxRateModule } from './tax/tax-rate.module';
     TreasuryModule,
     DeboursNotesModule,
     InvoicesModule,
-    TaxRateModule
+    TaxRateModule,
+    StatsModule
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard }

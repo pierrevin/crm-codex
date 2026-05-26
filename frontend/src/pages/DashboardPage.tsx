@@ -12,13 +12,16 @@ import {
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Line, PieChart, Pie, Cell } from 'recharts';
 import api from '../services/apiClient';
 import { ProjectionView } from '../components/ProjectionView';
-import { TreasuryView } from '../components/TreasuryView';
+import { PipelineByStageView } from '../components/PipelineByStageView';
 import { GlobalSearch } from '../components/GlobalSearch';
+
+type DashboardPreset = 'MONTH' | 'QUARTER' | 'YEAR' | 'LAST_12_MONTHS' | 'ALL' | 'CUSTOM';
 
 const STAGES = {
   QUALIFICATION: { label: 'Qualification', color: 'bg-blue-500' },
   PROPOSAL: { label: 'Proposition', color: 'bg-purple-500' },
   CLOSED_WON: { label: 'Gagné', color: 'bg-green-500' },
+  FINALIZED: { label: 'Finalisé / réglé', color: 'bg-amber-500' },
   CLOSED_LOST: { label: 'Perdu', color: 'bg-rose-500' }
 };
 
@@ -32,23 +35,26 @@ export function DashboardPage() {
     pipelineValue: 0,
     wonValue: 0,
     netRevenue: 0,
+    averageTaxRate: 0.27,
     opportunitiesByStage: {} as Record<string, number>,
-    recentOpportunities: [] as any[]
+    recentOpportunities: [] as any[],
+    // Opportunités filtrées par période + étapes (KPIs, tunnel)
+    filteredOpportunities: [] as any[],
+    // Filtrées par étapes uniquement (projection / pipeline ont leur propre période)
+    stageFilteredOpportunities: [] as any[]
   });
+  const [revenueStats, setRevenueStats] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [googleConnected, setGoogleConnected] = useState(false);
   const [connectingGoogle, setConnectingGoogle] = useState(false);
+  const [filterPreset, setFilterPreset] = useState<DashboardPreset>('YEAR');
+  const [filterDateFrom, setFilterDateFrom] = useState<string | undefined>();
+  const [filterDateTo, setFilterDateTo] = useState<string | undefined>();
+  const [filterStages, setFilterStages] = useState<Set<string>>(
+    () => new Set(Object.keys(STAGES))
+  );
   
-  // États pour la projection CA
-  const [projectionPeriod, setProjectionPeriod] = useState<3 | 6 | 12>(6);
-  const [projectionSelectedStages, setProjectionSelectedStages] = useState<Set<string>>(new Set(['CLOSED_WON']));
-  
-  // État pour toutes les opportunités (pour TreasuryView)
-  const [allOpportunities, setAllOpportunities] = useState<any[]>([]);
-
   useEffect(() => {
-    void loadStats();
-    void loadAllOpportunities();
     void checkGoogleConnection();
     
     // Afficher un message si Google OAuth callback
@@ -67,6 +73,27 @@ export function DashboardPage() {
     }
   }, [searchParams, setSearchParams]);
 
+  useEffect(() => {
+    // Initialiser la période par défaut (année en cours) si non définie
+    if (!filterDateFrom && !filterDateTo && filterPreset === 'YEAR') {
+      const now = new Date();
+      const from = new Date(now.getFullYear(), 0, 1);
+      const to = now;
+      setFilterDateFrom(from.toISOString().slice(0, 10));
+      setFilterDateTo(to.toISOString().slice(0, 10));
+      return;
+    }
+  }, [filterDateFrom, filterDateTo, filterPreset]);
+
+  // Recharger les stats pipeline + CA dès que les filtres changent
+  useEffect(() => {
+    if (!filterDateFrom && !filterDateTo && filterPreset !== 'ALL') {
+      return;
+    }
+
+    void loadStats();
+  }, [filterDateFrom, filterDateTo, filterStages, filterPreset]);
+
   const checkGoogleConnection = async () => {
     try {
       const { data } = await api.get('/api/google/connected');
@@ -80,76 +107,137 @@ export function DashboardPage() {
 
   const loadStats = async () => {
     try {
-      // Utiliser l'endpoint /stats optimisé au lieu de charger toutes les données
-      const statsRes = await api.get('/api/stats');
-      
+      setLoading(true);
+
+      const [contactsRes, companiesRes, opportunitiesRes, paymentsRes] = await Promise.all([
+        api.get('/api/contacts', { params: { limit: 1000 } }),
+        api.get('/api/companies'),
+        // Important : endpoint existant côté Supabase (opportunities en anglais)
+        api.get('/api/opportunities', { params: { limit: 1000 } }),
+        api.get('/api/payments', { params: { limit: 1000 } })
+      ]);
+
+      const contacts = contactsRes.data.items || contactsRes.data.data || [];
+      const companies = Array.isArray(companiesRes.data)
+        ? companiesRes.data
+        : companiesRes.data.items || companiesRes.data.data || [];
+      const opportunities = opportunitiesRes.data.items || opportunitiesRes.data.data || [];
+      const payments = paymentsRes.data.items || paymentsRes.data.data || [];
+
+      const totalContacts = contactsRes.data.total ?? contacts.length;
+
+      const fromDate = filterDateFrom ? new Date(filterDateFrom) : undefined;
+      const toDate = filterDateTo ? new Date(filterDateTo) : undefined;
+      const selectedStages = Array.from(filterStages);
+
+      const stageFilteredOpps = opportunities.filter((opp: any) => {
+        if (selectedStages.length > 0 && !selectedStages.includes(opp.stage)) {
+          return false;
+        }
+        return true;
+      });
+
+      const filteredOpps = stageFilteredOpps.filter((opp: any) => {
+        const rawDate = opp.closeDate || opp.createdAt;
+        if (!rawDate) return true;
+
+        const d = new Date(rawDate);
+        if (fromDate && d < fromDate) return false;
+        if (toDate && d > toDate) return false;
+
+        return true;
+      });
+
+      const totalOpportunities = filteredOpps.length;
+      const opportunitiesByStage: Record<string, number> = {};
+      let pipelineValue = 0;
+      let wonValue = 0;
+
+      let sumNetRevenue = 0;
+      let weightedTaxNumerator = 0;
+      let weightedTaxDenominator = 0;
+
+      for (const opp of filteredOpps) {
+        const stage = opp.stage;
+        const amount = Number(opp.amount) || 0;
+        const taxRate =
+          opp.taxRate !== undefined && opp.taxRate !== null ? Number(opp.taxRate) : 0.27;
+
+        opportunitiesByStage[stage] = (opportunitiesByStage[stage] || 0) + 1;
+
+        if (stage !== 'CLOSED_LOST') {
+          pipelineValue += amount;
+        }
+
+        if (stage === 'CLOSED_WON' || stage === 'FINALIZED') {
+          wonValue += amount;
+          sumNetRevenue += amount * (1 - taxRate);
+          weightedTaxNumerator += amount * taxRate;
+          weightedTaxDenominator += amount;
+        }
+      }
+
+      const averageTaxRate =
+        weightedTaxDenominator > 0 ? weightedTaxNumerator / weightedTaxDenominator : 0.27;
+
+      const netRevenue =
+        sumNetRevenue > 0 ? sumNetRevenue : wonValue * (1 - averageTaxRate);
+
+      const recentOpportunities = [...filteredOpps]
+        .sort((a, b) => {
+          const da = new Date(a.closeDate || a.createdAt || 0).getTime();
+          const db = new Date(b.closeDate || b.createdAt || 0).getTime();
+          return db - da;
+        })
+        .slice(0, 5);
+
+      // CA encaissé basé sur les paiements
+      const filteredPayments = payments.filter((p: any) => {
+        const rawDate = p.paymentDate;
+        if (!rawDate) return false;
+        const d = new Date(rawDate);
+        if (fromDate && d < fromDate) return false;
+        if (toDate && d > toDate) return false;
+        return true;
+      });
+
+      let paidGross = 0;
+      let paidNet = 0;
+
+      for (const p of filteredPayments) {
+        const amount = Number(p.amount) || 0;
+        const taxAmount =
+          p.taxAmount !== undefined && p.taxAmount !== null
+            ? Number(p.taxAmount)
+            : amount * Number(p.taxRate ?? 0.27);
+        paidGross += amount;
+        paidNet += amount - taxAmount;
+      }
+
       setStats({
-        totalContacts: statsRes.data.totalContacts ?? 0,
-        totalCompanies: statsRes.data.totalCompanies ?? 0,
-        totalOpportunities: statsRes.data.totalOpportunities ?? 0,
-        pipelineValue: statsRes.data.pipelineValue ?? 0,
-        wonValue: statsRes.data.wonValue ?? 0,
-        netRevenue: statsRes.data.netRevenue ?? 0,
-        opportunitiesByStage: statsRes.data.opportunitiesByStage ?? {},
-        recentOpportunities: statsRes.data.recentOpportunities ?? []
+        totalContacts,
+        totalCompanies: companies.length,
+        totalOpportunities,
+        pipelineValue,
+        wonValue,
+        netRevenue,
+        averageTaxRate,
+        opportunitiesByStage,
+        recentOpportunities,
+        filteredOpportunities: filteredOpps,
+        stageFilteredOpportunities: stageFilteredOpps
+      });
+
+      setRevenueStats({
+        averageTaxRate,
+        signed: { gross: wonValue, net: netRevenue },
+        invoiced: { gross: 0, net: 0 },
+        paid: { gross: paidGross, net: paidNet }
       });
     } catch (error) {
-      console.error('Erreur chargement stats:', error);
-      // Fallback vers l'ancienne méthode si /stats n'existe pas encore
-      try {
-        const [contactsRes, companiesRes, opportunitiesRes] = await Promise.all([
-          api.get('/api/contacts', { params: { limit: 1000 } }),
-          api.get('/api/companies'),
-          api.get('/api/opportunities', { params: { limit: 1000 } })
-        ]);
-
-        const contacts = contactsRes.data.items || contactsRes.data.data || [];
-        const companies = Array.isArray(companiesRes.data) ? companiesRes.data : (companiesRes.data.items || companiesRes.data.data || []);
-        const opportunities = opportunitiesRes.data.items || opportunitiesRes.data.data || [];
-
-        const totalContacts = contactsRes.data.total ?? contacts.length;
-        const totalOpportunities = opportunitiesRes.data.total ?? opportunities.length;
-
-        const oppsByStage = opportunities.reduce((acc: any, opp: any) => {
-          acc[opp.stage] = (acc[opp.stage] || 0) + 1;
-          return acc;
-        }, {});
-
-        const pipelineValue = opportunities
-          .filter((o: any) => o.stage !== 'CLOSED_LOST')
-          .reduce((sum: number, opp: any) => sum + (Number(opp.amount) || 0), 0);
-
-        const wonValue = opportunities
-          .filter((o: any) => o.stage === 'CLOSED_WON')
-          .reduce((sum: number, opp: any) => sum + (Number(opp.amount) || 0), 0);
-        
-        const netRevenue = wonValue * 0.73;
-
-        setStats({
-          totalContacts: totalContacts,
-          totalCompanies: companies.length,
-          totalOpportunities: totalOpportunities,
-          pipelineValue,
-          wonValue,
-          netRevenue,
-          opportunitiesByStage: oppsByStage,
-          recentOpportunities: opportunities.slice(0, 5)
-        });
-      } catch (fallbackError) {
-        console.error('Erreur fallback:', fallbackError);
-      }
-    }
-    setLoading(false);
-  };
-
-  const loadAllOpportunities = async () => {
-    try {
-      const { data } = await api.get('/api/opportunities', { params: { limit: 1000 } });
-      const opps = data.items || data.data || [];
-      console.log('DashboardPage - Opportunités chargées pour TreasuryView:', opps.length);
-      setAllOpportunities(opps);
-    } catch (error) {
-      console.error('Erreur chargement opportunités:', error);
+      console.error('Erreur chargement stats côté frontend:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -176,9 +264,20 @@ export function DashboardPage() {
     }
   };
 
+  const wonForConversion =
+    (stats.opportunitiesByStage['CLOSED_WON'] || 0) +
+    (stats.opportunitiesByStage['FINALIZED'] || 0);
+
   const conversionRate = stats.totalOpportunities > 0 
-    ? ((stats.opportunitiesByStage['CLOSED_WON'] || 0) / stats.totalOpportunities * 100).toFixed(1)
+    ? (wonForConversion / stats.totalOpportunities * 100).toFixed(1)
     : 0;
+
+  const signedGross = revenueStats?.signed?.gross ?? 0;
+  const signedNet = revenueStats?.signed?.net ?? 0;
+  const invoicedGross = revenueStats?.invoiced?.gross ?? 0;
+  const invoicedNet = revenueStats?.invoiced?.net ?? 0;
+  const paidGross = revenueStats?.paid?.gross ?? 0;
+  const paidNet = revenueStats?.paid?.net ?? 0;
 
   if (loading) {
     return <div className="p-8 text-center text-slate-500">Chargement du tableau de bord...</div>;
@@ -186,37 +285,179 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      {/* En-tête avec recherche globale */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-slate-900">Tableau de bord</h1>
-          <p className="text-slate-500 mt-1">Vue d'ensemble de votre activité commerciale</p>
+      {/* En-tête avec recherche globale + filtres */}
+      <div className="space-y-4 sticky top-0 z-10 bg-slate-50/80 backdrop-blur border-b border-slate-200 pb-4">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold text-slate-900">Tableau de bord</h1>
+            <p className="text-slate-500 mt-1">Vue d'ensemble de votre activité commerciale</p>
           </div>
-          {googleConnected ? (
-            <div className="flex items-center gap-2 text-sm text-green-600" title="Google Drive connecté">
-              <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-              </svg>
-              <span>Google Drive</span>
+          <div className="flex flex-col items-end gap-2">
+            {googleConnected ? (
+              <div className="flex items-center gap-2 text-sm text-green-600" title="Google Drive connecté">
+                <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                  <path
+                    fillRule="evenodd"
+                    d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+                <span>Google Drive</span>
+              </div>
+            ) : (
+              <button
+                onClick={connectGoogle}
+                disabled={connectingGoogle}
+                className="flex items-center gap-2 rounded-md bg-white border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <CloudIcon className="h-5 w-5" />
+                {connectingGoogle ? 'Connexion...' : 'Connecter Google Drive'}
+              </button>
+            )}
+
+            {/* Boutons \"Créer rapidement\" intégrés dans le header */}
+            <div className="flex flex-wrap justify-end gap-2">
+              <button
+                onClick={() => navigate('/entreprises/new')}
+                className="inline-flex items-center gap-1 rounded-md bg-white border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 shadow-sm"
+              >
+                <PlusIcon className="h-4 w-4 text-indigo-600" />
+                <span>Entreprise</span>
+              </button>
+              <button
+                onClick={() => navigate('/contacts/new')}
+                className="inline-flex items-center gap-1 rounded-md bg-white border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 shadow-sm"
+              >
+                <PlusIcon className="h-4 w-4 text-blue-600" />
+                <span>Contact</span>
+              </button>
+              <button
+                onClick={() => navigate('/opportunites/new')}
+                className="inline-flex items-center gap-1 rounded-md bg-white border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 shadow-sm"
+              >
+                <PlusIcon className="h-4 w-4 text-purple-600" />
+                <span>Opportunité</span>
+              </button>
             </div>
-          ) : (
-            <button
-              onClick={connectGoogle}
-              disabled={connectingGoogle}
-              className="flex items-center gap-2 rounded-md bg-white border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <CloudIcon className="h-5 w-5" />
-              {connectingGoogle ? 'Connexion...' : 'Connecter Google Drive'}
-            </button>
-          )}
+          </div>
         </div>
-        <div className="flex justify-center">
-          <GlobalSearch />
+
+        <div className="flex flex-col gap-3">
+          <div className="flex justify-center">
+            <GlobalSearch />
+          </div>
+
+          {/* Filtres globaux période + étapes */}
+          <div className="flex flex-wrap items-center gap-4 p-3 rounded-lg bg-white border border-slate-200 shadow-sm">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-slate-700">Période du tableau de bord :</span>
+              <select
+                value={filterPreset}
+                onChange={(e) => {
+                  const value = e.target.value as DashboardPreset;
+                  setFilterPreset(value);
+
+                  const now = new Date();
+
+                  if (value === 'CUSTOM') {
+                    return;
+                  }
+
+                  if (value === 'ALL') {
+                    setFilterDateFrom(undefined);
+                    setFilterDateTo(undefined);
+                    return;
+                  }
+
+                  let from: Date | undefined;
+                  let to: Date | undefined = now;
+
+                  switch (value) {
+                    case 'MONTH': {
+                      from = new Date(now.getFullYear(), now.getMonth(), 1);
+                      break;
+                    }
+                    case 'QUARTER': {
+                      const quarterStartMonth = Math.floor(now.getMonth() / 3) * 3;
+                      from = new Date(now.getFullYear(), quarterStartMonth, 1);
+                      break;
+                    }
+                    case 'YEAR': {
+                      from = new Date(now.getFullYear(), 0, 1);
+                      break;
+                    }
+                    case 'LAST_12_MONTHS': {
+                      from = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+                      break;
+                    }
+                  }
+
+                  setFilterDateFrom(from ? from.toISOString().slice(0, 10) : undefined);
+                  setFilterDateTo(to ? to.toISOString().slice(0, 10) : undefined);
+                }}
+                className="text-sm border border-slate-300 rounded-md px-3 py-1.5 bg-white"
+              >
+                <option value="MONTH">Mois en cours</option>
+                <option value="QUARTER">Trimestre en cours</option>
+                <option value="YEAR">Année en cours</option>
+                <option value="LAST_12_MONTHS">12 derniers mois</option>
+                <option value="ALL">Tout l'historique</option>
+                <option value="CUSTOM">Personnalisée</option>
+              </select>
+            </div>
+
+            {filterPreset === 'CUSTOM' && (
+              <>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-slate-600">Du :</span>
+                  <input
+                    type="date"
+                    value={filterDateFrom || ''}
+                    onChange={(e) => setFilterDateFrom(e.target.value || undefined)}
+                    className="text-sm border border-slate-300 rounded-md px-2 py-1 bg-white"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-slate-600">Au :</span>
+                  <input
+                    type="date"
+                    value={filterDateTo || ''}
+                    onChange={(e) => setFilterDateTo(e.target.value || undefined)}
+                    className="text-sm border border-slate-300 rounded-md px-2 py-1 bg-white"
+                  />
+                </div>
+              </>
+            )}
+
+            <div className="flex items-center gap-2 ml-auto">
+              <span className="text-sm font-medium text-slate-700">Étapes du pipeline :</span>
+              {Object.entries(STAGES).map(([stage, { label }]) => (
+                <label key={stage} className="flex items-center gap-1 text-xs sm:text-sm">
+                  <input
+                    type="checkbox"
+                    checked={filterStages.has(stage)}
+                    onChange={(e) => {
+                      setFilterStages(prev => {
+                        const next = new Set(prev);
+                        if (e.target.checked) {
+                          next.add(stage);
+                        } else {
+                          next.delete(stage);
+                        }
+                        return next;
+                      });
+                    }}
+                    className="rounded border-slate-300"
+                  />
+                  <span className="text-slate-700">{label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Statistiques principales - Cliquables */}
+      {/* Statistiques principales - Pipeline + CA signé */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Link
           to="/entreprises"
@@ -225,6 +466,9 @@ export function DashboardPage() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-slate-500 uppercase">Clients</p>
+              <p className="mt-1 inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">
+                Global
+              </p>
               <p className="text-3xl font-bold text-slate-900 mt-2">{stats.totalCompanies}</p>
             </div>
             <BuildingOfficeIcon className="h-12 w-12 text-indigo-500" />
@@ -238,6 +482,9 @@ export function DashboardPage() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-slate-500 uppercase">Contacts</p>
+              <p className="mt-1 inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">
+                Global
+              </p>
               <p className="text-3xl font-bold text-slate-900 mt-2">{stats.totalContacts}</p>
             </div>
             <UserGroupIcon className="h-12 w-12 text-blue-500" />
@@ -251,6 +498,9 @@ export function DashboardPage() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-slate-500 uppercase">Opportunités</p>
+              <p className="mt-1 inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+                Période + étapes
+              </p>
               <p className="text-3xl font-bold text-slate-900 mt-2">{stats.totalOpportunities}</p>
             </div>
             <BriefcaseIcon className="h-12 w-12 text-purple-500" />
@@ -260,10 +510,27 @@ export function DashboardPage() {
         <div className="rounded-lg border border-slate-200 bg-gradient-to-br from-emerald-500 to-green-600 p-6 shadow-sm">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-emerald-100 uppercase">CA Validé</p>
+              <p className="text-sm text-emerald-100 uppercase">
+                CA signé (date de gain)
+                {filterPreset === 'ALL'
+                  ? ' – Tout l’historique'
+                  : filterPreset === 'MONTH'
+                  ? ' – Mois en cours'
+                  : filterPreset === 'QUARTER'
+                  ? ' – Trimestre en cours'
+                  : filterPreset === 'YEAR'
+                  ? ' – Année en cours'
+                  : filterPreset === 'LAST_12_MONTHS'
+                  ? ' – 12 derniers mois'
+                  : filterPreset === 'CUSTOM'
+                  ? ' – Période personnalisée'
+                  : ''}
+              </p>
               <p className="text-3xl font-bold text-white mt-2">{stats.wonValue.toFixed(0)} €</p>
               <div className="mt-3 pt-2 border-t border-emerald-400 border-opacity-30">
-                <p className="text-xs text-emerald-100">CA Net (-27%)</p>
+                <p className="text-xs text-emerald-100">
+                  CA Net (-{(stats.averageTaxRate * 100).toFixed(1)}%)
+                </p>
                 <p className="text-xl font-semibold text-white">{stats.netRevenue.toFixed(0)} €</p>
               </div>
               <p className="text-xs text-emerald-100 mt-2">
@@ -276,42 +543,41 @@ export function DashboardPage() {
         </div>
       </div>
 
-      {/* Ajouts rapides */}
-      <div className="rounded-lg border-2 border-dashed border-indigo-200 bg-indigo-50 p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-slate-900 mb-4">⚡ Créer rapidement</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <button
-            onClick={() => navigate('/entreprises/new')}
-            className="flex items-center gap-3 rounded-lg bg-white border border-slate-200 p-4 hover:shadow-md transition-shadow"
-          >
-            <PlusIcon className="h-6 w-6 text-indigo-600" />
-            <div className="text-left">
-              <p className="font-semibold text-slate-900">Nouvelle entreprise</p>
-              <p className="text-xs text-slate-500">Entreprise</p>
-            </div>
-          </button>
+      {/* Statistiques CA : confirmé / facturé / encaissé */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+          <p className="text-sm text-slate-500 uppercase">CA signé (par date de gain)</p>
+          <p className="text-2xl font-bold text-slate-900 mt-2">{signedGross.toFixed(0)} €</p>
+          <p className="text-xs text-slate-500 mt-1">
+            Net estimé : <span className="font-semibold text-emerald-600">{signedNet.toFixed(0)} €</span>
+          </p>
+        </div>
 
-          <button
-            onClick={() => navigate('/contacts/new')}
-            className="flex items-center gap-3 rounded-lg bg-white border border-slate-200 p-4 hover:shadow-md transition-shadow"
-          >
-            <PlusIcon className="h-6 w-6 text-blue-600" />
-            <div className="text-left">
-              <p className="font-semibold text-slate-900">Nouveau contact</p>
-              <p className="text-xs text-slate-500">Personne</p>
+        <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+          <p className="text-sm text-slate-500 uppercase">CA facturé (par date de facture)</p>
+          {invoicedGross === 0 && invoicedNet === 0 ? (
+            <div className="mt-2">
+              <p className="text-sm font-medium text-slate-400">Données non disponibles</p>
+              <p className="text-xs text-slate-400 mt-1">
+                Factures gérées dans Tiime – intégration à venir.
+              </p>
             </div>
-          </button>
+          ) : (
+            <>
+              <p className="text-2xl font-bold text-slate-900 mt-2">{invoicedGross.toFixed(0)} €</p>
+              <p className="text-xs text-slate-500 mt-1">
+                Net estimé : <span className="font-semibold text-emerald-600">{invoicedNet.toFixed(0)} €</span>
+              </p>
+            </>
+          )}
+        </div>
 
-          <button
-            onClick={() => navigate('/opportunites')}
-            className="flex items-center gap-3 rounded-lg bg-white border border-slate-200 p-4 hover:shadow-md transition-shadow"
-          >
-            <PlusIcon className="h-6 w-6 text-purple-600" />
-            <div className="text-left">
-              <p className="font-semibold text-slate-900">Nouvelle opportunité</p>
-              <p className="text-xs text-slate-500">Affaire</p>
-            </div>
-          </button>
+        <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+          <p className="text-sm text-slate-500 uppercase">CA encaissé (par date de paiement)</p>
+          <p className="text-2xl font-bold text-slate-900 mt-2">{paidGross.toFixed(0)} €</p>
+          <p className="text-xs text-slate-500 mt-1">
+            Net estimé : <span className="font-semibold text-emerald-600">{paidNet.toFixed(0)} €</span>
+          </p>
         </div>
       </div>
 
@@ -326,21 +592,37 @@ export function DashboardPage() {
           <div className="space-y-3">
             {Object.entries(STAGES).map(([stage, { label, color }]) => {
               const count = stats.opportunitiesByStage[stage] || 0;
-              const percentage = stats.totalOpportunities > 0 
-                ? (count / stats.totalOpportunities * 100).toFixed(1)
-                : 0;
+              const percentage =
+                stats.totalOpportunities > 0 ? (count / stats.totalOpportunities) * 100 : 0;
               
+              const stageOpps =
+                stats.filteredOpportunities?.filter((o: any) => o.stage === stage) || [];
+              const stageValue = stageOpps.reduce(
+                (sum: number, opp: any) => sum + (Number(opp.amount) || 0),
+                0
+              );
+              const pipelineShare =
+                stats.pipelineValue > 0 ? (stageValue / stats.pipelineValue) * 100 : 0;
+
               return (
                 <div key={stage}>
                   <div className="flex items-center justify-between text-sm mb-1">
                     <span className="font-medium text-slate-700">{label}</span>
-                    <span className="text-slate-500">{count} ({percentage}%)</span>
+                    <span className="text-slate-500">
+                      {count} ({percentage.toFixed(1)}%)
+                    </span>
                   </div>
                   <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
-                    <div 
+                    <div
                       className={`h-full ${color} transition-all duration-500`}
-                      style={{ width: `${percentage}%` }}
+                      style={{ width: `${percentage.toFixed(1)}%` }}
                     />
+                  </div>
+                  <div className="mt-1 flex items-center justify-between text-xs text-slate-500">
+                    <span>Valeur : {stageValue.toFixed(0)} €</span>
+                    {stats.pipelineValue > 0 && (
+                      <span>{pipelineShare.toFixed(1)}% du pipeline</span>
+                    )}
                   </div>
                 </div>
               );
@@ -416,59 +698,9 @@ export function DashboardPage() {
         </div>
       </div>
 
-      {/* Projection CA */}
-      <ProjectionView 
-        opportunities={stats.recentOpportunities} 
-        period={projectionPeriod}
-        onPeriodChange={setProjectionPeriod}
-        selectedStages={projectionSelectedStages}
-        onStagesChange={setProjectionSelectedStages}
-      />
+      <ProjectionView opportunities={stats.stageFilteredOpportunities as any} />
 
-      {/* Suivi trésorerie */}
-      <TreasuryView 
-        opportunities={allOpportunities}
-      />
-
-      {/* Graphique pipeline value par étape */}
-      <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-slate-900 mb-4">💰 Valeur du pipeline par étape</h2>
-        
-        <div className="space-y-4">
-          {Object.entries(STAGES).filter(([stage]) => stage !== 'CLOSED_LOST').map(([stage, { label, color }]) => {
-            const stageOpps = stats.recentOpportunities?.filter((o: any) => o.stage === stage) || [];
-            const stageValue = stageOpps.reduce((sum: number, opp: any) => sum + (Number(opp.amount) || 0), 0);
-            const maxValue = stats.pipelineValue || 1;
-            const percentage = (stageValue / maxValue * 100).toFixed(1);
-            
-            return (
-              <div key={stage}>
-                <div className="flex items-center justify-between text-sm mb-2">
-                  <span className="font-medium text-slate-700">{label}</span>
-                  <span className="font-bold text-slate-900">{stageValue.toFixed(0)} €</span>
-                </div>
-                <div className="h-8 bg-slate-100 rounded-lg overflow-hidden">
-                  <div 
-                    className={`h-full ${color} flex items-center justify-end pr-3 transition-all duration-500`}
-                    style={{ width: `${percentage}%` }}
-                  >
-                    {parseFloat(percentage) > 15 && (
-                      <span className="text-xs font-semibold text-white">{percentage}%</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="mt-6 pt-6 border-t border-slate-200 bg-slate-50 -mx-6 -mb-6 px-6 py-4 rounded-b-lg">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-slate-700">Total Pipeline</span>
-            <span className="text-2xl font-bold text-indigo-600">{stats.pipelineValue.toFixed(0)} €</span>
-          </div>
-        </div>
-      </div>
+      <PipelineByStageView opportunities={stats.stageFilteredOpportunities as any} />
     </div>
   );
 }

@@ -4,7 +4,7 @@ import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 type Opportunity = {
   id: string;
   title: string;
-  stage: 'QUALIFICATION' | 'PROPOSAL' | 'NEGOTIATION' | 'CLOSED_WON' | 'CLOSED_LOST';
+  stage: 'QUALIFICATION' | 'PROPOSAL' | 'NEGOTIATION' | 'CLOSED_WON' | 'FINALIZED' | 'CLOSED_LOST';
   amount?: number;
   expectedPaymentDate?: string;
   contact?: { id: string; firstName: string; lastName?: string } | null;
@@ -16,6 +16,7 @@ const STAGES = {
   PROPOSAL: { label: 'Proposition', color: 'bg-purple-100 text-purple-700' },
   NEGOTIATION: { label: 'Négociation', color: 'bg-yellow-100 text-yellow-700' },
   CLOSED_WON: { label: 'Gagné', color: 'bg-green-100 text-green-700' },
+  FINALIZED: { label: 'Finalisé / réglé', color: 'bg-amber-100 text-amber-700' },
   CLOSED_LOST: { label: 'Perdu', color: 'bg-rose-100 text-rose-700' }
 };
 
