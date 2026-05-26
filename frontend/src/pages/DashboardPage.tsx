@@ -18,7 +18,8 @@ import {
   computeDashboardStats,
   type RawDashboardData
 } from '../utils/computeDashboardStats';
-import { formatPeriodLabel } from '../utils/dateRange';
+import { DEFAULT_DASHBOARD_STAGES } from '../constants/opportunityStages';
+import { formatPeriodLabel, getCalendarYearRange, getPresetDateRange } from '../utils/dateRange';
 
 type DashboardPreset = 'MONTH' | 'QUARTER' | 'YEAR' | 'LAST_12_MONTHS' | 'ALL' | 'CUSTOM';
 
@@ -41,7 +42,7 @@ export function DashboardPage() {
   const [filterDateFrom, setFilterDateFrom] = useState<string | undefined>();
   const [filterDateTo, setFilterDateTo] = useState<string | undefined>();
   const [filterStages, setFilterStages] = useState<Set<string>>(
-    () => new Set(Object.keys(STAGES))
+    () => new Set(DEFAULT_DASHBOARD_STAGES)
   );
   
   useEffect(() => {
@@ -64,14 +65,11 @@ export function DashboardPage() {
   }, [searchParams, setSearchParams]);
 
   useEffect(() => {
-    // Initialiser la période par défaut (année en cours) si non définie
+    // Année civile complète (1er jan – 31 déc) par défaut
     if (!filterDateFrom && !filterDateTo && filterPreset === 'YEAR') {
-      const now = new Date();
-      const from = new Date(now.getFullYear(), 0, 1);
-      const to = now;
-      setFilterDateFrom(from.toISOString().slice(0, 10));
-      setFilterDateTo(to.toISOString().slice(0, 10));
-      return;
+      const { from, to } = getCalendarYearRange();
+      setFilterDateFrom(from);
+      setFilterDateTo(to);
     }
   }, [filterDateFrom, filterDateTo, filterPreset]);
 
@@ -195,7 +193,7 @@ export function DashboardPage() {
         : filterPreset === 'QUARTER'
           ? 'Trimestre en cours'
           : filterPreset === 'YEAR'
-            ? 'Année en cours'
+            ? `Année civile ${new Date().getFullYear()}`
             : filterPreset === 'LAST_12_MONTHS'
               ? '12 derniers mois'
               : filterDateFrom && filterDateTo
@@ -284,8 +282,6 @@ export function DashboardPage() {
                   const value = e.target.value as DashboardPreset;
                   setFilterPreset(value);
 
-                  const now = new Date();
-
                   if (value === 'CUSTOM') {
                     return;
                   }
@@ -296,37 +292,15 @@ export function DashboardPage() {
                     return;
                   }
 
-                  let from: Date | undefined;
-                  let to: Date | undefined = now;
-
-                  switch (value) {
-                    case 'MONTH': {
-                      from = new Date(now.getFullYear(), now.getMonth(), 1);
-                      break;
-                    }
-                    case 'QUARTER': {
-                      const quarterStartMonth = Math.floor(now.getMonth() / 3) * 3;
-                      from = new Date(now.getFullYear(), quarterStartMonth, 1);
-                      break;
-                    }
-                    case 'YEAR': {
-                      from = new Date(now.getFullYear(), 0, 1);
-                      break;
-                    }
-                    case 'LAST_12_MONTHS': {
-                      from = new Date(now.getFullYear(), now.getMonth() - 11, 1);
-                      break;
-                    }
-                  }
-
-                  setFilterDateFrom(from ? from.toISOString().slice(0, 10) : undefined);
-                  setFilterDateTo(to ? to.toISOString().slice(0, 10) : undefined);
+                  const { from, to } = getPresetDateRange(value);
+                  setFilterDateFrom(from);
+                  setFilterDateTo(to);
                 }}
                 className="text-sm border border-slate-300 rounded-md px-3 py-1.5 bg-white"
               >
                 <option value="MONTH">Mois en cours</option>
                 <option value="QUARTER">Trimestre en cours</option>
-                <option value="YEAR">Année en cours</option>
+                <option value="YEAR">Année civile en cours</option>
                 <option value="LAST_12_MONTHS">12 derniers mois</option>
                 <option value="ALL">Tout l'historique</option>
                 <option value="CUSTOM">Personnalisée</option>
@@ -447,7 +421,7 @@ export function DashboardPage() {
                   : filterPreset === 'QUARTER'
                   ? ' – Trimestre en cours'
                   : filterPreset === 'YEAR'
-                  ? ' – Année en cours'
+                  ? ' – Année civile en cours'
                   : filterPreset === 'LAST_12_MONTHS'
                   ? ' – 12 derniers mois'
                   : filterPreset === 'CUSTOM'
@@ -631,6 +605,7 @@ export function DashboardPage() {
         dateFrom={filterDateFrom}
         dateTo={filterDateTo}
         periodLabel={globalPeriodLabel}
+        visibleStages={filterStages}
       />
 
       <PipelineByStageView

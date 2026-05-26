@@ -1,40 +1,54 @@
 import { useMemo } from 'react';
 import {
   Bar,
+  BarChart,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   Legend,
-  ResponsiveContainer,
-  Line,
-  ComposedChart
+  ResponsiveContainer
 } from 'recharts';
 
+import {
+  OPPORTUNITY_STAGES,
+  STAGE_DISPLAY_ORDER,
+  type OpportunityStageId
+} from '../constants/opportunityStages';
 import { getMonthKeysInRange } from '../utils/dateRange';
 
 type Opportunity = {
   id: string;
   title: string;
-  stage: 'QUALIFICATION' | 'PROPOSAL' | 'CLOSED_WON' | 'FINALIZED' | 'CLOSED_LOST';
+  stage: OpportunityStageId;
   amount?: number;
   closeDate?: string;
-  expectedPaymentDate?: string;
   contact?: { id: string; firstName: string; lastName?: string } | null;
   company?: { id: string; name: string } | null;
 };
+
+type MonthRow = {
+  month: string;
+  monthKey: string;
+  total: number;
+  opportunities: Opportunity[];
+} & Partial<Record<OpportunityStageId, number>>;
 
 export function ProjectionView({
   opportunities,
   dateFrom,
   dateTo,
-  periodLabel
+  periodLabel,
+  visibleStages
 }: {
   opportunities: Opportunity[];
   dateFrom?: string;
   dateTo?: string;
   periodLabel?: string;
+  visibleStages: Set<string>;
 }) {
+  const activeStages = STAGE_DISPLAY_ORDER.filter(stage => visibleStages.has(stage));
+
   const { projectionData, totals } = useMemo(() => {
     const relevantOpps = opportunities.filter(opp => opp.closeDate);
 
@@ -50,79 +64,64 @@ export function ProjectionView({
     const monthKeys =
       dateFrom && dateTo ? getMonthKeysInRange(dateFrom, dateTo) : monthKeysFromData;
 
-    const monthlyData: Record<
-      string,
-      {
-        caPrev: number;
-        caNet: number;
-        wonCount: number;
-        pipelineCount: number;
-      }
-    > = {};
+    const monthlyData: Record<string, MonthRow> = {};
 
     for (const monthKey of monthKeys) {
-      monthlyData[monthKey] = { caPrev: 0, caNet: 0, wonCount: 0, pipelineCount: 0 };
+      const row: MonthRow = {
+        month: new Date(monthKey + '-01').toLocaleDateString('fr-FR', {
+          month: 'short',
+          year: 'numeric'
+        }),
+        monthKey,
+        total: 0,
+        opportunities: []
+      };
+      for (const stage of activeStages) {
+        row[stage] = 0;
+      }
+      monthlyData[monthKey] = row;
     }
 
     relevantOpps.forEach(opp => {
-      if (!opp.closeDate) return;
+      if (!opp.closeDate || !activeStages.includes(opp.stage)) return;
 
       const date = new Date(opp.closeDate);
       const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-      if (!monthlyData[monthKey]) return;
+      const row = monthlyData[monthKey];
+      if (!row) return;
 
       const amount = Number(opp.amount) || 0;
-
-      if (opp.stage === 'CLOSED_WON' || opp.stage === 'FINALIZED') {
-        monthlyData[monthKey].wonCount++;
-      } else if (opp.stage !== 'CLOSED_LOST') {
-        monthlyData[monthKey].pipelineCount++;
-      } else {
-        return;
-      }
-
-      monthlyData[monthKey].caPrev += amount;
-      monthlyData[monthKey].caNet += amount * 0.73;
+      row[opp.stage] = (row[opp.stage] ?? 0) + amount;
+      row.total += amount;
+      row.opportunities.push(opp);
     });
 
-    const data = Object.entries(monthlyData)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([month, monthTotals]) => {
-        const monthOpps = relevantOpps.filter(opp => {
-          if (!opp.closeDate) return false;
-          const date = new Date(opp.closeDate);
-          const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-          return key === month;
-        });
+    const data = Object.values(monthlyData).sort((a, b) => a.monthKey.localeCompare(b.monthKey));
 
-        return {
-          month: new Date(month + '-01').toLocaleDateString('fr-FR', {
-            month: 'short',
-            year: 'numeric'
-          }),
-          monthKey: month,
-          caPrev: Math.round(monthTotals.caPrev),
-          caNet: Math.round(monthTotals.caNet),
-          wonCount: monthTotals.wonCount,
-          pipelineCount: monthTotals.pipelineCount,
-          totalCount: monthTotals.wonCount + monthTotals.pipelineCount,
-          opportunities: monthOpps
-        };
-      });
+    let caPrev = 0;
+    let wonCount = 0;
+    let totalCount = 0;
 
-    const agg = data.reduce(
-      (acc, month) => ({
-        caPrev: acc.caPrev + month.caPrev,
-        caNet: acc.caNet + month.caNet,
-        wonCount: acc.wonCount + month.wonCount,
-        pipelineCount: acc.pipelineCount + month.pipelineCount,
-        totalCount: acc.totalCount + month.totalCount
-      }),
-      { caPrev: 0, caNet: 0, wonCount: 0, pipelineCount: 0, totalCount: 0 }
-    );
+    for (const opp of relevantOpps) {
+      if (!activeStages.includes(opp.stage)) continue;
+      const amount = Number(opp.amount) || 0;
+      caPrev += amount;
+      totalCount++;
+      if (opp.stage === 'CLOSED_WON' || opp.stage === 'FINALIZED') {
+        wonCount++;
+      }
+    }
 
-    return { projectionData: data, totals: agg };
-  }, [opportunities, dateFrom, dateTo]);
+    return {
+      projectionData: data,
+      totals: {
+        caPrev,
+        caNet: Math.round(caPrev * 0.73),
+        wonCount,
+        totalCount
+      }
+    };
+  }, [opportunities, dateFrom, dateTo, activeStages.join(',')]);
 
   return (
     <div className="space-y-6">
@@ -149,17 +148,12 @@ export function ProjectionView({
       </div>
 
       <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-        {projectionData.some(m => m.caPrev > 0) ? (
+        {projectionData.some(m => m.total > 0) ? (
           <div className="h-96">
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart
+              <BarChart
                 data={projectionData}
-                margin={{
-                  top: 20,
-                  right: 30,
-                  left: 20,
-                  bottom: 5
-                }}
+                margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
               >
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis dataKey="month" stroke="#64748b" fontSize={12} />
@@ -170,60 +164,46 @@ export function ProjectionView({
                 />
                 <Tooltip
                   content={({ active, payload, label }) => {
-                    if (!active || !payload || !payload.length) return null;
-
-                    const data = payload[0]?.payload;
-                    if (!data) return null;
+                    if (!active || !payload?.length) return null;
+                    const row = payload[0]?.payload as MonthRow;
+                    if (!row) return null;
 
                     return (
                       <div className="bg-slate-800 text-white p-3 rounded-lg shadow-lg border border-slate-700 max-w-xs">
                         <p className="font-semibold text-sm mb-2">{label}</p>
                         <div className="space-y-1 text-xs">
-                          <p>
-                            <span className="text-indigo-300">CA Prévu :</span>{' '}
-                            {data.caPrev.toLocaleString()} €
+                          {activeStages.map(stage => {
+                            const value = row[stage] ?? 0;
+                            if (value <= 0) return null;
+                            return (
+                              <p key={stage}>
+                                <span style={{ color: OPPORTUNITY_STAGES[stage].chartColor }}>
+                                  {OPPORTUNITY_STAGES[stage].label} :
+                                </span>{' '}
+                                {value.toLocaleString()} €
+                              </p>
+                            );
+                          })}
+                          <p className="pt-1 border-t border-slate-600 font-medium">
+                            Total : {row.total.toLocaleString()} €
                           </p>
-                          <p>
-                            <span className="text-emerald-300">CA Net (-27%) :</span>{' '}
-                            {data.caNet.toLocaleString()} €
-                          </p>
-                          {data.opportunities && data.opportunities.length > 0 && (
-                            <div className="mt-2 pt-2 border-t border-slate-600">
-                              <p className="text-slate-300 mb-1">Clients :</p>
-                              {data.opportunities.slice(0, 3).map((opp: Opportunity, idx: number) => (
-                                <p key={idx} className="text-xs text-slate-200">
-                                  • {opp.title} ({opp.amount?.toLocaleString()} €)
-                                  {opp.contact &&
-                                    ` - ${opp.contact.firstName} ${opp.contact.lastName || ''}`}
-                                  {opp.company && ` (${opp.company.name})`}
-                                </p>
-                              ))}
-                              {data.opportunities.length > 3 && (
-                                <p className="text-xs text-slate-400">
-                                  + {data.opportunities.length - 3} autres...
-                                </p>
-                              )}
-                            </div>
-                          )}
                         </div>
                       </div>
                     );
                   }}
                 />
-                <Legend
-                  formatter={value => (value === 'caPrev' ? 'CA Prévu' : 'CA Net (-27%)')}
-                />
-                <Bar dataKey="caPrev" fill="#6366f1" name="caPrev" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="caNet" fill="#10b981" name="caNet" radius={[4, 4, 0, 0]} />
-                <Line
-                  type="monotone"
-                  dataKey="caNet"
-                  stroke="#10b981"
-                  strokeWidth={2}
-                  dot={{ fill: '#10b981', strokeWidth: 2, r: 4 }}
-                  name="caNet"
-                />
-              </ComposedChart>
+                <Legend />
+                {activeStages.map(stage => (
+                  <Bar
+                    key={stage}
+                    dataKey={stage}
+                    name={OPPORTUNITY_STAGES[stage].label}
+                    stackId="ca"
+                    fill={OPPORTUNITY_STAGES[stage].chartColor}
+                    radius={stage === activeStages[activeStages.length - 1] ? [4, 4, 0, 0] : undefined}
+                  />
+                ))}
+              </BarChart>
             </ResponsiveContainer>
           </div>
         ) : (

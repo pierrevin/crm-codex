@@ -1,3 +1,11 @@
+/** Format YYYY-MM-DD en heure locale (évite le décalage UTC de toISOString). */
+export function toDateInputValue(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 /** Plage année civile (1er jan – 31 déc). */
 export function getCalendarYearRange(year = new Date().getFullYear()) {
   return {
@@ -49,6 +57,37 @@ export function getMonthKeysInRange(dateFrom: string, dateTo: string): string[] 
   }
 
   return months;
+}
+
+export type DashboardDatePreset =
+  | 'MONTH'
+  | 'QUARTER'
+  | 'YEAR'
+  | 'LAST_12_MONTHS';
+
+/** Plages de dates pour les presets du tableau de bord (YEAR = année civile complète). */
+export function getPresetDateRange(preset: DashboardDatePreset, ref = new Date()) {
+  switch (preset) {
+    case 'MONTH':
+      return {
+        from: toDateInputValue(new Date(ref.getFullYear(), ref.getMonth(), 1)),
+        to: toDateInputValue(ref)
+      };
+    case 'QUARTER': {
+      const quarterStartMonth = Math.floor(ref.getMonth() / 3) * 3;
+      return {
+        from: toDateInputValue(new Date(ref.getFullYear(), quarterStartMonth, 1)),
+        to: toDateInputValue(ref)
+      };
+    }
+    case 'YEAR':
+      return getCalendarYearRange(ref.getFullYear());
+    case 'LAST_12_MONTHS':
+      return {
+        from: toDateInputValue(new Date(ref.getFullYear(), ref.getMonth() - 11, 1)),
+        to: toDateInputValue(ref)
+      };
+  }
 }
 
 export function formatPeriodLabel(dateFrom: string, dateTo: string): string {
