@@ -123,7 +123,9 @@ export function ProjectionView({ opportunities }: { opportunities: Opportunity[]
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h2 className="text-lg font-semibold text-slate-900">📊 Projection CA</h2>
-          <p className="text-sm text-slate-500 mt-1">{periodLabel}</p>
+          <p className="text-sm text-slate-500 mt-1">
+            {periodLabel} · étapes selon le filtre en haut de page
+          </p>
         </div>
 
         <div className="flex flex-col gap-4 lg:items-end">

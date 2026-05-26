@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { 
   PlusIcon, 
@@ -14,6 +14,10 @@ import api from '../services/apiClient';
 import { ProjectionView } from '../components/ProjectionView';
 import { PipelineByStageView } from '../components/PipelineByStageView';
 import { GlobalSearch } from '../components/GlobalSearch';
+import {
+  computeDashboardStats,
+  type RawDashboardData
+} from '../utils/computeDashboardStats';
 
 type DashboardPreset = 'MONTH' | 'QUARTER' | 'YEAR' | 'LAST_12_MONTHS' | 'ALL' | 'CUSTOM';
 
@@ -28,23 +32,8 @@ const STAGES = {
 export function DashboardPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [stats, setStats] = useState({
-    totalContacts: 0,
-    totalCompanies: 0,
-    totalOpportunities: 0,
-    pipelineValue: 0,
-    wonValue: 0,
-    netRevenue: 0,
-    averageTaxRate: 0.27,
-    opportunitiesByStage: {} as Record<string, number>,
-    recentOpportunities: [] as any[],
-    // Opportunités filtrées par période + étapes (KPIs, tunnel)
-    filteredOpportunities: [] as any[],
-    // Filtrées par étapes uniquement (projection / pipeline ont leur propre période)
-    stageFilteredOpportunities: [] as any[]
-  });
-  const [revenueStats, setRevenueStats] = useState<any | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [rawData, setRawData] = useState<RawDashboardData | null>(null);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [googleConnected, setGoogleConnected] = useState(false);
   const [connectingGoogle, setConnectingGoogle] = useState(false);
   const [filterPreset, setFilterPreset] = useState<DashboardPreset>('YEAR');
@@ -85,14 +74,40 @@ export function DashboardPage() {
     }
   }, [filterDateFrom, filterDateTo, filterPreset]);
 
-  // Recharger les stats pipeline + CA dès que les filtres changent
-  useEffect(() => {
-    if (!filterDateFrom && !filterDateTo && filterPreset !== 'ALL') {
-      return;
-    }
+  const filterStagesKey = useMemo(
+    () => Array.from(filterStages).sort().join(','),
+    [filterStages]
+  );
 
-    void loadStats();
-  }, [filterDateFrom, filterDateTo, filterStages, filterPreset]);
+  const canApplyGlobalPeriod =
+    filterPreset === 'ALL' || Boolean(filterDateFrom && filterDateTo);
+
+  const computed = useMemo(() => {
+    if (!rawData || !canApplyGlobalPeriod) return null;
+    return computeDashboardStats(rawData, filterStages, filterDateFrom, filterDateTo);
+  }, [rawData, filterStagesKey, filterDateFrom, filterDateTo, canApplyGlobalPeriod]);
+
+  const stats = computed ?? {
+    totalContacts: 0,
+    totalCompanies: 0,
+    totalOpportunities: 0,
+    pipelineValue: 0,
+    wonValue: 0,
+    netRevenue: 0,
+    averageTaxRate: 0.27,
+    opportunitiesByStage: {} as Record<string, number>,
+    recentOpportunities: [] as any[],
+    filteredOpportunities: [] as any[],
+    stageFilteredOpportunities: [] as any[]
+  };
+
+  const revenueStats = computed?.revenueStats ?? null;
+
+  useEffect(() => {
+    if (!canApplyGlobalPeriod) return;
+    if (rawData) return;
+    void fetchDashboardData();
+  }, [canApplyGlobalPeriod, rawData]);
 
   const checkGoogleConnection = async () => {
     try {
@@ -105,139 +120,31 @@ export function DashboardPage() {
     }
   };
 
-  const loadStats = async () => {
+  const fetchDashboardData = async () => {
     try {
-      setLoading(true);
-
       const [contactsRes, companiesRes, opportunitiesRes, paymentsRes] = await Promise.all([
         api.get('/api/contacts', { params: { limit: 1000 } }),
         api.get('/api/companies'),
-        // Important : endpoint existant côté Supabase (opportunities en anglais)
         api.get('/api/opportunities', { params: { limit: 1000 } }),
         api.get('/api/payments', { params: { limit: 1000 } })
       ]);
 
-      const contacts = contactsRes.data.items || contactsRes.data.data || [];
       const companies = Array.isArray(companiesRes.data)
         ? companiesRes.data
         : companiesRes.data.items || companiesRes.data.data || [];
       const opportunities = opportunitiesRes.data.items || opportunitiesRes.data.data || [];
       const payments = paymentsRes.data.items || paymentsRes.data.data || [];
 
-      const totalContacts = contactsRes.data.total ?? contacts.length;
-
-      const fromDate = filterDateFrom ? new Date(filterDateFrom) : undefined;
-      const toDate = filterDateTo ? new Date(filterDateTo) : undefined;
-      const selectedStages = Array.from(filterStages);
-
-      const stageFilteredOpps = opportunities.filter((opp: any) => {
-        if (selectedStages.length > 0 && !selectedStages.includes(opp.stage)) {
-          return false;
-        }
-        return true;
-      });
-
-      const filteredOpps = stageFilteredOpps.filter((opp: any) => {
-        const rawDate = opp.closeDate || opp.createdAt;
-        if (!rawDate) return true;
-
-        const d = new Date(rawDate);
-        if (fromDate && d < fromDate) return false;
-        if (toDate && d > toDate) return false;
-
-        return true;
-      });
-
-      const totalOpportunities = filteredOpps.length;
-      const opportunitiesByStage: Record<string, number> = {};
-      let pipelineValue = 0;
-      let wonValue = 0;
-
-      let sumNetRevenue = 0;
-      let weightedTaxNumerator = 0;
-      let weightedTaxDenominator = 0;
-
-      for (const opp of filteredOpps) {
-        const stage = opp.stage;
-        const amount = Number(opp.amount) || 0;
-        const taxRate =
-          opp.taxRate !== undefined && opp.taxRate !== null ? Number(opp.taxRate) : 0.27;
-
-        opportunitiesByStage[stage] = (opportunitiesByStage[stage] || 0) + 1;
-
-        if (stage !== 'CLOSED_LOST') {
-          pipelineValue += amount;
-        }
-
-        if (stage === 'CLOSED_WON' || stage === 'FINALIZED') {
-          wonValue += amount;
-          sumNetRevenue += amount * (1 - taxRate);
-          weightedTaxNumerator += amount * taxRate;
-          weightedTaxDenominator += amount;
-        }
-      }
-
-      const averageTaxRate =
-        weightedTaxDenominator > 0 ? weightedTaxNumerator / weightedTaxDenominator : 0.27;
-
-      const netRevenue =
-        sumNetRevenue > 0 ? sumNetRevenue : wonValue * (1 - averageTaxRate);
-
-      const recentOpportunities = [...filteredOpps]
-        .sort((a, b) => {
-          const da = new Date(a.closeDate || a.createdAt || 0).getTime();
-          const db = new Date(b.closeDate || b.createdAt || 0).getTime();
-          return db - da;
-        })
-        .slice(0, 5);
-
-      // CA encaissé basé sur les paiements
-      const filteredPayments = payments.filter((p: any) => {
-        const rawDate = p.paymentDate;
-        if (!rawDate) return false;
-        const d = new Date(rawDate);
-        if (fromDate && d < fromDate) return false;
-        if (toDate && d > toDate) return false;
-        return true;
-      });
-
-      let paidGross = 0;
-      let paidNet = 0;
-
-      for (const p of filteredPayments) {
-        const amount = Number(p.amount) || 0;
-        const taxAmount =
-          p.taxAmount !== undefined && p.taxAmount !== null
-            ? Number(p.taxAmount)
-            : amount * Number(p.taxRate ?? 0.27);
-        paidGross += amount;
-        paidNet += amount - taxAmount;
-      }
-
-      setStats({
-        totalContacts,
-        totalCompanies: companies.length,
-        totalOpportunities,
-        pipelineValue,
-        wonValue,
-        netRevenue,
-        averageTaxRate,
-        opportunitiesByStage,
-        recentOpportunities,
-        filteredOpportunities: filteredOpps,
-        stageFilteredOpportunities: stageFilteredOpps
-      });
-
-      setRevenueStats({
-        averageTaxRate,
-        signed: { gross: wonValue, net: netRevenue },
-        invoiced: { gross: 0, net: 0 },
-        paid: { gross: paidGross, net: paidNet }
+      setRawData({
+        totalContacts: contactsRes.data.total ?? (contactsRes.data.items?.length ?? 0),
+        companiesCount: companies.length,
+        opportunities,
+        payments
       });
     } catch (error) {
       console.error('Erreur chargement stats côté frontend:', error);
     } finally {
-      setLoading(false);
+      setInitialLoading(false);
     }
   };
 
@@ -279,7 +186,7 @@ export function DashboardPage() {
   const paidGross = revenueStats?.paid?.gross ?? 0;
   const paidNet = revenueStats?.paid?.net ?? 0;
 
-  if (loading) {
+  if (initialLoading) {
     return <div className="p-8 text-center text-slate-500">Chargement du tableau de bord...</div>;
   }
 
@@ -347,10 +254,15 @@ export function DashboardPage() {
             <GlobalSearch />
           </div>
 
-          {/* Filtres globaux période + étapes */}
-          <div className="flex flex-wrap items-center gap-4 p-3 rounded-lg bg-white border border-slate-200 shadow-sm">
+          {/* Filtres globaux : KPI, tunnel, étapes pour toute la page */}
+          <div className="flex flex-col gap-3 p-3 rounded-lg bg-white border border-slate-200 shadow-sm">
+            <p className="text-xs text-slate-500">
+              Ces filtres s&apos;appliquent aux indicateurs, au tunnel et aux graphiques (étapes).
+              Chaque graphique a sa propre période ci-dessous.
+            </p>
+            <div className="flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-slate-700">Période du tableau de bord :</span>
+              <span className="text-sm font-medium text-slate-700">Période des indicateurs :</span>
               <select
                 value={filterPreset}
                 onChange={(e) => {
@@ -429,8 +341,8 @@ export function DashboardPage() {
               </>
             )}
 
-            <div className="flex items-center gap-2 ml-auto">
-              <span className="text-sm font-medium text-slate-700">Étapes du pipeline :</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-medium text-slate-700">Étapes (page entière) :</span>
               {Object.entries(STAGES).map(([stage, { label }]) => (
                 <label key={stage} className="flex items-center gap-1 text-xs sm:text-sm">
                   <input
@@ -441,7 +353,7 @@ export function DashboardPage() {
                         const next = new Set(prev);
                         if (e.target.checked) {
                           next.add(stage);
-                        } else {
+                        } else if (next.size > 1) {
                           next.delete(stage);
                         }
                         return next;
@@ -452,6 +364,7 @@ export function DashboardPage() {
                   <span className="text-slate-700">{label}</span>
                 </label>
               ))}
+            </div>
             </div>
           </div>
         </div>
@@ -700,7 +613,10 @@ export function DashboardPage() {
 
       <ProjectionView opportunities={stats.stageFilteredOpportunities as any} />
 
-      <PipelineByStageView opportunities={stats.stageFilteredOpportunities as any} />
+      <PipelineByStageView
+        opportunities={stats.stageFilteredOpportunities as any}
+        visibleStages={filterStages}
+      />
     </div>
   );
 }

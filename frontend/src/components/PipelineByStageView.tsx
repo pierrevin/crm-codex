@@ -23,7 +23,13 @@ type Opportunity = {
   createdAt?: string;
 };
 
-export function PipelineByStageView({ opportunities }: { opportunities: Opportunity[] }) {
+export function PipelineByStageView({
+  opportunities,
+  visibleStages
+}: {
+  opportunities: Opportunity[];
+  visibleStages: Set<string>;
+}) {
   const defaultRange = getCalendarYearRange();
   const [dateFrom, setDateFrom] = useState(defaultRange.from);
   const [dateTo, setDateTo] = useState(defaultRange.to);
@@ -66,7 +72,9 @@ export function PipelineByStageView({ opportunities }: { opportunities: Opportun
           <h2 className="text-lg font-semibold text-slate-900">
             💰 Valeur du pipeline par étape
           </h2>
-          <p className="text-sm text-slate-500 mt-1">{periodLabel}</p>
+          <p className="text-sm text-slate-500 mt-1">
+            {periodLabel} · étapes selon le filtre en haut de page
+          </p>
         </div>
         <DateRangeFilter
           dateFrom={dateFrom}
@@ -78,7 +86,7 @@ export function PipelineByStageView({ opportunities }: { opportunities: Opportun
 
       <div className="space-y-4">
         {Object.entries(STAGES)
-          .filter(([stage]) => stage !== 'CLOSED_LOST')
+          .filter(([stage]) => stage !== 'CLOSED_LOST' && visibleStages.has(stage))
           .map(([stage, { label, color }]) => {
             const stageValue = byStage[stage]?.value ?? 0;
             const maxValue = pipelineValue || 1;

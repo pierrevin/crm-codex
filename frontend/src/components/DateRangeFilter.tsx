@@ -6,6 +6,7 @@ type DateRangeFilterProps = {
   onDateFromChange: (value: string) => void;
   onDateToChange: (value: string) => void;
   className?: string;
+  label?: string;
 };
 
 export function DateRangeFilter({
@@ -13,7 +14,8 @@ export function DateRangeFilter({
   dateTo,
   onDateFromChange,
   onDateToChange,
-  className = ''
+  className = '',
+  label = 'Période du graphique'
 }: DateRangeFilterProps) {
   const applyCalendarYear = () => {
     const { from, to } = getCalendarYearRange();
@@ -27,7 +29,7 @@ export function DateRangeFilter({
 
   return (
     <div className={`flex flex-wrap items-center gap-3 ${className}`}>
-      <span className="text-sm font-medium text-slate-700">Période :</span>
+      <span className="text-sm font-medium text-slate-700">{label} :</span>
       <button
         type="button"
         onClick={applyCalendarYear}
