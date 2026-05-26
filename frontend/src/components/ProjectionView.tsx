@@ -163,31 +163,91 @@ export function ProjectionView({
                   tickFormatter={value => `${(value / 1000).toFixed(0)}k €`}
                 />
                 <Tooltip
+                  shared={false}
                   content={({ active, payload, label }) => {
                     if (!active || !payload?.length) return null;
                     const row = payload[0]?.payload as MonthRow;
                     if (!row) return null;
 
+                    const hoveredStage = payload[0]?.dataKey as OpportunityStageId | undefined;
+
+                    const caNet = Math.round(row.total * 0.73);
+
                     return (
-                      <div className="bg-slate-800 text-white p-3 rounded-lg shadow-lg border border-slate-700 max-w-xs">
+                      <div className="bg-slate-800 text-white p-3 rounded-lg shadow-lg border border-slate-700 max-w-sm">
                         <p className="font-semibold text-sm mb-2">{label}</p>
-                        <div className="space-y-1 text-xs">
+                        <div className="space-y-1 text-xs mb-2">
                           {activeStages.map(stage => {
                             const value = row[stage] ?? 0;
                             if (value <= 0) return null;
+                            const isHovered = !hoveredStage || hoveredStage === stage;
                             return (
-                              <p key={stage}>
+                              <p
+                                key={stage}
+                                className={isHovered ? 'opacity-100' : 'opacity-60'}
+                              >
                                 <span style={{ color: OPPORTUNITY_STAGES[stage].chartColor }}>
                                   {OPPORTUNITY_STAGES[stage].label} :
                                 </span>{' '}
-                                {value.toLocaleString()} €
+                                {value.toLocaleString('fr-FR')} €
                               </p>
                             );
                           })}
                           <p className="pt-1 border-t border-slate-600 font-medium">
-                            Total : {row.total.toLocaleString()} €
+                            Total : {row.total.toLocaleString('fr-FR')} €
+                          </p>
+                          <p className="text-emerald-300">
+                            Net (-27 %) : {caNet.toLocaleString('fr-FR')} €
                           </p>
                         </div>
+
+                        {row.opportunities.length > 0 && (
+                          <div className="pt-2 border-t border-slate-600 space-y-2 max-h-48 overflow-y-auto">
+                            <p className="text-slate-300 text-xs font-medium">Opportunités</p>
+                            {activeStages.map(stage => {
+                              const stageOpps = row.opportunities.filter(o => o.stage === stage);
+                              if (stageOpps.length === 0) return null;
+                              if (hoveredStage && hoveredStage !== stage) return null;
+
+                              return (
+                                <div key={stage}>
+                                  <p
+                                    className="text-[11px] font-medium mb-0.5"
+                                    style={{ color: OPPORTUNITY_STAGES[stage].chartColor }}
+                                  >
+                                    {OPPORTUNITY_STAGES[stage].label}
+                                  </p>
+                                  <ul className="space-y-0.5">
+                                    {stageOpps.slice(0, 4).map(opp => (
+                                      <li key={opp.id} className="text-xs text-slate-200 leading-snug">
+                                        • {opp.title}{' '}
+                                        <span className="text-slate-400">
+                                          ({(opp.amount ?? 0).toLocaleString('fr-FR')} €)
+                                        </span>
+                                        {opp.company && (
+                                          <span className="text-slate-400"> — {opp.company.name}</span>
+                                        )}
+                                        {opp.contact && !opp.company && (
+                                          <span className="text-slate-400">
+                                            {' '}
+                                            — {opp.contact.firstName}
+                                            {opp.contact.lastName ? ` ${opp.contact.lastName}` : ''}
+                                          </span>
+                                        )}
+                                      </li>
+                                    ))}
+                                    {stageOpps.length > 4 && (
+                                      <li className="text-xs text-slate-400">
+                                        + {stageOpps.length - 4} autre
+                                        {stageOpps.length - 4 > 1 ? 's' : ''}…
+                                      </li>
+                                    )}
+                                  </ul>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     );
                   }}
