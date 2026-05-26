@@ -14,13 +14,9 @@ import { Expense } from '../services/expensesService';
 import { DeboursNote } from '../services/deboursNoteService';
 import { Payment } from '../services/paymentService';
 import { DeboursNoteModal } from '../components/DeboursNoteModal';
+import { getStageBadgeClass, getStageLabel, OPPORTUNITY_STAGES } from '../constants/opportunityStages';
 
-const STAGES = {
-  QUALIFICATION: { label: 'Qualification', color: 'bg-blue-100 text-blue-700' },
-  PROPOSAL: { label: 'Proposition', color: 'bg-purple-100 text-purple-700' },
-  CLOSED_WON: { label: 'Gagné', color: 'bg-green-100 text-green-700' },
-  CLOSED_LOST: { label: 'Perdu', color: 'bg-rose-100 text-rose-700' }
-};
+const STAGES = OPPORTUNITY_STAGES;
 
 type Company = {
   id: string;
@@ -1421,8 +1417,8 @@ export function CompanyDetailPage() {
                           )}
                         </div>
                         <div className="flex items-center gap-3">
-                          <span className={`rounded-full px-2 py-1 text-xs font-semibold ${STAGES[opp.stage as keyof typeof STAGES]?.color || 'bg-slate-100 text-slate-700'}`}>
-                            {STAGES[opp.stage as keyof typeof STAGES]?.label || opp.stage}
+                          <span className={`rounded-full px-2 py-1 text-xs font-medium ${getStageBadgeClass(opp.stage)}`}>
+                            {getStageLabel(opp.stage)}
                           </span>
                           {opp.amount && (
                             <span className="text-sm font-semibold text-indigo-600">

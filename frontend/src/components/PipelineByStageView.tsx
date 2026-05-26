@@ -1,12 +1,10 @@
 import { useMemo } from 'react';
 
-const STAGES = {
-  QUALIFICATION: { label: 'Qualification', color: 'bg-blue-500' },
-  PROPOSAL: { label: 'Proposition', color: 'bg-purple-500' },
-  CLOSED_WON: { label: 'Gagné', color: 'bg-green-500' },
-  FINALIZED: { label: 'Finalisé / réglé', color: 'bg-amber-500' },
-  CLOSED_LOST: { label: 'Perdu', color: 'bg-rose-500' }
-} as const;
+import {
+  OPPORTUNITY_STAGES,
+  getStageBarClass,
+  type OpportunityStageId
+} from '../constants/opportunityStages';
 
 type Opportunity = {
   id: string;
@@ -51,9 +49,9 @@ export function PipelineByStageView({
       </div>
 
       <div className="space-y-4">
-        {Object.entries(STAGES)
+        {Object.entries(OPPORTUNITY_STAGES)
           .filter(([stage]) => stage !== 'CLOSED_LOST' && visibleStages.has(stage))
-          .map(([stage, { label, color }]) => {
+          .map(([stage, { label }]) => {
             const stageValue = byStage[stage]?.value ?? 0;
             const maxValue = pipelineValue || 1;
             const percentage = (stageValue / maxValue) * 100;
@@ -66,7 +64,7 @@ export function PipelineByStageView({
                 </div>
                 <div className="h-8 bg-slate-100 rounded-lg overflow-hidden">
                   <div
-                    className={`h-full ${color} flex items-center justify-end pr-3 transition-all duration-500`}
+                    className={`h-full ${getStageBarClass(stage as OpportunityStageId)} flex items-center justify-end pr-3 transition-all duration-500`}
                     style={{ width: `${percentage}%` }}
                   >
                     {percentage > 15 && (

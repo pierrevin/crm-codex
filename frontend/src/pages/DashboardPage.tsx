@@ -18,18 +18,16 @@ import {
   computeDashboardStats,
   type RawDashboardData
 } from '../utils/computeDashboardStats';
-import { DEFAULT_DASHBOARD_STAGES } from '../constants/opportunityStages';
+import {
+  DEFAULT_DASHBOARD_STAGES,
+  OPPORTUNITY_STAGES,
+  getStageBadgeClass,
+  getStageBarClass,
+  type OpportunityStageId
+} from '../constants/opportunityStages';
 import { formatPeriodLabel, getCalendarYearRange, getPresetDateRange } from '../utils/dateRange';
 
 type DashboardPreset = 'MONTH' | 'QUARTER' | 'YEAR' | 'LAST_12_MONTHS' | 'ALL' | 'CUSTOM';
-
-const STAGES = {
-  QUALIFICATION: { label: 'Qualification', color: 'bg-blue-500' },
-  PROPOSAL: { label: 'Proposition', color: 'bg-purple-500' },
-  CLOSED_WON: { label: 'Gagné', color: 'bg-green-500' },
-  FINALIZED: { label: 'Finalisé / réglé', color: 'bg-amber-500' },
-  CLOSED_LOST: { label: 'Perdu', color: 'bg-rose-500' }
-};
 
 export function DashboardPage() {
   const navigate = useNavigate();
@@ -332,7 +330,7 @@ export function DashboardPage() {
 
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-medium text-slate-700">Étapes (page entière) :</span>
-              {Object.entries(STAGES).map(([stage, { label }]) => (
+              {Object.entries(OPPORTUNITY_STAGES).map(([stage, { label }]) => (
                 <label key={stage} className="flex items-center gap-1 text-xs sm:text-sm">
                   <input
                     type="checkbox"
@@ -492,7 +490,7 @@ export function DashboardPage() {
           </div>
           
           <div className="space-y-3">
-            {Object.entries(STAGES).map(([stage, { label, color }]) => {
+            {Object.entries(OPPORTUNITY_STAGES).map(([stage, { label }]) => {
               const count = stats.opportunitiesByStage[stage] || 0;
               const percentage =
                 stats.totalOpportunities > 0 ? (count / stats.totalOpportunities) * 100 : 0;
@@ -516,7 +514,7 @@ export function DashboardPage() {
                   </div>
                   <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
                     <div
-                      className={`h-full ${color} transition-all duration-500`}
+                      className={`h-full ${getStageBarClass(stage)} transition-all duration-500`}
                       style={{ width: `${percentage.toFixed(1)}%` }}
                     />
                   </div>
@@ -562,12 +560,10 @@ export function DashboardPage() {
                       )}
                     </div>
                     <div className="text-right">
-                      <span className={`inline-block rounded-full px-2 py-1 text-xs font-semibold ${
-                        STAGES[opp.stage as keyof typeof STAGES]?.color 
-                          ? `${STAGES[opp.stage as keyof typeof STAGES].color} bg-opacity-20 text-slate-700`
-                          : 'bg-slate-100 text-slate-700'
-                      }`}>
-                        {STAGES[opp.stage as keyof typeof STAGES]?.label || opp.stage}
+                      <span
+                        className={`inline-block rounded-full px-2 py-1 text-xs font-medium ${getStageBadgeClass(opp.stage)}`}
+                      >
+                        {OPPORTUNITY_STAGES[opp.stage as OpportunityStageId]?.label || opp.stage}
                       </span>
                       {opp.amount && (
                         <p className="text-sm font-semibold text-indigo-600 mt-1">

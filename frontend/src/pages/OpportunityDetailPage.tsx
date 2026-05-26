@@ -20,14 +20,9 @@ import { PaymentSummary } from '../components/PaymentSummary';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
+import { OPPORTUNITY_STAGES, getStageBadgeClass } from '../constants/opportunityStages';
 
-const STAGES = {
-  QUALIFICATION: { label: 'Qualification', color: 'bg-blue-100 text-blue-700' },
-  PROPOSAL: { label: 'Proposition', color: 'bg-purple-100 text-purple-700' },
-  CLOSED_WON: { label: 'Gagné', color: 'bg-green-100 text-green-700' },
-  FINALIZED: { label: 'Finalisé / réglé', color: 'bg-emerald-100 text-emerald-700' },
-  CLOSED_LOST: { label: 'Perdu', color: 'bg-rose-100 text-rose-700' }
-};
+const STAGES = OPPORTUNITY_STAGES;
 
 type OpportunityPayload = {
   title: string;
@@ -481,7 +476,7 @@ export function OpportunityDetailPage() {
         <div className="flex-1">
           <div className="flex items-center gap-3 mb-2">
             <h1 className="text-3xl font-bold text-slate-900">{opportunity.title}</h1>
-            <span className={`rounded-full px-3 py-1 text-sm font-semibold ${STAGES[opportunity.stage].color}`}>
+            <span className={`rounded-full px-3 py-1 text-sm font-medium ${getStageBadgeClass(opportunity.stage)}`}>
               {STAGES[opportunity.stage].label}
             </span>
           </div>

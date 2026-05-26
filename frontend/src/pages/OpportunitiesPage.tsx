@@ -7,6 +7,10 @@ import { ContactSearchSelect } from '../components/ContactSearchSelect';
 import { MultiplePaymentsModal } from '../components/MultiplePaymentsModal';
 import { paymentService, Payment } from '../services/paymentService';
 import { EffectiveSalesSection } from '../components/EffectiveSalesSection';
+import {
+  OPPORTUNITY_STAGES,
+  type OpportunityStageId
+} from '../constants/opportunityStages';
 
 type Opportunity = {
   id: string;
@@ -28,13 +32,7 @@ type PaginatedResponse<T> = {
   total?: number;
 };
 
-const STAGES = {
-  QUALIFICATION: { label: 'Qualification', color: 'bg-blue-100 text-blue-700' },
-  PROPOSAL: { label: 'Proposition', color: 'bg-purple-100 text-purple-700' },
-  CLOSED_WON: { label: 'Gagné', color: 'bg-green-100 text-green-700' },
-  FINALIZED: { label: 'Finalisé / réglé', color: 'bg-emerald-100 text-emerald-700' },
-  CLOSED_LOST: { label: 'Perdu', color: 'bg-rose-100 text-rose-700' }
-};
+const STAGES = OPPORTUNITY_STAGES;
 
 const KANBAN_COLLAPSED_STAGES_STORAGE_KEY = 'opportunities.kanban.collapsedStages.v1';
 
@@ -436,9 +434,12 @@ export function OpportunitiesPage() {
             return (
               <div
                 key={stageKey}
-                className={`flex flex-col rounded-lg border-2 ${draggedOpp ? 'border-dashed border-indigo-300' : 'border-slate-200'} bg-slate-50 transition-all ${
+                className={`flex flex-col rounded-lg border-2 border-t-[3px] ${draggedOpp ? 'border-dashed border-indigo-300' : 'border-slate-200'} bg-slate-50 transition-all ${
                   collapsed ? 'w-16 min-w-16' : 'w-[320px] min-w-[320px]'
                 }`}
+                style={{
+                  borderTopColor: STAGES[stage as OpportunityStageId].chartColor
+                }}
                 onDragOver={handleDragOver}
                 onDrop={() => handleDrop(stage)}
               >
@@ -644,7 +645,7 @@ export function OpportunitiesPage() {
                   >
                     <div className="flex items-start justify-between mb-2">
                       <h3 className="font-medium text-slate-900 text-sm flex-1">{opportunity.title}</h3>
-                      <span className={`ml-2 rounded-full px-2 py-1 text-xs font-semibold ${STAGES[opportunity.stage].color}`}>
+                      <span className={`ml-2 rounded-full px-2 py-1 text-xs font-medium ${STAGES[opportunity.stage].badgeClass}`}>
                         {STAGES[opportunity.stage].label}
                       </span>
                     </div>
@@ -724,7 +725,7 @@ export function OpportunitiesPage() {
                           onClick={() => window.location.href = `/opportunites/${opportunity.id}`}
                           className="px-4 py-3 cursor-pointer"
                         >
-                          <span className={`rounded-full px-2 py-1 text-xs font-semibold ${STAGES[opportunity.stage].color}`}>
+                          <span className={`rounded-full px-2 py-1 text-xs font-medium ${STAGES[opportunity.stage].badgeClass}`}>
                             {STAGES[opportunity.stage].label}
                           </span>
                         </td>

@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
+import { NEGOTIATION_STAGE, OPPORTUNITY_STAGES } from '../constants/opportunityStages';
+
 type Opportunity = {
   id: string;
   title: string;
@@ -12,12 +14,8 @@ type Opportunity = {
 };
 
 const STAGES = {
-  QUALIFICATION: { label: 'Qualification', color: 'bg-blue-100 text-blue-700' },
-  PROPOSAL: { label: 'Proposition', color: 'bg-purple-100 text-purple-700' },
-  NEGOTIATION: { label: 'Négociation', color: 'bg-yellow-100 text-yellow-700' },
-  CLOSED_WON: { label: 'Gagné', color: 'bg-green-100 text-green-700' },
-  FINALIZED: { label: 'Finalisé / réglé', color: 'bg-amber-100 text-amber-700' },
-  CLOSED_LOST: { label: 'Perdu', color: 'bg-rose-100 text-rose-700' }
+  ...OPPORTUNITY_STAGES,
+  NEGOTIATION: NEGOTIATION_STAGE
 };
 
 type PeriodType = '3' | '6' | '12' | 'custom';
@@ -199,7 +197,7 @@ export function TreasuryView({
           {/* Filtres par étapes */}
           <div className="flex items-center gap-2 ml-auto">
             <span className="text-sm font-medium text-slate-700">Statuts :</span>
-            {Object.entries(STAGES).map(([stage, { label, color }]) => (
+            {Object.entries(STAGES).map(([stage, { label, badgeClass }]) => (
               <label key={stage} className="flex items-center gap-1 text-sm">
                 <input
                   type="checkbox"
@@ -215,7 +213,9 @@ export function TreasuryView({
                   }}
                   className="rounded border-slate-300"
                 />
-                <span className={color}>{label}</span>
+                <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${badgeClass}`}>
+                  {label}
+                </span>
               </label>
             ))}
           </div>
